@@ -1,6 +1,6 @@
 #!/usr/bin/env npx tsx
 /**
- * GateSwarm MoMA Router v0.5.1 — CLI
+ * GateSwarm MoMA Router v0.5.1 — CLI Providers + Direct Routing
  *
  * Commands for configuring the model matrix, reasoning toggles,
  * retraining frequency, and checking v0.4 status.
@@ -105,7 +105,7 @@ const args = process.argv.slice(2);
 
 function printUsage() {
   console.log(`
-🧠 GateSwarm MoMA Router v0.6.2 — CLI
+🧠 GateSwarm MoMA Router v0.5.1 — CLI Providers + Direct Routing
 
 Core Commands:
   status                                    Show v0.4 system status
@@ -126,39 +126,14 @@ Core Commands:
   providers                                 List all providers and models
   direct <provider> <model> "prompt"        Direct route to provider/model
 
-effort Customization (v0.6):
-  effort-status                             Show per-agent effort profiles
-  effort-set <agentId> <default> [ceiling] [bias]  Set agent effort profile
-  effort-override <tier> "prompt"           Test override routing
-
-Plan/Act Modes (v0.6):
-  mode-status                               Show mode config per tier
-  mode-set <tier> <model> <provider> [max_tokens]  Set plan model for tier
-  mode "prompt"                             Test mode detection
-
-Token Economy (v0.6):
-  token-stats                               Show token economy stats
-  token-stats <agentId>                     Show per-agent token stats
-  token-stats reset                         Reset token economy stats
-
-Auto-Fallback (v0.6.2):
-  health                                    Show provider health + quota status
-  quota                                     Show detailed quota info
-  quota <providerId>                        Probe specific provider
-  reset <providerId>                        Reset provider cooldown/quota
-
 Tiers: trivial, light, moderate, heavy, intensive, extreme
 Providers: zai, bailian, openrouter, claude-cli, codex-cli, pi-agent, hermes-agent, openclaw-agent
 
 Examples:
-  gateswarm model intensive qwen3.6-plus bailian
+  gateswarm model intensive qwen3.5-plus bailian
   gateswarm reasoning extreme on
   gateswarm retrain-freq 200
   gateswarm weights heuristic 0.35
-  gateswarm effort-set bmad-dev moderate heavy -0.1
-  gateswarm mode-set moderate glm-4.7-flash zai 512
-  gateswarm mode "draft an architecture for..."
-  gateswarm token-stats
   gateswarm providers
   gateswarm direct claude-cli cc/claude-sonnet-4-6 "What is 2+2?"
 `);
@@ -353,7 +328,7 @@ async function cmdRetrain() {
 async function cmdProviders() {
   const result = await gatewayFetch('/v1/providers');
   const providers = result.data || [];
-  console.log('📦 GateSwarm Providers:\n');
+  console.log('📦 GateSwarm Providers (v0.5.1):\n');
   console.log('Provider           Type        Configured  Models');
   console.log('──────────────── ───────── ───────── ──────────────────────────────');
   for (const p of providers) {
@@ -361,7 +336,7 @@ async function cmdProviders() {
     const modelList = p.models.join(', ').slice(0, 40);
     console.log(`${p.id.padEnd(17)}${p.type.padEnd(12)}${configured.padEnd(12)}${modelList}`);
   }
-  console.log(`\nTotal: ${providers.length} providers (${providers.filter((p: any) => p.type === 'cli-agent').length} CLI + ${providers.filter((p: any) => p.type === 'http-api').length} HTTP)`);
+  console.log(`\nTotal: ${providers.length} providers`);
 }
 
 async function cmdDirect(provider: string, model: string, prompt: string) {
@@ -388,242 +363,6 @@ async function cmdDirect(provider: string, model: string, prompt: string) {
   console.log(`─`.repeat(50));
   console.log(`\nTokens: ${usage.prompt_tokens || 0}→${usage.completion_tokens || 0} (total: ${usage.total_tokens || 0})`);
   console.log(`Model:  ${result.model}`);
-}
-
-// ═══════════════════════════════════════════════════════
-// v0.6: Effort Customization Commands
-// ═══════════════════════════════════════════════════════
-
-async function cmdEffortStatus() {
-  const result = await gatewayFetch('/v06/effort');
-  console.log('🎛️  Effort Profiles:\n');
-  console.log('Agent            Floor       Ceiling     Bias');
-  console.log('──────────────── ─────────── ─────────── ──────');
-  for (const a of (result.profiles || [])) {
-    const ep = a.effortProfile || {};
-    const floor = (ep.default || '-').padEnd(12);
-    const ceiling = (ep.ceiling || '-').padEnd(12);
-    const bias = ep.bias !== undefined && ep.bias !== 0 ? `${ep.bias > 0 ? '+' : ''}${ep.bias}` : '-';
-    console.log(`${(a.id).padEnd(17)}${floor}${ceiling}${bias}`);
-  }
-}
-
-async function cmdEffortSet(agentId: string, defaultTier: string, ceiling?: string, bias?: string) {
-  const validTiers = ['trivial', 'light', 'moderate', 'heavy', 'intensive', 'extreme'];
-  if (!validTiers.includes(defaultTier)) {
-    console.error(`❌ Invalid tier: ${defaultTier}. Must be one of: ${validTiers.join(', ')}`);
-    process.exit(1);
-  }
-  if (ceiling && !validTiers.includes(ceiling)) {
-    console.error(`❌ Invalid ceiling tier: ${ceiling}. Must be one of: ${validTiers.join(', ')}`);
-    process.exit(1);
-  }
-  const biasNum = bias ? parseFloat(bias) : undefined;
-  if (bias !== undefined && (isNaN(biasNum!) || biasNum! < -0.2 || biasNum! > 0.2)) {
-    console.error('❌ Bias must be between -0.2 and +0.2');
-    process.exit(1);
-  }
-
-  const body: any = { agentId, default: defaultTier };
-  if (ceiling) body.ceiling = ceiling;
-  if (bias !== undefined) body.bias = biasNum;
-
-  const result = await gatewayFetch('/v06/effort', 'POST', body);
-  console.log(`✅ ${result.message}`);
-  console.log(`   Profile: default=${result.effortProfile.default}, ceiling=${result.effortProfile.ceiling || 'none'}, bias=${result.effortProfile.bias ?? 'none'}`);
-}
-
-async function cmdEffortOverride(tier: string, prompt: string) {
-  const startTime = Date.now();
-  const result = await gatewayFetch('/v1/chat/completions', 'POST', {
-    messages: [{ role: 'user', content: prompt }],
-    effort_override: tier,
-  });
-  const latency = Date.now() - startTime;
-
-  if (result.error) {
-    console.error(`❌ ${result.error.message}`);
-    process.exit(1);
-  }
-
-  const content = result.choices?.[0]?.message?.content || '(no content)';
-  const usage = result.usage || {};
-  console.log(`🎯 Effort Override → ${tier}\n`);
-  console.log(`Response (${latency}ms):`);
-  console.log('─'.repeat(50));
-  console.log(content.slice(0, 500));
-  console.log('─'.repeat(50));
-  console.log(`\nTokens: ${usage.prompt_tokens || 0}→${usage.completion_tokens || 0} (total: ${usage.total_tokens || 0})`);
-}
-
-// ═══════════════════════════════════════════════════════
-// v0.6: Plan/Act Mode Commands
-// ═══════════════════════════════════════════════════════
-
-async function cmdModeStatus() {
-  const result = await gatewayFetch('/v06/mode');
-  console.log('🎭 Plan/Act Mode Configuration:\n');
-  console.log('Tier         Primary Model                  Plan Model');
-  console.log('──────────── ────────────────────────────── ─────────────────────────────');
-  for (const [tier, mc] of Object.entries(result.modeConfig as any)) {
-    const m = mc as any;
-    const plan = m.plan ? m.plan : '(same as primary)';
-    console.log(`${tier.padEnd(13)}${m.primary.padEnd(32)}${plan}`);
-  }
-}
-
-async function cmdModeSet(tier: string, model: string, provider: string, maxTokens?: string) {
-  const validTiers = ['trivial', 'light', 'moderate', 'heavy', 'intensive', 'extreme'];
-  if (!validTiers.includes(tier)) {
-    console.error(`❌ Invalid tier: ${tier}. Must be one of: ${validTiers.join(', ')}`);
-    process.exit(1);
-  }
-
-  const body: any = { tier, model, provider };
-  if (maxTokens) body.max_tokens = parseInt(maxTokens, 10);
-
-  const result = await gatewayFetch('/v06/mode', 'POST', body);
-  console.log(`✅ ${result.message}`);
-}
-
-async function cmdModeDetect(prompt: string) {
-  const result = await gatewayFetch('/v06/mode/detect', 'POST', { prompt });
-  console.log('🎭 Mode Detection Result:\n');
-  console.log(`  Mode:       ${result.mode}`);
-  console.log(`  Confidence: ${(result.confidence * 100).toFixed(0)}%`);
-  console.log(`  Plan signals: ${result.planScore}`);
-  console.log(`  Act signals:  ${result.actScore}`);
-}
-
-// ═══════════════════════════════════════════════════════
-// v0.6: Token Economy Commands
-// ═══════════════════════════════════════════════════════
-
-async function cmdTokenStats(agentId?: string) {
-  const path = agentId ? `/v06/token-stats?agentId=${agentId}` : '/v06/token-stats';
-  const result = await gatewayFetch(path);
-
-  if (agentId) {
-    const s = result.stats;
-    if (!s) { console.log(`No data for agent: ${agentId}`); return; }
-    const savingsPct = s.totalRawOut > 0 ? ((s.totalSaved / s.totalRawOut) * 100).toFixed(1) : '0.0';
-    console.log(`📊 Token Economy — ${agentId}:\n`);
-    console.log(`  Requests:      ${s.requestCount}`);
-    console.log(`  Raw input:     ${formatTokens(s.totalRawIn)}`);
-    console.log(`  Raw output:    ${formatTokens(s.totalRawOut)}`);
-    console.log(`  Filtered:      ${formatTokens(s.totalFiltered)}`);
-    console.log(`  Saved:         ${formatTokens(s.totalSaved)} (${savingsPct}%)`);
-    console.log(`  Filter hits:   ${s.filterHitCount}`);
-  } else {
-    const g = result.global;
-    const savingsPct = g.rawOut > 0 ? ((g.saved / g.rawOut) * 100).toFixed(1) : '0.0';
-    console.log('📊 Token Economy — Global:\n');
-    console.log(`  Raw input:     ${formatTokens(g.rawIn)}`);
-    console.log(`  Raw output:    ${formatTokens(g.rawOut)}`);
-    console.log(`  Filtered:      ${formatTokens(g.filtered)}`);
-    console.log(`  Saved:         ${formatTokens(g.saved)} (${savingsPct}%)`);
-    console.log('\nPer-Agent:');
-    console.log('Agent            Raw Out   Filtered  Saved     Savings%');
-    console.log('──────────────── ───────── ───────── ───────── ────────');
-    for (const [id, s] of Object.entries(result.agents || {})) {
-      const a = s as any;
-      const pct = a.totalRawOut > 0 ? ((a.totalSaved / a.totalRawOut) * 100).toFixed(1) : '0.0';
-      console.log(`${id.padEnd(17)}${formatTokens(a.totalRawOut).padEnd(10)}${formatTokens(a.totalFiltered).padEnd(10)}${formatTokens(a.totalSaved).padEnd(10)}${pct}%`);
-    }
-  }
-}
-
-function formatTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return `${n}`;
-}
-
-async function cmdTokenStatsReset() {
-  await gatewayFetch('/v06/token-stats/reset', 'POST');
-  console.log('✅ Token economy stats reset');
-}
-
-// ═══════════════════════════════════════════════════════
-// v0.6.2: Provider Health + Quota Commands
-// ═══════════════════════════════════════════════════════
-
-function getBaseUrl(): string {
-  return process.env.GATESWARM_URL || 'http://localhost:8900';
-}
-
-function formatDuration(ms: number): string {
-  if (ms <= 0) return 'now';
-  const mins = Math.floor(ms / 60000);
-  const hours = Math.floor(mins / 60);
-  if (hours > 0) return `${hours}h ${mins % 60}m`;
-  return `${mins}m`;
-}
-
-async function cmdHealth(sub?: string, providerId?: string) {
-  const baseUrl = getBaseUrl();
-  try {
-    const resp = await fetch(`${baseUrl}/health/providers`);
-    const data = await resp.json() as any;
-    console.log('\n🏥 GateSwarm Provider Health + Quota Status\n');
-    console.log(`  Timestamp: ${new Date(data.timestamp).toLocaleString()}`);
-    for (const p of data.providers) {
-      const status = p.health.status;
-      const icon = status === 'healthy' ? '✅' : status === 'cooldown' ? '🔒' : status === 'degraded' ? '⚠️' : '❓';
-      console.log(`  ${icon} ${p.id.padEnd(18)} ${status.padEnd(10)} ${p.name}`);
-      if (p.health.totalRequests > 0) {
-        console.log(`     Requests: ${p.health.totalRequests} | Errors: ${p.health.totalErrors} | Consecutive: ${p.health.consecutiveErrors}`);
-      }
-      if (p.health.cooldownUntil && p.health.cooldownUntil > Date.now()) {
-        console.log(`     Cooldown until: ${new Date(p.health.cooldownUntil).toLocaleString()} (${p.health.cooldownReason})`);
-      }
-      if (p.quota) {
-        const q = p.quota;
-        if (q.limit > 0) console.log(`     Quota: ${q.used}/${q.limit} used (${q.remaining} remaining)`);
-        else if (q.isExhausted) console.log(`     Quota: EXHAUSTED (reset in ${formatDuration(q.resetInMs)})`);
-      }
-      if (p.usedBy) console.log(`     Tiers: ${p.usedBy.join(', ')}`);
-      console.log('');
-    }
-  } catch (err: any) { console.error(`Failed to fetch health status: ${err.message}`); }
-}
-
-async function cmdQuota(providerId?: string) {
-  const baseUrl = getBaseUrl();
-  try {
-    if (providerId) {
-      console.log(`🔍 Probing ${providerId}...`);
-      const resp = await fetch(`${baseUrl}/health/providers`);
-      const data = await resp.json() as any;
-      const p = data.providers.find((p: any) => p.id === providerId);
-      if (p) {
-        console.log(`\n  Provider: ${p.name} (${p.id})`);
-        console.log(`  Health:   ${p.health.status}`);
-        if (p.quota) {
-          const q = p.quota;
-          console.log(`  Quota:    ${q.limit > 0 ? `${q.used}/${q.limit}` : 'unlimited/unknown'}`);
-          if (q.isExhausted) console.log(`  Status:   EXHAUSTED`);
-          if (q.resetInMs > 0) console.log(`  Reset in: ${formatDuration(q.resetInMs)}`);
-        }
-        if (p.quota?.cliWindows) {
-          console.log(`  CLI Quota:`);
-          for (const [win, d] of Object.entries(p.quota.cliWindows)) {
-            const w = d as any;
-            console.log(`    ${win}: ${w.used}/${w.limit > 0 ? w.limit : '∞'} (resets in ${w.resetsIn})`);
-          }
-        }
-      } else { console.log(`  Provider '${providerId}' not found`); }
-    } else { await cmdHealth(); }
-  } catch (err: any) { console.error(`Failed to fetch quota: ${err.message}`); }
-}
-
-async function cmdResetProvider(providerId: string) {
-  const baseUrl = getBaseUrl();
-  try {
-    const resp = await fetch(`${baseUrl}/health/providers/reset/${providerId}`, { method: 'POST' });
-    const data = await resp.json() as any;
-    console.log(`✅ Reset ${providerId}: ${data.status || 'healthy'}`);
-  } catch (err: any) { console.error(`Failed to reset: ${err.message}`); }
 }
 
 async function main() {
@@ -680,69 +419,6 @@ async function main() {
     case 'training':
       await cmdTraining(args[1], args[2]);
       break;
-
-    // ─── v0.6: Effort Customization ───
-    case 'effort-status':
-      await cmdEffortStatus();
-      break;
-    case 'effort-set':
-      if (args.length < 3) {
-        console.error('Usage: gateswarm effort-set <agentId> <default> [ceiling] [bias]');
-        process.exit(1);
-      }
-      await cmdEffortSet(args[1], args[2], args[3], args[4]);
-      break;
-    case 'effort-override':
-      if (args.length < 3) {
-        console.error('Usage: gateswarm effort-override <tier> "prompt"');
-        process.exit(1);
-      }
-      await cmdEffortOverride(args[1], args.slice(2).join(' '));
-      break;
-
-    // ─── v0.6: Plan/Act Modes ───
-    case 'mode-status':
-      await cmdModeStatus();
-      break;
-    case 'mode-set':
-      if (args.length < 4) {
-        console.error('Usage: gateswarm mode-set <tier> <model> <provider> [max_tokens]');
-        process.exit(1);
-      }
-      await cmdModeSet(args[1], args[2], args[3], args[4]);
-      break;
-    case 'mode':
-      if (args.length < 2) {
-        console.error('Usage: gateswarm mode "prompt to test"');
-        process.exit(1);
-      }
-      await cmdModeDetect(args.slice(1).join(' '));
-      break;
-
-    // ─── v0.6: Token Economy ───
-    case 'token-stats':
-      if (args[1] === 'reset') {
-        await cmdTokenStatsReset();
-      } else {
-        await cmdTokenStats(args[1]);
-      }
-      break;
-
-    // ─── v0.6.2: Provider Health + Quota ───
-    case 'health':
-      await cmdHealth(args[1], args[2]);
-      break;
-    case 'quota':
-      await cmdQuota(args[1]);
-      break;
-    case 'reset':
-      if (args[1]) {
-        await cmdResetProvider(args[1]);
-      } else {
-        console.log('Usage: gateswarm reset <providerId>');
-      }
-      break;
-
 
     default:
       console.error(`❌ Unknown command: ${command}`);

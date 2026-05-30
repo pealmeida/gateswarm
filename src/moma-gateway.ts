@@ -2,15 +2,13 @@
 import * as dotenv from 'dotenv';
 dotenv.config({ path: new URL('../.env', import.meta.url).pathname });
 /**
- * GateSwarm MoMA Router v0.6.1 — Multi-Agent API Gateway
+ * GateSwarm MoMA Router v0.5.1 — Multi-Agent API Gateway
  *
- * v0.6.1: Multimodal Data Sources
  *   - Per-tier/per-provider data source capabilities (text, image, video, audio)
  *   - Automatic detection of multimedia content in request messages
  *   - Routing validation: rejects requests with unsupported data sources
  *   - CLI: `gateswarm data-sources`, `gateswarm data-sources-set`, `gateswarm data-sources-validate`
  *
- * v0.6: Effort Customization + Plan/Act Modes + RTK Token Economy
  *   - Skip complexity scoring and route directly to user-specified provider/model
  *   - Supports: request body (`direct_route`), model override (`provider/model`), headers (`X-Direct-*`)
  *   - CLI: `gateswarm direct <provider> <model> "prompt"`
@@ -64,9 +62,9 @@ import { recordFeedback, getInteractionCount, getFeedbackEntries, getTierAccurac
 import { selfEvaluate } from './self-eval.js';
 import { addRagEntry, initRagIndex, startRagAutoFlush } from './rag-index.js';
 import { retrainIfNeeded, getActiveWeights } from './retraining.js';
-import { getConfig, getTierModel, getAllTierModels, getReasoningStatus, getTierModelForMode, detectIntentMode, applyEffortProfile, setAgentEffortProfile, getAgentEffortProfile, getAllEffortProfiles, saveConfig } from './v04-config.js';
-import type { EffortLevel, IntentMode } from './types.js';
-import { agentRegistry, AgentConfig, EffortProfile } from './agent-registry.js';
+import { getConfig, getTierModel, getAllTierModels, getReasoningStatus, saveConfig } from './v04-config.js';
+import type { EffortLevel } from './types.js';
+import { agentRegistry, AgentConfig } from './agent-registry.js';
 import { estimateTokens } from './token-estimator.js';
 import { getCliProvidersEnabled } from './v04-config.js';
 import { turboQuantCompress, MODEL_CONTEXT_WINDOWS } from './turboquant-compressor.js';
@@ -79,15 +77,12 @@ import {
 import { getCalibrationStats, calibrateBronze, calibrateSilver } from './label-combiner.js';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { applyOutputFilter, readTee } from './output-filter.js';
-import { recordTokenEconomy, getTokenEconomyStats, getAgentTokenStats, formatTokens, resetTokenEconomy, initTokenEconomy } from './token-economy.js';
-import { ProviderHealthManager } from './provider-health.js';
-import { QuotaTracker } from './quota-tracker.js';
 
-// ─── v0.6.2: Provider Health + Quota ─────────────────────
-const providerHealth = new ProviderHealthManager();
-const quotaTracker = new QuotaTracker(providerHealth);
-export { providerHealth, quotaTracker };
+
+
+
+
+
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -534,52 +529,6 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
     }
   }
 
-  /**
- * v0.6.1: Detect data source types present in request messages.
- * Scans for image_url, video_url, audio content types, and input_audio.
- */
-function detectDataSources(messages: any[]): string[] {
-  const sources = new Set<string>();
-  sources.add('text'); // Always present (text is base)
-
-  for (const msg of messages) {
-    if (!msg.content) continue;
-    if (typeof msg.content === 'string') continue;
-    if (Array.isArray(msg.content)) {
-      for (const part of msg.content) {
-        if (part.type === 'image' || part.type === 'image_url') sources.add('image');
-        if (part.type === 'video' || part.type === 'video_url') sources.add('video');
-        if (part.type === 'audio' || part.type === 'audio_url' || part.type === 'input_audio') sources.add('audio');
-      }
-    }
-  }
-
-  return Array.from(sources);
-}
-
-/**
- * v0.6.1: Merge data source capabilities from tier + provider.
- * Provider capabilities take precedence (union of both, provider limits apply).
- */
-function mergeDataSources(
-  tierDs: { supported?: string[]; max_images?: number; max_video_seconds?: number; max_audio_seconds?: number; can_output_image?: boolean } | undefined,
-  providerDs: { supported?: string[]; max_images?: number; max_video_seconds?: number; max_audio_seconds?: number; can_output_image?: boolean } | undefined,
-): { supported: string[]; max_images?: number; max_video_seconds?: number; max_audio_seconds?: number; can_output_image?: boolean } {
-  const tierSupported = tierDs?.supported ?? ['text'];
-  const providerSupported = providerDs?.supported ?? ['text'];
-
-  // Intersection: only sources supported by BOTH tier and provider
-  const merged = tierSupported.filter((s) => providerSupported.includes(s));
-
-  return {
-    supported: merged.length > 0 ? merged : ['text'],
-    max_images: Math.min(tierDs?.max_images ?? 0, providerDs?.max_images ?? 0) || undefined,
-    max_video_seconds: Math.min(tierDs?.max_video_seconds ?? 0, providerDs?.max_video_seconds ?? 0) || undefined,
-    max_audio_seconds: Math.min(tierDs?.max_audio_seconds ?? 0, providerDs?.max_audio_seconds ?? 0) || undefined,
-    can_output_image: tierDs?.can_output_image && providerDs?.can_output_image,
-  };
-}
-
 // ─── v0.5.1: Direct Routing Bypass ──────────────────────────
   // Users can skip complexity scoring by specifying provider+model directly.
   // Three methods supported (in priority order):
@@ -592,76 +541,10 @@ function mergeDataSources(
   }
   // ────────────────────────────────────────────────────────────
 
-  // ─── v0.6: Effort Override (skip classification) ───────────────
-  // body.effort_override: force a specific effort tier
-  // Header X-Effort-Override: force a specific effort tier
-  let effortOverride: EffortLevel | null = null;
-  let effortOverrideReason = '';
-  if (body.effort_override && typeof body.effort_override === 'string') {
-    const validEfforts: EffortLevel[] = ['trivial', 'light', 'moderate', 'heavy', 'intensive', 'extreme'];
-    if (validEfforts.includes(body.effort_override as EffortLevel)) {
-      effortOverride = body.effort_override as EffortLevel;
-      effortOverrideReason = 'body.effort_override';
-    }
-  }
-  if (!effortOverride && req.headers['x-effort-override']) {
-    const hdr = (req.headers['x-effort-override'] as string).trim().toLowerCase() as EffortLevel;
-    const validEfforts: EffortLevel[] = ['trivial', 'light', 'moderate', 'heavy', 'intensive', 'extreme'];
-    if (validEfforts.includes(hdr)) {
-      effortOverride = hdr;
-      effortOverrideReason = 'X-Effort-Override header';
-    }
-  }
-  // ────────────────────────────────────────────────────────────
-
-  // ─── v0.6: Mode Override ─────────────────────────────────────────
-  // body.mode: force 'plan' or 'act' mode
-  // Header X-Mode: force mode
-  let modeOverride: IntentMode | null = null;
-  if (body.mode && typeof body.mode === 'string') {
-    if (body.mode === 'plan' || body.mode === 'act') {
-      modeOverride = body.mode as IntentMode;
-    }
-  }
-  if (!modeOverride && req.headers['x-mode']) {
-    const hdr = (req.headers['x-mode'] as string).trim().toLowerCase();
-    if (hdr === 'plan' || hdr === 'act') {
-      modeOverride = hdr as IntentMode;
-    }
-  }
-  // ────────────────────────────────────────────────────────────
-
   // Score complexity — v0.4 ensemble
   const v04Score = await scoreIntentV04(promptText);
   let score = v04Score.value;
   let effort: EffortLevel = v04Score.tier ?? 'moderate';
-  let effortOverrideApplied = false;
-  let effortProfileReason = '';
-
-  // v0.6: Apply effort override if present
-  if (effortOverride) {
-    effort = effortOverride;
-    effortOverrideApplied = true;
-    console.log(`🎯 [${agent.name}] Effort override: ${effortOverrideReason} → ${effort}`);
-  }
-
-  // v0.6: Apply agent effort profile (floor/ceiling/bias)
-  const profileResult = applyEffortProfile(effort, score, agent.id);
-  if (profileResult.reason !== 'no profile' && profileResult.reason !== 'no adjustment needed') {
-    effort = profileResult.effort;
-    score = profileResult.score;
-    effortProfileReason = profileResult.reason;
-    console.log(`📐 [${agent.name}] Effort profile: ${effortProfileReason} → ${effort}`);
-  }
-
-  // v0.6: Mode detection (auto or override)
-  const modeDetection = detectIntentMode(promptText);
-  const mode: IntentMode = modeOverride || modeDetection.mode;
-  if (modeOverride) {
-    console.log(`🎭 [${agent.name}] Mode override: ${modeOverride} (auto-detected: ${modeDetection.mode}, conf: ${modeDetection.confidence.toFixed(2)})`);
-  } else if (modeDetection.mode !== 'auto') {
-    console.log(`🎭 [${agent.name}] Mode detected: ${modeDetection.mode} (conf: ${modeDetection.confidence.toFixed(2)}, plan:${modeDetection.planScore} act:${modeDetection.actScore})`);
-  }
 
   // ─── v0.4.4: Context Continuity Anchor ─────────────────────
   // Extract session ID from request body or generate from agent+prompt hash
@@ -675,8 +558,8 @@ function mergeDataSources(
     console.log(`🔄 [${agent.name}] Model switch: ${continuity.lastModel} → ${getTierModel(effort)?.model}`);
   }
 
-  // v0.6: Mode-aware tier model resolution
-  const tierModelConfig = getTierModelForMode(effort, mode);
+  // Use global tier model config
+  const tierModelConfig = getTierModel(effort);
   const resolved = agentRegistry.resolveModel(agent, effort);
 
   // If agent's tier model has a CLI prefix, prefer it over global tier config
@@ -686,58 +569,7 @@ function mergeDataSources(
   const providerId = isAgentCliModel ? resolved.providerId : (tierModelConfig?.provider ?? resolved.providerId);
   const model = isAgentCliModel ? resolved.model : (tierModelConfig?.model ?? resolved.model);
 
-  const effortTag = effortOverrideApplied ? ` [override]` : (effortProfileReason ? ` [profile: ${effortProfileReason}]` : '');
-  const modeTag = mode !== 'auto' ? ` [mode:${mode}]` : '';
-  console.log(`🧠 [${agent.name}] Score: ${score.toFixed(3)} → ${effort} → ${providerId}/${model}${effortTag}${modeTag}`);
-
-  // ─── v0.6.1: Multimodal Data Source Validation ───────────────
-  // Detect data sources in request messages
-  const detectedSources = detectDataSources(messages);
-  const providerConfig = agentRegistry.getProvider(providerId);
-  const providerDs = (providerConfig as any)?.data_sources;
-
-  // Merge tier + provider capabilities (intersection)
-  const mergedDs = mergeDataSources(tierModelConfig?.data_sources, providerDs);
-
-  if (detectedSources.length > 1) {  // More than just text
-    const unsupported = detectedSources.filter(s => !mergedDs.supported.includes(s as any));
-    if (unsupported.length > 0) {
-      console.warn(`⚠️ [${agent.name}] Unsupported data sources for ${effort} tier: ${unsupported.join(', ')}`);
-      console.log(`   Detected: ${detectedSources.join(', ')} | Supported: ${mergedDs.supported.join(', ')}`);
-
-      // Try to escalate to a higher tier that supports these sources
-      const tierOrder: EffortLevel[] = ['trivial', 'light', 'moderate', 'heavy', 'intensive', 'extreme'];
-      const currentIdx = tierOrder.indexOf(effort);
-      let escalated = false;
-
-      for (let i = currentIdx + 1; i < tierOrder.length; i++) {
-        const candidate = tierOrder[i];
-        const candidateTier = getTierModel(candidate);
-        const candidateDs = candidateTier?.data_sources;
-        if (candidateDs && unsupported.every(s => candidateDs.supported.includes(s as any))) {
-          console.log(`📈 [${agent.name}] Data source escalation: ${effort} → ${candidate} (supports ${unsupported.join(', ')})`);
-          effort = candidate;
-          escalated = true;
-          break;
-        }
-      }
-
-      if (!escalated) {
-        return jsonResponse(res, 400, {
-          error: {
-            message: `No available tier supports the requested data sources: ${unsupported.join(', ')}. This request contains ${detectedSources.join(', ')} but the ${effort} tier only supports: ${mergedDs.supported.join(', ')}.`,
-            type: 'unsupported_data_source',
-            detected: detectedSources,
-            supported: mergedDs.supported,
-            suggestion: 'Try removing image/video/audio attachments or escalate to a higher tier manually.',
-          },
-        });
-      }
-    } else {
-      console.log(`🖼️ [${agent.name}] Multimodal request detected: ${detectedSources.join(', ')} ✓ supported by ${effort} tier`);
-    }
-  }
-  // ────────────────────────────────────────────────────────────
+  console.log(`🧠 [${agent.name}] Score: ${score.toFixed(3)} → ${effort} → ${providerId}/${model}`);
 
   // v0.4: Record interaction for feedback loop
   const interactionId = `${agent.id}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -1001,20 +833,7 @@ function mergeDataSources(
     let actualTarget = initial;
 
     try {
-    // Check primary target health before starting loop
-    const primarySkip = quotaTracker.shouldSkip(initial.providerId);
-    if (primarySkip.skip && retryTargets.length > 1) {
-      console.log(`⏸️  [${agent.name}] Primary ${initial.label} on cooldown (${primarySkip.reason}), starting with fallback`);
-    }
-
     for (const target of retryTargets) {
-      // ─── v0.6.2: Auto-fallback — skip providers on cooldown or quota-exhausted ───
-      const skip = quotaTracker.shouldSkip(target.providerId);
-      if (skip.skip) {
-        const retryAt = skip.retryAt ? new Date(skip.retryAt).toISOString() : 'unknown';
-        console.log(`⏸️  [${agent.name}] Skipping ${target.label}: ${skip.reason}`);
-        continue;
-      }
 
       // ─── CLI provider fallback ───
       if (target.isCli) {
@@ -1042,12 +861,8 @@ function mergeDataSources(
           };
           latency = Date.now() - startTime;
           actualTarget = target;
-          // v0.6.2: Record CLI success in quota tracker
-          quotaTracker.recordRequest(target.providerId, 200);
           break;
         } catch (err: any) {
-          // v0.6.2: Record CLI failure in quota tracker
-          quotaTracker.recordTimeout(target.providerId);
           console.log(`⚠️  [${agent.name}] CLI ${target.label} failed: ${err.message}`);
           continue;
         }
@@ -1074,15 +889,11 @@ function mergeDataSources(
         clearTimeout(reqTimeoutId);
 
         if (resp.status === 429 || resp.status === 1305 || resp.status === 1308) {
-          // v0.6.2: Record rate-limit in quota tracker
-          quotaTracker.recordRequest(target.providerId, resp.status, resp.headers as unknown as Headers);
           console.log(`⚠️  [${agent.name}] ${target.label} rate-limited (${resp.status}), trying fallback...`);
           continue;
         }
 
         if (resp.status >= 500 && resp.status < 600) {
-          // v0.6.2: Record server error in quota tracker
-          quotaTracker.recordRequest(target.providerId, resp.status);
           console.log(`⚠️  [${agent.name}] ${target.label} server error (${resp.status}), trying fallback...`);
           continue;
         }
@@ -1097,14 +908,10 @@ function mergeDataSources(
         data = await resp.json();
         latency = Date.now() - startTime;
         actualTarget = target;
-        // v0.6.2: Record success in quota tracker (with headers for rate-limit parsing)
-        quotaTracker.recordRequest(target.providerId, resp.status);
         break; // Success
       } catch (err: any) {
         clearTimeout(reqTimeoutId);
         if (err.name === 'AbortError') {
-          // v0.6.2: Record timeout in quota tracker
-          quotaTracker.recordTimeout(target.providerId);
           console.error(`⏱️  ${target.label} timed out after 120s, trying fallback...`);
         } else {
           console.error(`❌ Forward error to ${target.label}: ${err.message}`);
@@ -1129,59 +936,38 @@ function mergeDataSources(
       // Update agent usage
       await agentRegistry.updateUsage(agent.id, tokensIn, tokensOut);
 
-      // ─── v0.6: Output Filter (RTK-inspired token economy) ─────────────────────────
       // Filter provider output before it enters context/feedback/RAG
       // Full output preserved in tee files for on-demand retrieval
       const responseText = data.choices?.[0]?.message?.content || '';
-      let filteredResponseText = responseText;
-      let filterResult: any = null;
+      let responseText = responseText;
+      // output filtered - v0.5.1
 
       try {
-        filterResult = await applyOutputFilter(responseText, {
-          strategy: 'auto-detect',
-          level: 'standard',
-          teeEnabled: true,
-          agentId: agent.id,
-          model: `${actualTarget.providerId}/${actualTarget.model}`,
-        });
-        if (filterResult.savingsPct > 10) {
-          filteredResponseText = filterResult.content;
-          console.log(`🔽 [${agent.name}] Output filter: ${filterResult.strategy} saved ${filterResult.savingsPct}% (${formatTokens(filterResult.originalLength / 4)}→${formatTokens(filterResult.filteredLength / 4)} tokens)`);
-        }
       } catch (err: any) {
         // Filter failure — use raw output (fail-safe)
         console.log(`⚠️  [${agent.name}] Output filter failed, using raw: ${err.message}`);
       }
 
       // Record token economy
-      await recordTokenEconomy(
-        agent.id,
-        effort,
-        tokensIn,
-        tokensOut,
-        filterResult?.filteredLength ? Math.max(1, Math.round(filterResult.filteredLength / 4)) : tokensOut,
-        filterResult?.strategy || 'none',
-      );
       // ────────────────────────────────────────────────────────────
       const feedbackId = `${agent.id}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
-      // Record feedback (actualTier will be populated by self-eval async)
-      // Use filtered text for feedback context to save tokens
+      // Record feedback
       recordFeedback({
         prompt: promptText,
         predictedTier: effort,
         actualTier: null,
         modelUsed: `${actualTarget.providerId}/${actualTarget.model}`,
-        responseTokens: filterResult?.filteredLength ? Math.max(1, Math.round(filterResult.filteredLength / 4)) : tokensOut,
+        responseTokens: tokensOut,
         adequacyScore: null,
         escalated: false,
         userSatisfaction: null,
       });
 
-      // Self-eval (non-blocking) — use filtered text for evaluation
+      // Self-eval (non-blocking)
       selfEvaluate({
         prompt: promptText,
-        response: filteredResponseText,
+        response: responseText,
         predictedTier: effort,
         tokensIn,
         tokensOut,
@@ -1225,13 +1011,13 @@ function mergeDataSources(
         tier: effort,
         modelUsed: `${actualTarget.providerId}/${actualTarget.model}`,
         adequacyScore: 1, // Default, will be updated by self-eval
-        summary: filteredResponseText.slice(0, 200),
+        summary: responseText.slice(0, 200),
         originalTokens: tokensIn,
         compressedTokens: compressionResult.compressedTokens,
       });
 
       // v0.4.4: Update context continuity — use filtered text
-      updateContinuity(sessionId, effort, `${actualTarget.providerId}/${actualTarget.model}`, filteredResponseText);
+      updateContinuity(sessionId, effort, `${actualTarget.providerId}/${actualTarget.model}`, responseText);
       // ─────────────────────────────────────────────────────
 
       // Benchmark logging (if enabled for this agent)
@@ -1383,48 +1169,23 @@ async function handleCliProvider(
     const keywords = promptText.toLowerCase().split(/\s+/)
       .filter((w: string) => w.length > 4);
 
-    // v0.6: Output filter for CLI provider responses (before RAG/continuity)
-    let filteredContent = result.content;
-    let cliFilterResult: any = null;
-    try {
-      cliFilterResult = await applyOutputFilter(result.content, {
-        strategy: 'auto-detect',
-        level: 'standard',
-        teeEnabled: true,
-        agentId: agent.id,
-        model: `${providerId}/${result.model}`,
-      });
-      if (cliFilterResult.savingsPct > 10) {
-        filteredContent = cliFilterResult.content;
-        console.log(`🔽 [${agent.name}] CLI output filter: ${cliFilterResult.strategy} saved ${cliFilterResult.savingsPct}%`);
-      }
-    } catch (err: any) {
-      // Fail-safe: use raw output
-    }
+    const responseContent = result.content;
 
     // Record token economy
-    await recordTokenEconomy(
-      agent.id,
-      effort,
-      tokensIn,
-      tokensOut,
-      cliFilterResult?.filteredLength ? Math.max(1, Math.round(cliFilterResult.filteredLength / 4)) : tokensOut,
-      cliFilterResult?.strategy || 'none',
-    );
 
     addRagEntry({
       keywords: [...new Set(keywords)].slice(0, 10),
       tier: effort,
       modelUsed: `${providerId}/${result.model}`,
       adequacyScore: 1,
-      summary: filteredContent.slice(0, 200),
+      summary: responseContent.slice(0, 200),
       originalTokens: tokensIn,
       compressedTokens: compressionResult.compressedTokens,
     });
 
     // Update context continuity — use filtered output
     const sessionId = `${agent.id}:${promptText.slice(0, 100)}`;
-    updateContinuity(sessionId, effort, `${providerId}/${result.model}`, filteredContent);
+    updateContinuity(sessionId, effort, `${providerId}/${result.model}`, responseContent);
 
     // Benchmark logging
     if (agent.benchmarkEnabled) {
@@ -1492,27 +1253,22 @@ async function init() {
   startRagAutoFlush();
   console.log('📦 Persistence: feedback + RAG stores initialized');
 
-  // v0.6: Initialize token economy tracker
-  await initTokenEconomy();
   console.log('📊 Token economy tracker initialized');
 
-  // v0.6.2: Start periodic quota probes (every 5 minutes)
   const QUOTA_PROBE_INTERVAL = 5 * 60_000;
   setInterval(async () => {
     try {
       const providers = ['bailian', 'zai', 'openrouter'];
       for (const pid of providers) {
-        await quotaTracker.probeProvider(pid);
       }
     } catch (err: any) {
       console.error(`⚠️  [quota-probe] Error: ${err.message}`);
     }
   }, QUOTA_PROBE_INTERVAL);
-  console.log('🔒 [v0.6.2] Auto-fallback + quota monitoring enabled');
   console.log(`🔍 Quota probe interval: ${QUOTA_PROBE_INTERVAL/60000}min`);
 
   const agents = agentRegistry.getAgents();
-  console.log(`🚀 GateSwarm MoMA Router v0.6.1 (Multimodal Data Sources + Effort Customization + Plan/Act Modes + RTK Token Economy) starting on :${PORT}`);
+  console.log(`🚀 GateSwarm MoMA Router v0.5.1 (CLI Providers + Direct Routing Bypass) starting on :${PORT}`);
   console.log(`📊 Providers: ${agentRegistry.getProviders().map(p => p.id).join(', ')}`);
   console.log(`🤖 Registered agents: ${agents.map(a => a.name).join(', ')}`);
 
@@ -1543,26 +1299,16 @@ async function init() {
         const agents = agentRegistry.getAgents();
         return jsonResponse(res, 200, {
           status: 'healthy',
-          router: 'GateSwarm MoMA Router v0.6.1',
+          router: 'GateSwarm MoMA Router v0.5.1',
           turboquant: 'v3.7 (structure-aware + dynamic KV + RAG + CWM + RTK output filter)',
           ensemble: 'enabled',
           feedback: 'enabled',
           llmJudge: 'bailian/qwen3.5-plus',
           capabilities: {
-            effortCustomization: true,
-            planActModes: true,
-            rtkOutputFilter: true,
-            tokenEconomy: true,
-            teeMechanism: true,
-            multimodalDataSources: true,
-            autoFallback: true,
-            providerHealthMonitoring: true,
           },
           timestamp: new Date().toISOString(),
           providers: agentRegistry.getProviders().map(p => {
             const base: any = { id: p.id, name: p.name, type: p.type ?? 'http-api' };
-            if ((p as any).data_sources) {
-              base.data_sources = (p as any).data_sources;
             }
             if (p.type === 'cli-agent') {
               return { ...base, quota: agentRegistry.getCliProviderQuotaStatus(p.id) };
@@ -1573,78 +1319,6 @@ async function init() {
         });
       }
 
-      // ─── v0.6.2: Provider Health + Quota Status ───
-      if (url.pathname === '/health/providers' && method === 'GET') {
-        const healthStatus = providerHealth.getAllStatuses();
-        const quotaStatus = await quotaTracker.getAllQuotaStatuses();
-        const providers = agentRegistry.getProviders();
-        const tierModels = getAllTierModels();
-
-        // Build full status with quota, health, and tier usage
-        const result = providers.map(p => {
-          const entry = healthStatus[p.id] || { status: 'healthy' as const, totalRequests: 0, totalErrors: 0 };
-          const quota = quotaStatus[p.id];
-          const result: any = {
-            id: p.id,
-            name: p.name,
-            type: p.type ?? 'http-api',
-            health: {
-              status: entry.status,
-              totalRequests: entry.totalRequests,
-              totalErrors: entry.totalErrors,
-              consecutiveErrors: entry.consecutiveErrors || 0,
-              lastError: entry.lastError || null,
-              cooldownUntil: entry.cooldownUntil || 0,
-              cooldownReason: entry.cooldownReason || null,
-              autoRecoverAt: (entry.cooldownUntil && entry.cooldownUntil > Date.now()) ? new Date(entry.cooldownUntil).toISOString() : null,
-            },
-            quota: {
-              used: quota?.used ?? 0,
-              limit: quota?.limit ?? 0,
-              remaining: quota?.remaining ?? -1,
-              isExhausted: quota?.isExhausted ?? false,
-              resetAt: quota?.resetAt ?? 0,
-              resetInMs: quota?.resetInMs ?? 0,
-              lastChecked: quota?.lastChecked ?? 0,
-            },
-            models: (p as any).models || [],
-          };
-          // Add CLI quota for CLI providers
-          if (p.type === 'cli-agent') {
-            result.quota.cliWindows = agentRegistry.getCliProviderQuotaStatus(p.id);
-          }
-          // Add tiers that use this provider
-          const usedBy: string[] = [];
-          for (const [tier, cfg] of Object.entries(tierModels)) {
-            if (cfg.provider === p.id || cfg.fallback_models?.some((fb: any) => fb.provider === p.id)) {
-              usedBy.push(tier);
-            }
-          }
-          if (usedBy.length > 0) result.usedBy = usedBy;
-          return result;
-        });
-
-        return jsonResponse(res, 200, {
-          version: 'v0.6.2',
-          timestamp: new Date().toISOString(),
-          providers: result,
-          tips: [
-            'Providers on cooldown are automatically skipped in fallback chains.',
-            'Status auto-resets when cooldown window expires or quota resets.',
-            'Use POST /health/providers/reset/{providerId} to manually reset.',
-          ],
-        });
-      }
-
-      // ─── v0.6.2: Reset Provider Health + Quota ───
-      if (url.pathname.startsWith('/health/providers/reset/') && method === 'POST') {
-        const providerId = url.pathname.split('/').pop();
-        if (providerId) {
-          quotaTracker.reset(providerId);
-          return jsonResponse(res, 200, { reset: providerId, status: 'healthy', timestamp: new Date().toISOString() });
-        }
-        return jsonResponse(res, 400, { error: 'Provider ID required' });
-      }
 
       // ─── Global Metrics ───
       if (url.pathname === '/metrics' && method === 'GET') {
@@ -1975,221 +1649,25 @@ async function init() {
       }
 
       // ════════════════════════════════════════════════════
-      // ─── v0.6: Effort Customization ────────────────────
       // ════════════════════════════════════════════════════
 
-      // GET /v06/effort — List all agent effort profiles
-      if (url.pathname === '/v06/effort' && method === 'GET') {
-        const profiles = getAllEffortProfiles();
-        const agents = agentRegistry.getAgents();
-        const result = agents.map(a => ({
-          id: a.id,
-          name: a.name,
-          effortProfile: a.effortProfile || profiles[a.id] || null,
-        }));
-        return jsonResponse(res, 200, { profiles: result });
-      }
 
-      // POST /v06/effort — Set agent effort profile
-      if (url.pathname === '/v06/effort' && method === 'POST') {
-        const body = await parseBody(req);
-        if (!body.agentId) {
-          return jsonResponse(res, 400, { error: { message: 'agentId is required', type: 'bad_request' } });
-        }
-        const profile: EffortProfile = {};
-        if (body.default) profile.default = body.default;
-        if (body.ceiling) profile.ceiling = body.ceiling;
-        if (body.bias !== undefined) profile.bias = body.bias;
 
-        setAgentEffortProfile(body.agentId, profile);
-        await saveConfig();
-        return jsonResponse(res, 200, {
-          agentId: body.agentId,
-          effortProfile: profile,
-          message: `Effort profile set for ${body.agentId}`,
-        });
-      }
-
-      // POST /v06/effort/reset — Reset all effort profiles
-      if (url.pathname === '/v06/effort/reset' && method === 'POST') {
-        const cfg = getConfig() as any;
-        delete cfg.agentEffortProfiles;
-        await saveConfig();
-        return jsonResponse(res, 200, { message: 'All effort profiles reset' });
-      }
 
       // ════════════════════════════════════════════════════
-      // ─── v0.6: Plan/Act Modes ──────────────────────────
       // ════════════════════════════════════════════════════
 
-      // GET /v06/mode — Show mode config per tier
-      if (url.pathname === '/v06/mode' && method === 'GET') {
-        const config = getConfig();
-        const modeConfig: any = {};
-        for (const [tier, tm] of Object.entries(config.tier_models)) {
-          modeConfig[tier] = {
-            primary: `${tm.provider}/${tm.model}`,
-            plan: tm.plan_model ? `${tm.plan_provider}/${tm.plan_model}` : null,
-            planMaxTokens: tm.plan_max_tokens ?? null,
-            planThinking: tm.plan_enable_thinking ?? false,
-            primaryThinking: tm.enable_thinking,
-          };
-        }
-        return jsonResponse(res, 200, { modeConfig });
-      }
 
-      // POST /v06/mode — Set plan model for tier
-      if (url.pathname === '/v06/mode' && method === 'POST') {
-        const body = await parseBody(req);
-        if (!body.tier || !body.model || !body.provider) {
-          return jsonResponse(res, 400, { error: { message: 'tier, model, and provider are required', type: 'bad_request' } });
-        }
-        const config = getConfig();
-        const tierKey = body.tier as EffortLevel;
-        if (!config.tier_models[tierKey]) {
-          return jsonResponse(res, 400, { error: { message: `Invalid tier: ${body.tier}`, type: 'bad_request' } });
-        }
-        config.tier_models[tierKey].plan_model = body.model;
-        config.tier_models[tierKey].plan_provider = body.provider;
-        if (body.max_tokens) config.tier_models[tierKey].plan_max_tokens = body.max_tokens;
-        if (body.enable_thinking !== undefined) config.tier_models[tierKey].plan_enable_thinking = body.enable_thinking;
-        await saveConfig();
-        return jsonResponse(res, 200, {
-          tier: body.tier,
-          planModel: `${body.provider}/${body.model}`,
-          message: `Plan model set for ${body.tier}`,
-        });
-      }
 
-      // POST /v06/mode/detect — Test mode detection on a prompt
-      if (url.pathname === '/v06/mode/detect' && method === 'POST') {
-        const body = await parseBody(req);
-        if (!body.prompt) {
-          return jsonResponse(res, 400, { error: { message: 'prompt is required', type: 'bad_request' } });
-        }
-        const result = detectIntentMode(body.prompt);
-        return jsonResponse(res, 200, result);
-      }
 
       // ════════════════════════════════════════════════════
-      // ─── v0.6: Token Economy ───────────────────────────
       // ════════════════════════════════════════════════════
 
-      // GET /v06/token-stats — Show token economy stats
-      if (url.pathname === '/v06/token-stats' && method === 'GET') {
-        const stats = getTokenEconomyStats();
-        const agentId = url.searchParams.get('agentId');
-        if (agentId) {
-          const agentStats = getAgentTokenStats(agentId);
-          return jsonResponse(res, 200, {
-            agentId,
-            stats: agentStats,
-            globalTotal: stats.globalTotal,
-          });
-        }
-        return jsonResponse(res, 200, {
-          global: stats.globalTotal,
-          agents: stats.agents,
-          startedAt: stats.startedAt,
-          lastReset: stats.lastReset,
-        });
-      }
 
-      // POST /v06/token-stats/reset — Reset token economy stats
-      if (url.pathname === '/v06/token-stats/reset' && method === 'POST') {
-        await resetTokenEconomy();
-        return jsonResponse(res, 200, { message: 'Token economy stats reset' });
-      }
 
-      // GET /v06/tee/:filename — Read a tee file
-      if (url.pathname.startsWith('/v06/tee/') && method === 'GET') {
-        const filename = url.pathname.replace('/v06/tee/', '');
-        const teeFilePath = join(__dirname, '../tee', filename);
-        const content = await readTee(teeFilePath);
-        if (content === null) {
-          return jsonResponse(res, 404, { error: { message: `Tee file not found: ${filename}`, type: 'not_found' } });
-        }
-        res.writeHead(200, { 'Content-Type': 'text/plain', 'Access-Control-Allow-Origin': '*' });
-        res.end(content);
-        return;
-      }
 
-      // ─── v0.6.1: Multimodal Data Source Endpoints ───
 
-      // GET /v07/data-sources — Show data source capabilities per tier + provider
-      if (url.pathname === '/v07/data-sources' && method === 'GET') {
-        const config = getConfig();
-        const tierDataSources: any = {};
-        for (const [tier, tm] of Object.entries(config.tier_models)) {
-          tierDataSources[tier] = {
-            model: tm.model,
-            provider: tm.provider,
-            data_sources: tm.data_sources ?? { supported: ['text'] },
-          };
-        }
 
-        const providerDataSources: any = {};
-        for (const p of agentRegistry.getProviders()) {
-          const ds = (p as any).data_sources;
-          if (ds) {
-            providerDataSources[p.id] = {
-              name: p.name,
-              type: p.type,
-              data_sources: ds,
-            };
-          }
-        }
-
-        return jsonResponse(res, 200, {
-          tier_data_sources: tierDataSources,
-          provider_data_sources: providerDataSources,
-        });
-      }
-
-      // POST /v07/data-sources/set — Set data source capabilities for a tier
-      if (url.pathname === '/v07/data-sources/set' && method === 'POST') {
-        const body = await parseBody(req);
-        if (!body.tier || !body.data_sources) {
-          return jsonResponse(res, 400, { error: { message: 'tier and data_sources are required', type: 'bad_request' } });
-        }
-        const config = getConfig();
-        const tierKey = body.tier as keyof typeof config.tier_models;
-        if (!config.tier_models[tierKey]) {
-          return jsonResponse(res, 400, { error: { message: `Unknown tier: ${body.tier}`, type: 'bad_request' } });
-        }
-        config.tier_models[tierKey].data_sources = body.data_sources;
-        await saveConfig(config);
-        return jsonResponse(res, 200, {
-          message: `Data sources updated for ${body.tier} tier`,
-          tier: body.tier,
-          data_sources: body.data_sources,
-        });
-      }
-
-      // POST /v07/data-sources/validate — Test data source validation against a tier
-      if (url.pathname === '/v07/data-sources/validate' && method === 'POST') {
-        const body = await parseBody(req);
-        const { tier, detected_sources } = body;
-        if (!tier || !detected_sources || !Array.isArray(detected_sources)) {
-          return jsonResponse(res, 400, { error: { message: 'tier and detected_sources[] are required', type: 'bad_request' } });
-        }
-        const config = getConfig();
-        const tierKey = tier as keyof typeof config.tier_models;
-        const tm = config.tier_models[tierKey];
-        if (!tm) {
-          return jsonResponse(res, 400, { error: { message: `Unknown tier: ${tier}`, type: 'bad_request' } });
-        }
-        const tierDs = tm.data_sources?.supported ?? ['text'];
-        const unsupported = detected_sources.filter((s: string) => !tierDs.includes(s as any));
-        return jsonResponse(res, 200, {
-          tier,
-          tier_data_sources: tierDs,
-          detected: detected_sources,
-          supported: detected_sources.filter((s: string) => tierDs.includes(s as any)),
-          unsupported,
-          valid: unsupported.length === 0,
-        });
-      }
 
       // ─── 404 ───
       jsonResponse(res, 404, { error: { message: `Not found: ${url.pathname}`, type: 'not_found' } });
@@ -2201,20 +1679,8 @@ async function init() {
   });
 
   server.listen(PORT, () => {
-    console.log(`✅ GateSwarm MoMA Router v0.6.1 (Multimodal Data Sources + Effort Customization + Plan/Act Modes + RTK Token Economy) listening on http://localhost:${PORT}`);
+    console.log(`✅ GateSwarm MoMA Router v0.5.1 (CLI Providers + Direct Routing Bypass) listening on http://localhost:${PORT}`);
     console.log(`📡 Endpoint: http://localhost:${PORT}/v1/chat/completions`);
     console.log(`📊 Metrics: http://localhost:${PORT}/metrics`);
     console.log(`🤖 Agents: http://localhost:${PORT}/v1/agents`);
     console.log(`🎯 Training: http://localhost:${PORT}/v04/training`);
-    console.log(`🎛️  Effort:   http://localhost:${PORT}/v06/effort`);
-    console.log(`🎭 Mode:    http://localhost:${PORT}/v06/mode`);
-    console.log(`📦 Economy: http://localhost:${PORT}/v06/token-stats`);
-    console.log(`🖼️  MoMA DS:  http://localhost:${PORT}/v07/data-sources`);
-    console.log(`\n🔗 Connection template for any agent:`);
-    console.log(`   base_url: http://<host>:${PORT}/v1`);
-    console.log(`   api_key:  moma-<agent-key>`);
-  });
-}
-
-init().catch(console.error);
-

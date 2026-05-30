@@ -1,17 +1,16 @@
 /**
- * GateSwarm MoMA Router v0.6.2 — Configuration Manager
+ * GateSwarm MoMA Router v0.5.1 — Configuration Manager
  * MoMA = Mixture of Multimodal Agents
  *
  * Centralized config for ensemble weights, tier models,
- * reasoning toggles, feedback loop, RAG settings, and multimodal data sources.
+ * reasoning toggles, feedback loop, and RAG settings.
  * User-configurable via /gateswarm CLI commands.
  */
 
 import { promises as fs } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import type { EffortLevel, IntentMode } from './types.js';
-import type { EffortProfile } from './agent-registry.js';
+import type { EffortLevel } from './types.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CONFIG_FILE = join(__dirname, '../v04_config.json');
@@ -29,19 +28,6 @@ export interface TierModelConfig {
   max_tokens: number;
   enable_thinking: boolean;
   fallback_models?: FallbackModel[];
-  /** v0.6: Plan-mode model (lighter/faster for exploration tasks) */
-  plan_model?: string;
-  plan_provider?: string;
-  plan_max_tokens?: number;
-  plan_enable_thinking?: boolean;
-  /** v0.6.2: Multimodal data source capabilities per tier */
-  data_sources?: {
-    supported: ('text' | 'image' | 'video' | 'audio')[];
-    max_images?: number;
-    max_video_seconds?: number;
-    max_audio_seconds?: number;
-    can_output_image?: boolean;
-  };
 }
 
 export interface EnsembleWeightsConfig {
@@ -94,7 +80,7 @@ export interface V04Config {
 // ─── Default Config ──────────────────────────────────────
 
 export const DEFAULT_V04_CONFIG: V04Config = {
-  version: 'v0.6.2-auto-fallback',
+  version: 'v0.5.1-cli-providers',
   trained: new Date().toISOString(),
   method: 'ensemble-voter-with-feedback-loop',
   ensemble: {
@@ -122,29 +108,17 @@ export const DEFAULT_V04_CONFIG: V04Config = {
   },
   tier_models: {
     trivial:   { model: 'glm-4.5-air',    provider: 'zai',     max_tokens: 256,  enable_thinking: false,
-                 fallback_models: [{ model: 'glm-4.7-flash', provider: 'zai' }, { model: 'glm-4.7', provider: 'zai' }, { model: 'kimi-k2.5', provider: 'bailian' }],
-                 plan_model: 'glm-4.5-air', plan_provider: 'zai', plan_max_tokens: 128, plan_enable_thinking: false,
-                 data_sources: { supported: ['text'] } },
+                 fallback_models: [{ model: 'glm-4.7-flash', provider: 'zai' }, { model: 'glm-4.7', provider: 'zai' }, { model: 'kimi-k2.5', provider: 'bailian' }] },
     light:     { model: 'glm-4.7-flash',   provider: 'zai',     max_tokens: 512,  enable_thinking: false,
-                 fallback_models: [{ model: 'glm-4.7', provider: 'zai' }, { model: 'glm-4.5-air', provider: 'zai' }, { model: 'MiniMax-M2.5', provider: 'bailian' }],
-                 plan_model: 'glm-4.5-air', plan_provider: 'zai', plan_max_tokens: 256, plan_enable_thinking: false,
-                 data_sources: { supported: ['text'] } },
+                 fallback_models: [{ model: 'glm-4.7', provider: 'zai' }, { model: 'glm-4.5-air', provider: 'zai' }, { model: 'MiniMax-M2.5', provider: 'bailian' }] },
     moderate:  { model: 'MiniMax-M2.5',    provider: 'bailian', max_tokens: 2048, enable_thinking: false,
-                 fallback_models: [{ model: 'qwen3.5-plus', provider: 'bailian' }, { model: 'kimi-k2.5', provider: 'bailian' }, { model: 'glm-4.7-flash', provider: 'zai' }],
-                 plan_model: 'glm-4.7-flash', plan_provider: 'zai', plan_max_tokens: 512, plan_enable_thinking: false,
-                 data_sources: { supported: ['text'] } },
+                 fallback_models: [{ model: 'qwen3.5-plus', provider: 'bailian' }, { model: 'kimi-k2.5', provider: 'bailian' }, { model: 'glm-4.7-flash', provider: 'zai' }] },
     heavy:     { model: 'qwen3.5-plus',    provider: 'bailian', max_tokens: 4096, enable_thinking: true,
-                 fallback_models: [{ model: 'qwen3.6-plus', provider: 'bailian' }, { model: 'MiniMax-M2.5', provider: 'bailian' }, { model: 'glm-4.7-flash', provider: 'zai' }, { model: 'glm-4.7', provider: 'zai' }, { model: 'cc/claude-sonnet-4-6', provider: 'claude-cli' }],
-                 plan_model: 'MiniMax-M2.5', plan_provider: 'bailian', plan_max_tokens: 1024, plan_enable_thinking: false,
-                 data_sources: { supported: ['text', 'image'] } },
+                 fallback_models: [{ model: 'qwen3.6-plus', provider: 'bailian' }, { model: 'MiniMax-M2.5', provider: 'bailian' }, { model: 'glm-4.7-flash', provider: 'zai' }, { model: 'glm-4.7', provider: 'zai' }, { model: 'cc/claude-sonnet-4-6', provider: 'claude-cli' }] },
     intensive: { model: 'qwen3.5-plus',    provider: 'bailian', max_tokens: 4096, enable_thinking: true,
-                 fallback_models: [{ model: 'qwen3.6-plus', provider: 'bailian' }, { model: 'kimi-k2.5', provider: 'bailian' }, { model: 'MiniMax-M2.5', provider: 'bailian' }, { model: 'cc/claude-sonnet-4-6', provider: 'claude-cli' }, { model: 'cx/gpt-5.3-codex', provider: 'codex-cli' }],
-                 plan_model: 'MiniMax-M2.5', plan_provider: 'bailian', plan_max_tokens: 1024, plan_enable_thinking: false,
-                 data_sources: { supported: ['text', 'image'] } },
+                 fallback_models: [{ model: 'qwen3.6-plus', provider: 'bailian' }, { model: 'kimi-k2.5', provider: 'bailian' }, { model: 'MiniMax-M2.5', provider: 'bailian' }, { model: 'cc/claude-sonnet-4-6', provider: 'claude-cli' }, { model: 'cx/gpt-5.3-codex', provider: 'codex-cli' }] },
     extreme:   { model: 'qwen3.6-plus',    provider: 'bailian', max_tokens: 8192, enable_thinking: true,
-                 fallback_models: [{ model: 'qwen3.6-max-preview', provider: 'bailian' }, { model: 'qwen3.5-plus', provider: 'bailian' }, { model: 'kimi-k2.5', provider: 'bailian' }, { model: 'cc/claude-opus-4-7', provider: 'claude-cli' }],
-                 plan_model: 'qwen3.5-plus', plan_provider: 'bailian', plan_max_tokens: 2048, plan_enable_thinking: false,
-                 data_sources: { supported: ['text', 'image', 'video', 'audio'] } },
+                 fallback_models: [{ model: 'qwen3.6-max-preview', provider: 'bailian' }, { model: 'qwen3.5-plus', provider: 'bailian' }, { model: 'kimi-k2.5', provider: 'bailian' }, { model: 'cc/claude-opus-4-7', provider: 'claude-cli' }] },
   },
   feedback_loop: {
     retrainAfterInteractions: 500,
@@ -262,98 +236,4 @@ export function getCliProvidersConfig(): CliProvidersConfig {
   return cfg.cliProviders ?? { enabled: true };
 }
 
-// ─── v0.6: Plan/Act Mode Config ─────────────────────
 
-export function getTierModelForMode(effort: EffortLevel, mode: IntentMode): TierModelConfig | null {
-  const cfg = getConfig();
-  const tier = cfg.tier_models[effort];
-  if (!tier) return null;
-  if (mode === 'plan' && tier.plan_model) {
-    return {
-      model: tier.plan_model,
-      provider: tier.plan_provider || tier.provider,
-      max_tokens: tier.plan_max_tokens || tier.max_tokens,
-      enable_thinking: tier.plan_enable_thinking ?? false,
-      fallback_models: tier.fallback_models,
-      data_sources: tier.data_sources,
-    };
-  }
-  return tier;
-}
-
-/** Detect plan vs act mode from prompt text */
-export function detectIntentMode(promptText: string): { mode: IntentMode; confidence: number; planScore: number; actScore: number } {
-  const planKeywords = ['draft', 'outline', 'brainstorm', 'sketch', 'explore', 'what if', 'options', 'approach', 'consider', 'tradeoff', 'strategy', 'roadmap', 'plan', 'design', 'compare', 'pros and cons'];
-  const actKeywords = ['implement', 'build', 'code', 'fix', 'deploy', 'run', 'test', 'apply', 'merge', 'write the code', 'create the file'];
-  const lower = promptText.toLowerCase();
-  let planScore = 0, actScore = 0;
-  for (const kw of planKeywords) { if (lower.includes(kw)) planScore++; }
-  for (const kw of actKeywords) { if (lower.includes(kw)) actScore++; }
-  const maxScore = Math.max(planScore, actScore);
-  if (maxScore === 0) return { mode: 'auto', confidence: 0, planScore: 0, actScore: 0 };
-  const confidence = Math.min(maxScore / 3, 1);
-  return { mode: planScore > actScore ? 'plan' : actScore > planScore ? 'act' : 'auto', confidence, planScore, actScore };
-}
-
-// ─── v0.6: Effort Profile Commands ─────────────────────
-
-export function setAgentEffortProfile(agentId: string, profile: EffortProfile): void {
-  const cfg = getConfig() as any;
-  if (!cfg.agentEffortProfiles) cfg.agentEffortProfiles = {};
-  cfg.agentEffortProfiles[agentId] = profile;
-}
-
-export function getAgentEffortProfile(agentId: string): EffortProfile | null {
-  const cfg = getConfig() as any;
-  return cfg.agentEffortProfiles?.[agentId] ?? null;
-}
-
-export function getAllEffortProfiles(): Record<string, EffortProfile> {
-  const cfg = getConfig() as any;
-  return cfg.agentEffortProfiles ?? {};
-}
-
-function scoreToEffortLevel(score: number): EffortLevel {
-  const cfg = getConfig();
-  for (const [tier, [low, high]] of Object.entries(cfg.tier_boundaries)) {
-    if (score >= low && score < high) return tier as EffortLevel;
-  }
-  return 'extreme';
-}
-
-export function applyEffortProfile(effort: EffortLevel, score: number, agentId: string): { effort: EffortLevel; score: number; reason: string } {
-  const profile = getAgentEffortProfile(agentId);
-  if (!profile) return { effort, score, reason: 'no profile' };
-
-  let adjustedScore = score;
-  const reasons: string[] = [];
-
-  if (profile.bias && profile.bias !== 0) {
-    adjustedScore = Math.max(0, Math.min(1, score + (profile.bias || 0)));
-    reasons.push(`bias ${profile.bias > 0 ? '-' : '+'}${Math.abs(profile.bias * 100).toFixed(0)}`);
-  }
-
-  let adjustedEffort = scoreToEffortLevel(adjustedScore);
-
-  if (profile.default) {
-    const tierOrder: EffortLevel[] = ['trivial', 'light', 'moderate', 'heavy', 'intensive', 'extreme'];
-    const floorIdx = tierOrder.indexOf(profile.default);
-    const effortIdx = tierOrder.indexOf(adjustedEffort);
-    if (floorIdx > effortIdx) {
-      adjustedEffort = profile.default;
-      reasons.push(`floor→${profile.default}`);
-    }
-  }
-
-  if (profile.ceiling) {
-    const tierOrder: EffortLevel[] = ['trivial', 'light', 'moderate', 'heavy', 'intensive', 'extreme'];
-    const ceilIdx = tierOrder.indexOf(profile.ceiling);
-    const effortIdx = tierOrder.indexOf(adjustedEffort);
-    if (ceilIdx < effortIdx) {
-      adjustedEffort = profile.ceiling;
-      reasons.push(`ceiling→${profile.ceiling}`);
-    }
-  }
-
-  return { effort: adjustedEffort, score: adjustedScore, reason: reasons.join(', ') || 'no adjustment needed' };
-}

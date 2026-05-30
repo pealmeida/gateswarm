@@ -1,6 +1,8 @@
 /**
  * MoMA Cross-Platform — Type Definitions
  * MoMA = Mixture of Multimodal Agents
+ *
+ * v0.5.1: Clean — no IntentMode, no DataSource, no mode/effortOverride
  */
 
 // ─── Backend & Device ───────────────────────────────────
@@ -35,41 +37,17 @@ export interface ComplexityScore {
   value: number; // 0.0 – 1.0
   method: 'ml' | 'heuristic' | 'v3.3-heuristic' | 'heuristic-fallback' | 'ensemble-v0.4';
   latencyMs: number;
-  /** Predicted tier (v3.3: from heuristic score boundaries) */
   tier?: EffortLevel;
-  /** LLM validation confidence (v3.3: 0.99) */
   confidence?: number;
-  /** Low confidence flag */
   lowConfidence?: boolean;
-  /** Classifier accuracy (v3.3: 0.99 = LLM agreement rate) */
   classifierAccuracy?: number;
 }
 
 // ─── Router ─────────────────────────────────────────────
 
-// ─── Multimodal Data Sources ─────────────────────
-
-export type DataSource = 'text' | 'image' | 'video' | 'audio';
-
-export interface DataSourceCapability {
-  /** Which data sources this model/provider supports */
-  supported: DataSource[];
-  /** Max images per request (0 = none) */
-  maxImages?: number;
-  /** Max video duration seconds (0 = none) */
-  maxVideoSeconds?: number;
-  /** Max audio duration seconds (0 = none) */
-  maxAudioSeconds?: number;
-  /** Whether the provider supports outputting images */
-  canOutputImage?: boolean;
-}
-
 export type Tier = 'local' | 'gatekeeper' | 'cloud';
 
 export type EffortLevel = 'trivial' | 'light' | 'moderate' | 'heavy' | 'intensive' | 'extreme';
-
-/** Plan/Act mode — v0.6 */
-export type IntentMode = 'plan' | 'act' | 'auto';
 
 export type ModelTier = 'nano' | 'small' | 'medium' | 'large' | 'cloud-light' | 'cloud-heavy';
 
@@ -86,10 +64,6 @@ export interface RoutingDecision {
   qualityScore: number;
   reason: string;
   profile: DeviceProfile;
-  /** v0.6: detected or forced intent mode */
-  mode?: IntentMode;
-  /** v0.6: effort override flag */
-  effortOverride?: boolean;
 }
 
 // ─── Gatekeeper ─────────────────────────────────────────
@@ -178,8 +152,7 @@ export type MoMAErrorCode =
   | 'CLOUD_UNAVAILABLE'
   | 'OFFLINE_NO_CACHE'
   | 'MEMORY_PRESSURE'
-  | 'BACKEND_UNAVAILABLE'
-  | 'UNSUPPORTED_DATA_SOURCE';
+  | 'BACKEND_UNAVAILABLE';
 
 export interface MoMAError extends Error {
   code: MoMAErrorCode;

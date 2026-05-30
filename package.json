@@ -1,7 +1,7 @@
 {
   "name": "gateswarm-gateway",
-  "version": "0.6.2",
-  "description": "GateSwarm MoMA Gateway v0.6.2 — Effort Customization + Plan/Act Modes + RTK Token Economy + Provider Health + Quota Auto-Fallback.",
+  "version": "0.5.1",
+  "description": "GateSwarm MoMA Gateway v0.5.1 — CLI Providers + Direct Routing Bypass.",
   "type": "module",
   "main": "src/moma-gateway.ts",
   "types": "src/moma-gateway.ts",

@@ -7,6 +7,7 @@
  * - Benchmark tracking (on/off)
  * - Usage quotas and rate limits
  * 
+ * v0.5.1: Agent Registry
  * v0.5.0: Added CLI provider support (Claude Code, Codex, Pi, Hermes, OpenClaw)
  * CLI providers are subprocess-dispatched, respecting official CLI OAuth/policies.
  *
@@ -27,16 +28,7 @@ const REGISTRY_FILE = join(__dirname, '../data/agent-registry.json');
 
 export type ProviderType = 'http-api' | 'cli-agent';
 
-export type DataSource = 'text' | 'image' | 'video' | 'audio';
 
-/** v0.6.2: Per-provider multimodal data source capabilities */
-export interface ProviderDataSourceCapability {
-  supported: DataSource[];
-  max_images?: number;
-  max_video_seconds?: number;
-  max_audio_seconds?: number;
-  can_output_image?: boolean;
-}
 
 export interface HttpProviderConfig {
   id: string;
@@ -45,8 +37,6 @@ export interface HttpProviderConfig {
   baseUrl: string;
   apiKey: string;
   models: string[];
-  /** v0.6.2: data source capabilities */
-  data_sources?: ProviderDataSourceCapability;
 }
 
 export interface CliProviderEntry {
@@ -55,8 +45,6 @@ export interface CliProviderEntry {
   type: 'cli-agent';
   models: string[];
   cliConfig: CliProviderConfig;
-  /** v0.6.2: data source capabilities */
-  data_sources?: ProviderDataSourceCapability;
 }
 
 export type ProviderConfig = HttpProviderConfig | CliProviderEntry;
@@ -70,15 +58,7 @@ export interface AgentTierConfig {
   extreme: string;
 }
 
-/** v0.6: Per-agent effort customization profile */
-export interface EffortProfile {
-  /** Floor: minimum tier (bump trivial→floor) */
-  default?: string;
-  /** Ceiling: maximum tier (cap extreme→ceiling) */
-  ceiling?: string;
-  /** Score bias: negative favors heavier, positive favors lighter */
-  bias?: number;
-}
+
 
 export interface AgentConfig {
   id: string;
@@ -93,8 +73,6 @@ export interface AgentConfig {
   requestCount: number;
   totalTokensIn: number;
   totalTokensOut: number;
-  /** v0.6: effort customization profile */
-  effortProfile?: EffortProfile;
 }
 
 export interface RegistryState {

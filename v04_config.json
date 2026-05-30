@@ -1,5 +1,5 @@
 {
-  "version": "v0.6.2-auto-fallback",
+  "version": "v0.5.1-cli-providers",
   "trained": "2026-05-27T23:59:52.685Z",
   "method": "ensemble-voter-with-feedback-loop",
   "ensemble": {
@@ -76,16 +76,7 @@
           "model": "pi/qwen3.5-plus",
           "provider": "pi-agent"
         }
-      ],
-      "plan_model": "glm-4.5-air",
-      "plan_provider": "zai",
-      "plan_max_tokens": 128,
-      "plan_enable_thinking": false,
-      "data_sources": {
-        "supported": [
-          "text"
-        ]
-      }
+      ]
     },
     "light": {
       "model": "glm-4.7",
@@ -105,16 +96,7 @@
           "model": "pi/glm-4.7-flash",
           "provider": "pi-agent"
         }
-      ],
-      "plan_model": "glm-4.5-air",
-      "plan_provider": "zai",
-      "plan_max_tokens": 256,
-      "plan_enable_thinking": false,
-      "data_sources": {
-        "supported": [
-          "text"
-        ]
-      }
+      ]
     },
     "moderate": {
       "model": "MiniMax-M2.5",
@@ -138,16 +120,7 @@
           "model": "pi/glm-4.7-flash",
           "provider": "pi-agent"
         }
-      ],
-      "plan_model": "glm-4.7-flash",
-      "plan_provider": "zai",
-      "plan_max_tokens": 512,
-      "plan_enable_thinking": false,
-      "data_sources": {
-        "supported": [
-          "text"
-        ]
-      }
+      ]
     },
     "heavy": {
       "model": "cc/claude-sonnet-4-6",
@@ -171,17 +144,7 @@
           "model": "glm-4.7",
           "provider": "zai"
         }
-      ],
-      "plan_model": "MiniMax-M2.5",
-      "plan_provider": "bailian",
-      "plan_max_tokens": 1024,
-      "plan_enable_thinking": false,
-      "data_sources": {
-        "supported": [
-          "text",
-          "image"
-        ]
-      }
+      ]
     },
     "intensive": {
       "model": "cx/gpt-5.5-codex",
@@ -205,17 +168,7 @@
           "model": "kimi-k2.5",
           "provider": "bailian"
         }
-      ],
-      "plan_model": "MiniMax-M2.5",
-      "plan_provider": "bailian",
-      "plan_max_tokens": 1024,
-      "plan_enable_thinking": false,
-      "data_sources": {
-        "supported": [
-          "text",
-          "image"
-        ]
-      }
+      ]
     },
     "extreme": {
       "model": "cc/claude-opus-4-7",
@@ -239,19 +192,7 @@
           "model": "kimi-k2.5",
           "provider": "bailian"
         }
-      ],
-      "plan_model": "qwen3.5-plus",
-      "plan_provider": "bailian",
-      "plan_max_tokens": 2048,
-      "plan_enable_thinking": false,
-      "data_sources": {
-        "supported": [
-          "text",
-          "image",
-          "video",
-          "audio"
-        ]
-      }
+      ]
     }
   },
   "feedback_loop": {
