@@ -4,21 +4,15 @@ dotenv.config({ path: new URL('../.env', import.meta.url).pathname });
 /**
  * GateSwarm MoMA Router v0.5.1 — Multi-Agent API Gateway
  *
- *   - Per-tier/per-provider data source capabilities (text, image, video, audio)
- *   - Automatic detection of multimedia content in request messages
- *   - Routing validation: rejects requests with unsupported data sources
- *   - CLI: `gateswarm data-sources`, `gateswarm data-sources-set`, `gateswarm data-sources-validate`
- *
+ * v0.5.1: Direct Routing Bypass
  *   - Skip complexity scoring and route directly to user-specified provider/model
  *   - Supports: request body (`direct_route`), model override (`provider/model`), headers (`X-Direct-*`)
  *   - CLI: `gateswarm direct <provider> <model> "prompt"`
- *   - New endpoint: `GET /v1/providers` — list all providers and models
  *
  * v0.5.0: CLI Provider Support
  *   - Route to CLI agents (Claude Code, Codex, Pi, Hermes, OpenClaw) as providers
  *   - Subprocess dispatch with official CLIs (respects OAuth/policies)
  *   - Token estimation via tiktoken for CLI responses
- *   - Subscription quota tracking for CLI agents
  *   - 9router-style prefix notation (cc/, cx/, pi/, hm/, oc/)
  *   - Feature toggle: cliProviders.enabled in v04_config.json
  *
@@ -529,6 +523,8 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
     }
   }
 
+
+
 // ─── v0.5.1: Direct Routing Bypass ──────────────────────────
   // Users can skip complexity scoring by specifying provider+model directly.
   // Three methods supported (in priority order):
@@ -540,6 +536,10 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
     return handleDirectRoute(req, res, agent, messages, promptText, directRoute.providerId, directRoute.model);
   }
   // ────────────────────────────────────────────────────────────
+
+
+
+
 
   // Score complexity — v0.4 ensemble
   const v04Score = await scoreIntentV04(promptText);
@@ -558,20 +558,10 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
     console.log(`🔄 [${agent.name}] Model switch: ${continuity.lastModel} → ${getTierModel(effort)?.model}`);
   }
 
-  // Use global tier model config
-  const tierModelConfig = getTierModel(effort);
   const resolved = agentRegistry.resolveModel(agent, effort);
-
-  // If agent's tier model has a CLI prefix, prefer it over global tier config
-  const agentTierModel = agent.tierConfig[effort as keyof typeof agent.tierConfig];
-  const isAgentCliModel = agentTierModel && /^(cc|cx|pi|hm|oc)/.test(agentTierModel);
-
-  const providerId = isAgentCliModel ? resolved.providerId : (tierModelConfig?.provider ?? resolved.providerId);
-  const model = isAgentCliModel ? resolved.model : (tierModelConfig?.model ?? resolved.model);
-
+  const providerId = resolved.providerId;
+  const model = resolved.model;
   console.log(`🧠 [${agent.name}] Score: ${score.toFixed(3)} → ${effort} → ${providerId}/${model}`);
-
-  // v0.4: Record interaction for feedback loop
   const interactionId = `${agent.id}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
   // ─── TurboQuant Context Compression v3.5 ──────────────────
@@ -834,18 +824,15 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
 
     try {
     for (const target of retryTargets) {
-
       // ─── CLI provider fallback ───
       if (target.isCli) {
         console.log(`🔄 [${agent.name}] Trying CLI fallback: ${target.label}`);
         try {
-          // Check availability
           const avail = await agentRegistry.checkCliProviderAvailability(target.providerId);
           if (!avail.ok) {
             console.log(`⚠️  [${agent.name}] CLI ${target.label} unavailable: ${avail.reason}`);
             continue;
           }
-          // Execute CLI
           const cliResult = await (async () => {
             const adapter = agentRegistry.getCliAdapter(target.providerId)!;
             return adapter.chatCompletion(payload.messages, target.model, {});
@@ -908,7 +895,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
         data = await resp.json();
         latency = Date.now() - startTime;
         actualTarget = target;
-        break; // Success
+        break;
       } catch (err: any) {
         clearTimeout(reqTimeoutId);
         if (err.name === 'AbortError') {
@@ -936,23 +923,9 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
       // Update agent usage
       await agentRegistry.updateUsage(agent.id, tokensIn, tokensOut);
 
-      // Filter provider output before it enters context/feedback/RAG
-      // Full output preserved in tee files for on-demand retrieval
       const responseText = data.choices?.[0]?.message?.content || '';
-      let responseText = responseText;
-      // output filtered - v0.5.1
-
-      try {
-      } catch (err: any) {
-        // Filter failure — use raw output (fail-safe)
-        console.log(`⚠️  [${agent.name}] Output filter failed, using raw: ${err.message}`);
-      }
-
-      // Record token economy
-      // ────────────────────────────────────────────────────────────
       const feedbackId = `${agent.id}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
-      // Record feedback
       recordFeedback({
         prompt: promptText,
         predictedTier: effort,
@@ -964,7 +937,6 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
         userSatisfaction: null,
       });
 
-      // Self-eval (non-blocking)
       selfEvaluate({
         prompt: promptText,
         response: responseText,
@@ -975,48 +947,39 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
       }).then(evalResult => {
         console.log(`📊 [v0.4.4] Self-eval: adequacy=${evalResult.quickScore.toFixed(2)} escalate=${evalResult.shouldEscalate}`);
 
-        // Wire LLM judge result to feedback store
         if (evalResult.llmScore !== null && evalResult.predictedCorrectTier) {
           updateAdequacy(feedbackId, evalResult.llmScore, evalResult.predictedCorrectTier);
           console.log(`📊 [v0.4.4] actualTier=${evalResult.predictedCorrectTier} adequacy=${evalResult.llmScore.toFixed(2)}`);
-
-          // Calibrate bronze weight (LLM judge) against quick heuristic
           calibrateBronze(evalResult.predictedCorrectTier === effort);
         }
       }).catch(() => {});
 
-      // v0.4.4: SILVER label — RAG consensus inference
       const silverTier = inferRagConsensus(promptText);
       if (silverTier) {
         console.log(`🥈 [v0.4.4] SILVER label: ${silverTier} (RAG consensus)`);
         calibrateSilver(silverTier === effort);
       }
 
-      // v0.4.4: Training mode — vote request (if enabled)
       const voteRequest = createVoteRequest(agent.id, promptText, effort, v04Score.confidence ?? 0.7);
       if (voteRequest) {
         console.log(`🎯 [${agent.name}] Training vote: ${voteRequest.id} (${effort})`);
-        // Append vote prompt to response
         const votePrompt = voteRequest.prompt;
-        // We'll include vote in a custom header for the client to handle
         const responseData = { ...data, _voteRequest: { id: voteRequest.id, prompt: votePrompt } };
         return jsonResponse(res, 200, responseData);
       }
 
-      // Add to RAG index (non-blocking) — use filtered summary
       const keywords: string[] = promptText.toLowerCase().split(/\s+/)
         .filter((w: string) => w.length > 4 && !/^(the|and|for|with|this|that|from|have|been)/.test(w));
       addRagEntry({
         keywords: [...new Set(keywords)].slice(0, 10) as string[],
         tier: effort,
         modelUsed: `${actualTarget.providerId}/${actualTarget.model}`,
-        adequacyScore: 1, // Default, will be updated by self-eval
+        adequacyScore: 1,
         summary: responseText.slice(0, 200),
         originalTokens: tokensIn,
         compressedTokens: compressionResult.compressedTokens,
       });
 
-      // v0.4.4: Update context continuity — use filtered text
       updateContinuity(sessionId, effort, `${actualTarget.providerId}/${actualTarget.model}`, responseText);
       // ─────────────────────────────────────────────────────
 
@@ -1165,27 +1128,21 @@ async function handleCliProvider(
       }
     }).catch(() => {});
 
-    // RAG index
     const keywords = promptText.toLowerCase().split(/\s+/)
       .filter((w: string) => w.length > 4);
-
-    const responseContent = result.content;
-
-    // Record token economy
 
     addRagEntry({
       keywords: [...new Set(keywords)].slice(0, 10),
       tier: effort,
       modelUsed: `${providerId}/${result.model}`,
       adequacyScore: 1,
-      summary: responseContent.slice(0, 200),
+      summary: result.content.slice(0, 200),
       originalTokens: tokensIn,
       compressedTokens: compressionResult.compressedTokens,
     });
 
-    // Update context continuity — use filtered output
     const sessionId = `${agent.id}:${promptText.slice(0, 100)}`;
-    updateContinuity(sessionId, effort, `${providerId}/${result.model}`, responseContent);
+    updateContinuity(sessionId, effort, `${providerId}/${result.model}`, result.content);
 
     // Benchmark logging
     if (agent.benchmarkEnabled) {
@@ -1253,20 +1210,6 @@ async function init() {
   startRagAutoFlush();
   console.log('📦 Persistence: feedback + RAG stores initialized');
 
-  console.log('📊 Token economy tracker initialized');
-
-  const QUOTA_PROBE_INTERVAL = 5 * 60_000;
-  setInterval(async () => {
-    try {
-      const providers = ['bailian', 'zai', 'openrouter'];
-      for (const pid of providers) {
-      }
-    } catch (err: any) {
-      console.error(`⚠️  [quota-probe] Error: ${err.message}`);
-    }
-  }, QUOTA_PROBE_INTERVAL);
-  console.log(`🔍 Quota probe interval: ${QUOTA_PROBE_INTERVAL/60000}min`);
-
   const agents = agentRegistry.getAgents();
   console.log(`🚀 GateSwarm MoMA Router v0.5.1 (CLI Providers + Direct Routing Bypass) starting on :${PORT}`);
   console.log(`📊 Providers: ${agentRegistry.getProviders().map(p => p.id).join(', ')}`);
@@ -1299,16 +1242,20 @@ async function init() {
         const agents = agentRegistry.getAgents();
         return jsonResponse(res, 200, {
           status: 'healthy',
-          router: 'GateSwarm MoMA Router v0.5.1',
+          router: 'GateSwarm MoMA Router v0.5.1 (CLI Providers + Direct Routing Bypass)',
           turboquant: 'v3.7 (structure-aware + dynamic KV + RAG + CWM + RTK output filter)',
           ensemble: 'enabled',
           feedback: 'enabled',
           llmJudge: 'bailian/qwen3.5-plus',
           capabilities: {
+            directRouting: true,
+            cliProviders: true,
           },
           timestamp: new Date().toISOString(),
           providers: agentRegistry.getProviders().map(p => {
             const base: any = { id: p.id, name: p.name, type: p.type ?? 'http-api' };
+            if ((p as any).data_sources) {
+              base.data_sources = (p as any).data_sources;
             }
             if (p.type === 'cli-agent') {
               return { ...base, quota: agentRegistry.getCliProviderQuotaStatus(p.id) };
@@ -1318,6 +1265,7 @@ async function init() {
           agents: agents.map(a => ({ id: a.id, name: a.name, provider: a.provider, requests: a.requestCount })),
         });
       }
+
 
 
       // ─── Global Metrics ───
@@ -1648,25 +1596,6 @@ async function init() {
         });
       }
 
-      // ════════════════════════════════════════════════════
-      // ════════════════════════════════════════════════════
-
-
-
-
-      // ════════════════════════════════════════════════════
-      // ════════════════════════════════════════════════════
-
-
-
-
-      // ════════════════════════════════════════════════════
-      // ════════════════════════════════════════════════════
-
-
-
-
-
 
 
       // ─── 404 ───
@@ -1684,3 +1613,12 @@ async function init() {
     console.log(`📊 Metrics: http://localhost:${PORT}/metrics`);
     console.log(`🤖 Agents: http://localhost:${PORT}/v1/agents`);
     console.log(`🎯 Training: http://localhost:${PORT}/v04/training`);
+
+    console.log(`\n🔗 Connection template for any agent:`);
+    console.log(`   base_url: http://<host>:${PORT}/v1`);
+    console.log(`   api_key:  moma-<agent-key>`);
+  });
+}
+
+init().catch(console.error);
+
