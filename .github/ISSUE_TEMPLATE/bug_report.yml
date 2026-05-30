@@ -1,0 +1,68 @@
+name: Bug report
+description: Report a defect in the Python scorer or TypeScript gateway
+title: "[bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug. Please fill out the fields below so we can reproduce quickly.
+        **Do not** report security vulnerabilities here — see [SECURITY.md](../SECURITY.md).
+
+  - type: dropdown
+    id: subsystem
+    attributes:
+      label: Subsystem
+      options:
+        - Python scorer (router.py / train.py / llmfit)
+        - TypeScript gateway (port 8900)
+        - Docs / examples
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: "git rev-parse --short HEAD or release tag"
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproduction steps
+      description: Minimum commands or code to trigger the bug
+      placeholder: |
+        1. `python router.py "..."`
+        2. Observe output `...`
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include stack traces, JSON output, gateway logs
+    validations:
+      required: true
+
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      placeholder: |
+        - OS:
+        - Python:
+        - Node:
+        - Providers configured (BAILIAN / GLM / Ollama):
+    validations:
+      required: true

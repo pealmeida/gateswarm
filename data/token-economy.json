@@ -1,0 +1,11 @@
+{
+  "agents": {},
+  "globalTotal": {
+    "rawIn": 0,
+    "rawOut": 0,
+    "filtered": 0,
+    "saved": 0
+  },
+  "lastReset": "2026-05-26T02:21:52.739Z",
+  "startedAt": "2026-05-26T02:21:52.739Z"
+}

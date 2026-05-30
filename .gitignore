@@ -1,0 +1,47 @@
+# __pycache__
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Large datasets — regenerate with generators
+llmfit/datasets/*.jsonl
+llmfit/datasets/general-purpose/*.jsonl
+datasets/*.jsonl
+
+# Results JSON (keep small summaries, not full outputs)
+llmfit/datasets/v31_results_*.json
+llmfit/datasets/v31_all_results.json
+
+# Secrets / env
+.env
+*.key
+*.pem
+
+# IDE
+.vscode/
+.idea/
+
+# Local agent / tooling state
+.claude/
+.cursor/
+CLAUDE.md
+
+# Internal audit/working notes (not for public OSS distribution)
+docs/FEATURE_AUDIT.md
+docs/FIXES_AND_IMPROVEMENTS.md
+
+# OS
+.DS_Store
+Thumbs.db
+
+# pip temp dirs (from train.py ensure_deps())
+pip-metadata-*/
+pip-unpack-*/
+pip-build-tracker-*/
+pip-ephem-wheel-cache-*/
+pip-install-*/
+
+# Flash debug
+.flash/

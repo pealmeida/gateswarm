@@ -1,0 +1,121 @@
+{
+  "default": {
+    "agentId": "default",
+    "enabled": false,
+    "aleatoryRate": 0.1,
+    "alwaysAskBelowConfidence": 0.5,
+    "neverAskTiers": [
+      "trivial",
+      "extreme"
+    ],
+    "weightedTiers": [
+      "moderate",
+      "heavy",
+      "intensive"
+    ],
+    "weightedRateMultiplier": 2,
+    "retrainAfterVotes": 10
+  },
+  "quality": {
+    "agentId": "quality",
+    "enabled": false,
+    "aleatoryRate": 0.1,
+    "alwaysAskBelowConfidence": 0.5,
+    "neverAskTiers": [
+      "trivial",
+      "extreme"
+    ],
+    "weightedTiers": [
+      "moderate",
+      "heavy",
+      "intensive"
+    ],
+    "weightedRateMultiplier": 2,
+    "retrainAfterVotes": 10
+  },
+  "bmad-dev": {
+    "agentId": "bmad-dev",
+    "enabled": false,
+    "aleatoryRate": 0.1,
+    "alwaysAskBelowConfidence": 0.5,
+    "neverAskTiers": [
+      "trivial",
+      "extreme"
+    ],
+    "weightedTiers": [
+      "moderate",
+      "heavy",
+      "intensive"
+    ],
+    "weightedRateMultiplier": 2,
+    "retrainAfterVotes": 10
+  },
+  "bmad-architect": {
+    "agentId": "bmad-architect",
+    "enabled": false,
+    "aleatoryRate": 0.1,
+    "alwaysAskBelowConfidence": 0.5,
+    "neverAskTiers": [
+      "trivial",
+      "extreme"
+    ],
+    "weightedTiers": [
+      "moderate",
+      "heavy",
+      "intensive"
+    ],
+    "weightedRateMultiplier": 2,
+    "retrainAfterVotes": 10
+  },
+  "jack": {
+    "agentId": "jack",
+    "enabled": false,
+    "aleatoryRate": 0.1,
+    "alwaysAskBelowConfidence": 0.5,
+    "neverAskTiers": [
+      "trivial",
+      "extreme"
+    ],
+    "weightedTiers": [
+      "moderate",
+      "heavy",
+      "intensive"
+    ],
+    "weightedRateMultiplier": 2,
+    "retrainAfterVotes": 10
+  },
+  "claude-quality": {
+    "agentId": "claude-quality",
+    "enabled": false,
+    "aleatoryRate": 0.1,
+    "alwaysAskBelowConfidence": 0.5,
+    "neverAskTiers": [
+      "trivial",
+      "extreme"
+    ],
+    "weightedTiers": [
+      "moderate",
+      "heavy",
+      "intensive"
+    ],
+    "weightedRateMultiplier": 2,
+    "retrainAfterVotes": 10
+  },
+  "codex-heavy": {
+    "agentId": "codex-heavy",
+    "enabled": false,
+    "aleatoryRate": 0.1,
+    "alwaysAskBelowConfidence": 0.5,
+    "neverAskTiers": [
+      "trivial",
+      "extreme"
+    ],
+    "weightedTiers": [
+      "moderate",
+      "heavy",
+      "intensive"
+    ],
+    "weightedRateMultiplier": 2,
+    "retrainAfterVotes": 10
+  }
+}

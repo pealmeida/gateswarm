@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MoA — Metrics Dashboard</title>
+  <meta http-equiv="refresh" content="5">
+  <style>
+    :root {
+      --bg: #0a0a0f;
+      --surface: #111118;
+      --surface2: #181822;
+      --border: #252535;
+      --text: #d4d4e8;
+      --text2: #6e6e88;
+      --accent: #6366f1;
+      --green: #22c55e;
+      --yellow: #eab308;
+      --orange: #f97316;
+      --red: #ef4444;
+      --blue: #3b82f6;
+      --purple: #a855f7;
+      --mono: 'SF Mono','JetBrains Mono','Fira Code','Cascadia Code',monospace;
+      --sans: -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg); color: var(--text); font-family: var(--sans); padding: 20px; }
+    .auto-refresh { font-size: 11px; color: var(--text2); font-family: var(--mono); }
+
+    h1 { font-size: 16px; font-weight: 600; margin-bottom: 4px; display: flex; align-items: center; gap: 8px; }
+    h1 span { color: var(--accent); }
+
+    .grid { display: grid; gap: 16px; margin-top: 16px; }
+    .g2 { grid-template-columns: 1fr 1fr; }
+    .g3 { grid-template-columns: 1fr 1fr 1fr; }
+    .g4 { grid-template-columns: repeat(4, 1fr); }
+    .g6 { grid-template-columns: repeat(6, 1fr); }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 16px;
+    }
+    .card-title {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 1.2px;
+      color: var(--text2);
+      margin-bottom: 12px;
+      font-weight: 700;
+    }
+
+    .stat { text-align: center; }
+    .stat-value { font-size: 32px; font-weight: 700; font-family: var(--mono); line-height: 1; }
+    .stat-label { font-size: 10px; color: var(--text2); margin-top: 6px; text-transform: uppercase; letter-spacing: 0.5px; }
+
+    /* Effort colors */
+    .effort-trivial { color: #22c55e; }
+    .effort-light { color: #84cc16; }
+    .effort-moderate { color: #eab308; }
+    .effort-heavy { color: #f97316; }
+    .effort-intensive { color: #ef4444; }
+    .effort-extreme { color: #dc2626; }
+
+    /* Mini bar */
+    .bar-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 12px; }
+    .bar-label { min-width: 70px; text-align: right; font-family: var(--mono); font-size: 11px; }
+    .bar-track { flex: 1; height: 6px; background: var(--bg); border-radius: 3px; overflow: hidden; }
+    .bar-fill { height: 100%; border-radius: 3px; transition: width 0.4s; }
+    .bar-count { min-width: 30px; font-family: var(--mono); font-size: 11px; color: var(--text2); }
+
+    /* Table */
+    table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 11px; }
+    th { text-align: left; color: var(--text2); font-weight: 500; font-size: 9px; text-transform: uppercase; letter-spacing: 0.5px; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+    td { padding: 5px 8px; border-bottom: 1px solid var(--border); }
+    tr:hover td { background: var(--surface2); }
+
+    /* Log */
+    .log { max-height: 260px; overflow-y: auto; font-family: var(--mono); font-size: 11px; }
+    .log-row { display: flex; gap: 8px; padding: 4px 8px; border-bottom: 1px solid var(--border); }
+    .log-row:hover { background: var(--surface2); }
+    .log-ts { color: var(--text2); min-width: 70px; }
+    .log-effort { min-width: 75px; font-weight: 600; }
+    .log-score { min-width: 45px; }
+    .log-model { min-width: 100px; color: var(--accent); }
+    .log-prompt { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text2); }
+    .log-latency { min-width: 55px; text-align: right; color: var(--text2); }
+
+    /* Routing matrix mini */
+    .matrix-cell { padding: 3px 6px; font-size: 9px; font-family: var(--mono); text-align: center; border: 1px solid var(--border); }
+    .matrix-cell.local { background: rgba(34,197,94,0.08); }
+    .matrix-cell.cloud { background: rgba(59,130,246,0.08); }
+
+    .divider { border: none; border-top: 1px solid var(--border); margin: 12px 0; }
+
+    @media (max-width: 768px) {
+      .g2,.g3,.g4,.g6 { grid-template-columns: 1fr 1fr; }
+    }
+    @media (max-width: 480px) {
+      .g2,.g3,.g4,.g6 { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <!-- Header -->
+  <div style="display:flex; justify-content:space-between; align-items:center;">
+    <h1>🧠 <span>MoA</span> Metrics Dashboard</h1>
+    <div style="display:flex; align-items:center; gap:12px;">
+      <span class="auto-refresh">auto-refresh 5s</span>
+      <span id="clock" class="auto-refresh" style="color:var(--text)"></span>
+    </div>
+  </div>
+
+  <!-- KPI Row -->
+  <div class="grid g4">
+    <div class="card stat">
+      <div class="stat-value" id="kpiQueries" style="color:var(--accent)">0</div>
+      <div class="stat-label">Total Queries</div>
+    </div>
+    <div class="card stat">
+      <div class="stat-value" id="kpiAccuracy" style="color:var(--green)">—</div>
+      <div class="stat-label">Classification Acc</div>
+    </div>
+    <div class="card stat">
+      <div class="stat-value" id="kpiLocal" style="color:var(--green)">0%</div>
+      <div class="stat-label">Local Routing %</div>
+    </div>
+    <div class="card stat">
+      <div class="stat-value" id="kpiSavings" style="color:var(--yellow)">$0.00</div>
+      <div class="stat-label">Cost Saved</div>
+    </div>
+  </div>
+
+  <!-- Second KPI Row -->
+  <div class="grid g4">
+    <div class="card stat">
+      <div class="stat-value" id="kpiAvgLatency" style="color:var(--blue)">0ms</div>
+      <div class="stat-label">Avg Score Latency</div>
+    </div>
+    <div class="card stat">
+      <div class="stat-value" id="kpiNudges" style="color:var(--purple)">0</div>
+      <div class="stat-label">Learning Nudges</div>
+    </div>
+    <div class="card stat">
+      <div class="stat-value" id="kpiPatterns" style="color:var(--orange)">0</div>
+      <div class="stat-label">Patterns Learned</div>
+    </div>
+    <div class="card stat">
+      <div class="stat-value" id="kpiEngine" style="color:var(--text2)">heuristic</div>
+      <div class="stat-label">Engine Mode</div>
+    </div>
+  </div>
+
+  <!-- Effort Distribution + Routing Matrix -->
+  <div class="grid g2">
+    <!-- Distribution -->
+    <div class="card">
+      <div class="card-title">Effort Distribution</div>
+      <div id="distBars"></div>
+      <hr class="divider">
+      <div style="display:flex; justify-content:space-between; font-size:11px; font-family:var(--mono);">
+        <span>Avg trivial: <strong id="avgTrivial">—</strong></span>
+        <span>Avg extreme: <strong id="avgExtreme">—</strong></span>
+        <span>Δ <strong id="deltaScore">—</strong></span>
+      </div>
+    </div>
+
+    <!-- Routing Matrix -->
+    <div class="card">
+      <div class="card-title">Routing Matrix (Effort × Device)</div>
+      <table id="matrixTable">
+        <thead>
+          <tr>
+            <th></th>
+            <th>dsk-hi</th><th>dsk-mid</th><th>mob-hi</th><th>mob-lo</th><th>lowend</th>
+          </tr>
+        </thead>
+        <tbody id="matrixBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Recent Log -->
+  <div class="card">
+    <div class="card-title">Recent Query Log</div>
+    <div class="log" id="logContainer">
+      <div style="text-align:center; padding:20px; color:var(--text2);">Waiting for queries via CLI…</div>
+    </div>
+  </div>
+
+  <script type="module">
+    // ─── Config & Constants ──────────────────────────────────
+    const EFFORT_LABELS = ['trivial','light','moderate','heavy','intensive','extreme'];
+    const EFFORT_COLORS = {trivial:'#22c55e',light:'#84cc16',moderate:'#eab308',heavy:'#f97316',intensive:'#ef4444',extreme:'#dc2626'};
+    const ROUTING = {
+      trivial:    {dh:'qwen-0.5b',dm:'qwen-0.5b',mh:'qwen-0.5b',ml:'qwen-0.5b',lo:'gpt4o-mini'},
+      light:      {dh:'qwen-0.5b',dm:'qwen-0.5b',mh:'qwen-0.5b',ml:'tinyllama', lo:'gpt4o-mini'},
+      moderate:   {dh:'tinyllama', dm:'tinyllama',mh:'tinyllama',ml:'gpt4o-mini',lo:'gpt4o-mini'},
+      heavy:      {dh:'llama-3b',  dm:'gpt4o-mini',mh:'gpt4o-mini',ml:'gpt4o-mini',lo:'gpt4o'},
+      intensive:  {dh:'gpt4o',     dm:'gpt4o',     mh:'claude-s', ml:'claude-s', lo:'gpt4o'},
+      extreme:    {dh:'gpt4o',     dm:'claude-s',  mh:'claude-s', ml:'claude-s', lo:'gpt4o'},
+    };
+    const TIERS = {qwen:'local',tinyllama:'local','llama-3b':'local','gpt4o-mini':'cloud',gpt4o:'cloud','claude-s':'cloud'};
+
+    // ─── State (loaded from localStorage) ────────────────────
+    function loadState() {
+      try {
+        const raw = localStorage.getItem('moa_metrics');
+        if (raw) return JSON.parse(raw);
+      } catch {}
+      return { queries: [], totalQueries: 0, nudges: 0, patterns: 0 };
+    }
+    function saveState(s) {
+      try { localStorage.setItem('moa_metrics', JSON.stringify(s)); } catch {}
+    }
+
+    let state = loadState();
+
+    // ─── Rendering ───────────────────────────────────────────
+    function render() {
+      const queries = state.queries || [];
+      const total = state.totalQueries || queries.length;
+
+      // KPIs
+      document.getElementById('kpiQueries').textContent = total;
+      document.getElementById('kpiNudges').textContent = Math.floor(total / 10);
+      document.getElementById('kpiPatterns').textContent = Math.min(total, new Set(queries.map(q=>q.effort)).size * 4);
+      document.getElementById('kpiEngine').textContent = 'heuristic';
+
+      if (queries.length > 0) {
+        const avgLat = queries.reduce((s,q) => s + (q.latency||0), 0) / queries.length;
+        document.getElementById('kpiAvgLatency').textContent = Math.round(avgLat) + 'ms';
+
+        // Local %
+        const localCount = queries.filter(q => q.tier === 'local').length;
+        const localPct = Math.round((localCount / queries.length) * 100);
+        document.getElementById('kpiLocal').textContent = localPct + '%';
+
+        // Cost saved
+        const tokens = queries.length * 200;
+        const savings = (tokens / 1e6) * 2.50 * (localPct / 100);
+        document.getElementById('kpiSavings').textContent = '$' + savings.toFixed(2);
+
+        // Accuracy (if expectedEffort available)
+        const withExpected = queries.filter(q => q.expectedEffort);
+        if (withExpected.length > 0) {
+          const correct = withExpected.filter(q => q.effort === q.expectedEffort).length;
+          document.getElementById('kpiAccuracy').textContent = Math.round((correct / withExpected.length) * 100) + '%';
+        }
+
+        // Avg scores
+        const trivialScores = queries.filter(q => q.effort === 'trivial').map(q => q.score);
+        const extremeScores = queries.filter(q => q.effort === 'extreme').map(q => q.score);
+        const avgT = trivialScores.length ? (trivialScores.reduce((a,b)=>a+b,0)/trivialScores.length) : 0;
+        const avgE = extremeScores.length ? (extremeScores.reduce((a,b)=>a+b,0)/extremeScores.length) : 0;
+        document.getElementById('avgTrivial').textContent = avgT.toFixed(3);
+        document.getElementById('avgExtreme').textContent = avgE.toFixed(3);
+        document.getElementById('deltaScore').textContent = (avgE - avgT).toFixed(3);
+
+        // Distribution
+        const dist = {};
+        EFFORT_LABELS.forEach(e => dist[e] = 0);
+        queries.forEach(q => dist[q.effort] = (dist[q.effort]||0) + 1);
+        const maxD = Math.max(...Object.values(dist), 1);
+        document.getElementById('distBars').innerHTML = EFFORT_LABELS.map(e => {
+          const pct = (dist[e] / maxD * 100);
+          return `<div class="bar-row">
+            <span class="bar-label effort-${e}">${e}</span>
+            <div class="bar-track"><div class="bar-fill" style="width:${pct}%;background:${EFFORT_COLORS[e]}"></div></div>
+            <span class="bar-count">${dist[e]}</span>
+          </div>`;
+        }).join('');
+      }
+
+      // Routing matrix
+      document.getElementById('matrixBody').innerHTML = EFFORT_LABELS.map(e => {
+        const r = ROUTING[e];
+        const cells = [r.dh,r.dm,r.mh,r.ml,r.lo].map(m => {
+          const tier = Object.entries(TIERS).find(([k]) => m.startsWith(k))?.[1] || 'cloud';
+          return `<td class="matrix-cell ${tier}">${m}</td>`;
+        }).join('');
+        return `<tr><td class="effort-${e}" style="font-weight:600;font-size:10px">${e}</td>${cells}</tr>`;
+      }).join('');
+
+      // Log (last 50)
+      const logEl = document.getElementById('logContainer');
+      const recent = queries.slice(-50).reverse();
+      if (recent.length === 0) {
+        logEl.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text2)">Waiting for queries via CLI…</div>';
+      } else {
+        logEl.innerHTML = recent.map(q => {
+          const c = EFFORT_COLORS[q.effort] || '#888';
+          return `<div class="log-row">
+            <span class="log-ts">${q.ts || '—'}</span>
+            <span class="log-effort" style="color:${c}">${q.effort}</span>
+            <span class="log-score">${(q.score||0).toFixed(3)}</span>
+            <span class="log-model">${q.model || '—'}</span>
+            <span class="log-prompt">${(q.prompt||'').slice(0,60)}</span>
+            <span class="log-latency">${Math.round(q.latency||0)}ms</span>
+          </div>`;
+        }).join('');
+      }
+
+      // Clock
+      document.getElementById('clock').textContent = new Date().toLocaleTimeString();
+    }
+
+    // ─── Data Source: Tauri IPC > HTTP API > localStorage ────
+
+    async function pollMetrics() {
+      // 1. Try Tauri IPC (native app)
+      if (window.__TAURI__) {
+        try {
+          const { invoke } = window.__TAURI__.core;
+          const data = await invoke('get_metrics');
+          if (data && data.queries) {
+            state = { queries: data.queries, totalQueries: data.totalQueries || data.queries.length, nudges: 0, patterns: 0 };
+            saveState(state);
+            render();
+            return;
+          }
+        } catch (e) { /* Tauri not available */ }
+      }
+
+      // 2. Try HTTP API (metrics server)
+      try {
+        const res = await fetch('/api/metrics');
+        if (res.ok) {
+          const data = await res.json();
+          if (data.queries) {
+            state = data;
+            saveState(state);
+            render();
+            return;
+          }
+        }
+      } catch {}
+
+      // 3. Fallback: localStorage
+      state = loadState();
+      render();
+    }
+
+    // ─── Init ────────────────────────────────────────────────
+    render();
+    pollMetrics();
+    setInterval(pollMetrics, 5000);
+  </script>
+</body>
+</html>

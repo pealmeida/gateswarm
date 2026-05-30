@@ -1,0 +1,44 @@
+name: Feature request
+description: Suggest a new capability or improvement
+title: "[feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What can't you do today? Who is affected?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+
+  - type: dropdown
+    id: subsystem
+    attributes:
+      label: Affected subsystem
+      multiple: true
+      options:
+        - Python scorer
+        - TypeScript gateway
+        - Training pipeline
+        - Docs
+        - New surface area
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Links, prior art, benchmarks

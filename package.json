@@ -1,0 +1,85 @@
+{
+  "name": "gateswarm-gateway",
+  "version": "0.6.2",
+  "description": "GateSwarm MoMA Gateway v0.6.2 — Effort Customization + Plan/Act Modes + RTK Token Economy + Provider Health + Quota Auto-Fallback.",
+  "type": "module",
+  "main": "src/moma-gateway.ts",
+  "types": "src/moma-gateway.ts",
+  "exports": {
+    ".": {
+      "import": "./src/moma-gateway.ts",
+      "types": "./src/moma-gateway.ts"
+    },
+    "./intent-engine": {
+      "import": "./src/intent-engine-v04.ts",
+      "types": "./src/intent-engine-v04.ts"
+    },
+    "./ensemble-voter": {
+      "import": "./src/ensemble-voter.ts",
+      "types": "./src/ensemble-voter.ts"
+    },
+    "./feature-extractor": {
+      "import": "./src/feature-extractor-v04.ts",
+      "types": "./src/feature-extractor-v04.ts"
+    },
+    "./cli": {
+      "import": "./src/gateswarm-cli.ts",
+      "types": "./src/gateswarm-cli.ts"
+    }
+  },
+  "files": [
+    "src/",
+    "public/",
+    "docs/"
+  ],
+  "bin": {
+    "gateswarm": "./src/gateswarm-cli.ts",
+    "gateswarm-gateway": "./src/moma-gateway.ts"
+  },
+  "scripts": {
+    "start": "tsx src/moma-gateway.ts --port 8900",
+    "dev": "tsx watch src/moma-gateway.ts --port 8900",
+    "cli": "tsx src/gateswarm-cli.ts",
+    "benchmark": "tsx src/benchmark-logger.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^3.4.0",
+    "idb-keyval": "^6.2.1",
+    "onnxruntime-web": "^1.21.0",
+    "tiktoken": "^1.0.22"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.1.0"
+  },
+  "keywords": [
+    "mixture-of-agents",
+    "moma",
+    "llm-router",
+    "model-routing",
+    "intent-engine",
+    "complexity-scoring",
+    "openai-compatible",
+    "ai-gateway",
+    "cost-optimization",
+    "adaptive-inference"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pealmeida/gateswarm-moma-router.git"
+  },
+  "homepage": "https://github.com/pealmeida/gateswarm-moma-router#readme",
+  "bugs": {
+    "url": "https://github.com/pealmeida/gateswarm-moma-router/issues"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
