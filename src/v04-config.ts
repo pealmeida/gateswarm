@@ -10,7 +10,7 @@
 import { promises as fs } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import type { EffortLevel } from './types.js';
+import type { EffortLevel, IntentMode } from './types.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CONFIG_FILE = join(__dirname, '../v04_config.json');
@@ -28,6 +28,10 @@ export interface TierModelConfig {
   max_tokens: number;
   enable_thinking: boolean;
   fallback_models?: FallbackModel[];
+  plan_model?: string;
+  plan_provider?: string;
+  plan_max_tokens?: number;
+  plan_enable_thinking?: boolean;
 }
 
 export interface EnsembleWeightsConfig {
@@ -201,6 +205,44 @@ export function setEnsembleWeights(weights: Partial<EnsembleWeightsConfig>): voi
 
 export function getTierModel(tier: EffortLevel): TierModelConfig | null {
   return getConfig().tier_models[tier] ?? null;
+}
+
+export function getTierModelForMode(effort: EffortLevel, mode: IntentMode): TierModelConfig | null {
+  const tier = getConfig().tier_models[effort];
+  if (!tier) return null;
+  if (mode === 'plan' && tier.plan_model) {
+    return {
+      model: tier.plan_model,
+      provider: tier.plan_provider ?? tier.provider,
+      max_tokens: tier.plan_max_tokens ?? tier.max_tokens,
+      enable_thinking: tier.plan_enable_thinking ?? false,
+      fallback_models: tier.fallback_models,
+    };
+  }
+  return tier;
+}
+
+export function detectIntentMode(promptText: string): {
+  mode: IntentMode;
+  confidence: number;
+  planScore: number;
+  actScore: number;
+} {
+  const planKeywords = ['draft', 'outline', 'brainstorm', 'sketch', 'explore',
+    'what if', 'options', 'approach', 'consider', 'tradeoff', 'strategy',
+    'roadmap', 'plan', 'design', 'compare', 'pros and cons'];
+  const actKeywords = ['implement', 'build', 'code', 'fix', 'deploy',
+    'run', 'test', 'apply', 'merge', 'write the code', 'create the file'];
+  const lower = promptText.toLowerCase();
+  let planScore = 0;
+  let actScore = 0;
+  for (const kw of planKeywords) { if (lower.includes(kw)) planScore++; }
+  for (const kw of actKeywords) { if (lower.includes(kw)) actScore++; }
+  const maxScore = Math.max(planScore, actScore);
+  if (maxScore === 0) return { mode: 'auto', confidence: 0, planScore: 0, actScore: 0 };
+  const confidence = Math.min(maxScore / 3, 1);
+  const mode: IntentMode = planScore > actScore ? 'plan' : actScore > planScore ? 'act' : 'auto';
+  return { mode, confidence, planScore, actScore };
 }
 
 export function getAllTierModels(): Record<EffortLevel, TierModelConfig> {

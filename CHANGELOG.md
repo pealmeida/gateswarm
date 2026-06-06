@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.2] - 2026-06-06
+
+### Added
+- **Plan/Act router modes**: configure separate, cheaper models for planning (exploration/drafting)
+  vs. acting (implementation/execution) per complexity tier
+- `plan_model`, `plan_provider`, `plan_max_tokens`, `plan_enable_thinking` fields on all 6 tier configs
+- Auto-detection of intent mode via keyword scoring (16 plan keywords, 11 act keywords)
+- Explicit override via `body.mode` ("plan" | "act") or `X-Mode` request header
+- `X-Mode` and `X-Mode-Confidence` response headers on all routed requests
+- CLI commands: `mode-status` (view all tier plan/act models), `mode-set` (update plan_* config),
+  `mode-detect` (test auto-detection on prompt text)
+
 ## [0.5.1-direct-routing] — 2026-05-19
 
 ### Added

@@ -63,6 +63,10 @@
       "provider": "zai",
       "max_tokens": 256,
       "enable_thinking": false,
+      "plan_model": "glm-4.5-air",
+      "plan_provider": "zai",
+      "plan_max_tokens": 256,
+      "plan_enable_thinking": false,
       "fallback_models": [
         {
           "model": "MiniMax-M2.5",
@@ -83,6 +87,10 @@
       "provider": "zai",
       "max_tokens": 512,
       "enable_thinking": false,
+      "plan_model": "glm-4.5-air",
+      "plan_provider": "zai",
+      "plan_max_tokens": 512,
+      "plan_enable_thinking": false,
       "fallback_models": [
         {
           "model": "MiniMax-M2.5",
@@ -103,6 +111,10 @@
       "provider": "bailian",
       "max_tokens": 2048,
       "enable_thinking": false,
+      "plan_model": "glm-4.7-flash",
+      "plan_provider": "zai",
+      "plan_max_tokens": 1024,
+      "plan_enable_thinking": false,
       "fallback_models": [
         {
           "model": "qwen3.5-plus",
@@ -127,6 +139,10 @@
       "provider": "claude-cli",
       "max_tokens": 4096,
       "enable_thinking": true,
+      "plan_model": "MiniMax-M2.5",
+      "plan_provider": "bailian",
+      "plan_max_tokens": 2048,
+      "plan_enable_thinking": false,
       "fallback_models": [
         {
           "model": "cx/gpt-5.5-codex",
@@ -151,6 +167,10 @@
       "provider": "codex-cli",
       "max_tokens": 4096,
       "enable_thinking": false,
+      "plan_model": "qwen3.5-plus",
+      "plan_provider": "bailian",
+      "plan_max_tokens": 2048,
+      "plan_enable_thinking": false,
       "fallback_models": [
         {
           "model": "cc/claude-sonnet-4-6",
@@ -175,6 +195,10 @@
       "provider": "claude-cli",
       "max_tokens": 8192,
       "enable_thinking": true,
+      "plan_model": "qwen3.5-plus",
+      "plan_provider": "bailian",
+      "plan_max_tokens": 4096,
+      "plan_enable_thinking": true,
       "fallback_models": [
         {
           "model": "cx/gpt-5.5-codex",

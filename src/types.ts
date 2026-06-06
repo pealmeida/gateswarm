@@ -49,6 +49,8 @@ export type Tier = 'local' | 'gatekeeper' | 'cloud';
 
 export type EffortLevel = 'trivial' | 'light' | 'moderate' | 'heavy' | 'intensive' | 'extreme';
 
+export type IntentMode = 'plan' | 'act' | 'auto';
+
 export type ModelTier = 'nano' | 'small' | 'medium' | 'large' | 'cloud-light' | 'cloud-heavy';
 
 export type DeviceProfileName = 'desktop-high' | 'desktop-mid' | 'mobile-high' | 'mobile-low' | 'lowend';
@@ -64,6 +66,7 @@ export interface RoutingDecision {
   qualityScore: number;
   reason: string;
   profile: DeviceProfile;
+  mode?: IntentMode;
 }
 
 // ─── Gatekeeper ─────────────────────────────────────────

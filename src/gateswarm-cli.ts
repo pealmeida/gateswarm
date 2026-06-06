@@ -1,28 +1,32 @@
 #!/usr/bin/env npx tsx
 /**
- * GateSwarm MoMA Router v0.5.1 — CLI Providers + Direct Routing
+ * GateSwarm MoMA Router v0.5.2 — CLI Providers + Direct Routing + Plan/Act Mode
  *
  * Commands for configuring the model matrix, reasoning toggles,
  * retraining frequency, and checking v0.4 status.
  *
  * Usage:
- *   npx tsx src/gateswarm-cli.ts status           # Show v0.4 status
- *   npx tsx src/gateswarm-cli.ts models            # List tier models
+ *   npx tsx src/gateswarm-cli.ts status                          # Show v0.4 status
+ *   npx tsx src/gateswarm-cli.ts models                           # List tier models
  *   npx tsx src/gateswarm-cli.ts model <tier> <model> <provider>
- *   npx tsx src/gateswarm-cli.ts reasoning         # Show reasoning status
+ *   npx tsx src/gateswarm-cli.ts reasoning                        # Show reasoning status
  *   npx tsx src/gateswarm-cli.ts reasoning <tier> on|off
- *   npx tsx src/gateswarm-cli.ts retrain-freq      # Show retrain frequency
- *   npx tsx src/gateswarm-cli.ts retrain-freq <N>  # Set retrain after N interactions
- *   npx tsx src/gateswarm-cli.ts weights           # Show ensemble weights
+ *   npx tsx src/gateswarm-cli.ts retrain-freq                     # Show retrain frequency
+ *   npx tsx src/gateswarm-cli.ts retrain-freq <N>                 # Set retrain after N interactions
+ *   npx tsx src/gateswarm-cli.ts weights                          # Show ensemble weights
  *   npx tsx src/gateswarm-cli.ts weights <method> <value>
- *   npx tsx src/gateswarm-cli.ts feedback          # Show feedback stats
- *   npx tsx src/gateswarm-cli.ts rag               # Show RAG stats
- *   npx tsx src/gateswarm-cli.ts retrain           # Trigger manual retraining
- *   npx tsx src/gateswarm-cli.ts providers         # List all providers (v0.5.1)
+ *   npx tsx src/gateswarm-cli.ts feedback                         # Show feedback stats
+ *   npx tsx src/gateswarm-cli.ts rag                              # Show RAG stats
+ *   npx tsx src/gateswarm-cli.ts retrain                          # Trigger manual retraining
+ *   npx tsx src/gateswarm-cli.ts providers                        # List all providers (v0.5.1)
  *   npx tsx src/gateswarm-cli.ts direct <provider> <model> "prompt"  # Direct route (v0.5.1)
+ *   npx tsx src/gateswarm-cli.ts mode-status                      # Show Plan/Act model config (v0.5.2)
+ *   npx tsx src/gateswarm-cli.ts mode-set <tier> <field> <value>  # Set plan-mode field for tier (v0.5.2)
+ *   npx tsx src/gateswarm-cli.ts mode-detect "prompt text"        # Detect intent mode from prompt (v0.5.2)
  */
 
-import { loadConfig, getConfig, saveConfig, setTierModel, setTierThinking, setRetrainFrequency, setEnsembleWeights, getAllTierModels, getReasoningStatus } from './v04-config.js';
+import { loadConfig, getConfig, saveConfig, setTierModel, setTierThinking, setRetrainFrequency, setEnsembleWeights, getAllTierModels, getReasoningStatus, getTierModelForMode, detectIntentMode } from './v04-config.js';
+import type { IntentMode, EffortLevel } from './types.js';
 import { getInteractionCount, getFeedbackEntries, getTierAccuracy, shouldRetrain } from './feedback-store.js';
 import { getRagStats } from './rag-index.js';
 import { retrainIfNeeded } from './retraining.js';
@@ -105,7 +109,7 @@ const args = process.argv.slice(2);
 
 function printUsage() {
   console.log(`
-🧠 GateSwarm MoMA Router v0.5.1 — CLI Providers + Direct Routing
+🧠 GateSwarm MoMA Router v0.5.2 — CLI Providers + Direct Routing + Plan/Act Mode
 
 Core Commands:
   status                                    Show v0.4 system status
@@ -126,6 +130,13 @@ Core Commands:
   providers                                 List all providers and models
   direct <provider> <model> "prompt"        Direct route to provider/model
 
+Plan/Act Mode Commands (v0.5.2):
+  mode-status                               Show Plan/Act model configuration for all tiers
+  mode-set <tier> <field> <value>           Set a plan-mode field for a tier
+                                              Fields: plan_model, plan_provider,
+                                                      plan_max_tokens, plan_enable_thinking
+  mode-detect <prompt text>                 Detect intent mode (plan/act/auto) from prompt text
+
 Tiers: trivial, light, moderate, heavy, intensive, extreme
 Providers: zai, bailian, openrouter, claude-cli, codex-cli, pi-agent, hermes-agent, openclaw-agent
 
@@ -136,6 +147,10 @@ Examples:
   gateswarm weights heuristic 0.35
   gateswarm providers
   gateswarm direct claude-cli cc/claude-sonnet-4-6 "What is 2+2?"
+  gateswarm mode-status
+  gateswarm mode-set heavy plan_model qwen3.6-plus
+  gateswarm mode-set heavy plan_enable_thinking true
+  gateswarm mode-detect "draft an architecture plan for the new service"
 `);
 }
 
@@ -365,6 +380,61 @@ async function cmdDirect(provider: string, model: string, prompt: string) {
   console.log(`Model:  ${result.model}`);
 }
 
+// ─── v0.5.2: Plan/Act Mode Commands ─────────────────────
+
+async function cmdModeStatus() {
+  await loadConfig();
+  const tiers = getAllTierModels();
+  console.log('Plan/Act Model Configuration\n');
+  console.log('Tier         Act Model             Plan Model');
+  console.log('──────────── ───────────────────── ─────────────────────');
+  for (const [tier, tm] of Object.entries(tiers)) {
+    const actModel = tm.model;
+    const planModel = tm.plan_model ? tm.plan_model : '(same as act)';
+    console.log(`${tier.padEnd(13)}${actModel.padEnd(22)}${planModel}`);
+  }
+}
+
+async function cmdModeSet(tier: string, field: string, value: string) {
+  const validTiers = ['trivial', 'light', 'moderate', 'heavy', 'intensive', 'extreme'];
+  if (!validTiers.includes(tier)) {
+    console.error(`Invalid tier: ${tier}. Must be one of: ${validTiers.join(', ')}`);
+    process.exit(1);
+  }
+
+  const validFields = ['plan_model', 'plan_provider', 'plan_max_tokens', 'plan_enable_thinking'];
+  if (!validFields.includes(field)) {
+    console.error(`Invalid field: ${field}. Must be one of: ${validFields.join(', ')}`);
+    process.exit(1);
+  }
+
+  await loadConfig();
+  const cfg = getConfig();
+  const tierCfg = cfg.tier_models[tier as EffortLevel];
+
+  if (field === 'plan_max_tokens') {
+    const n = parseInt(value, 10);
+    if (isNaN(n) || n <= 0) {
+      console.error('plan_max_tokens must be a positive integer');
+      process.exit(1);
+    }
+    (tierCfg as any)[field] = n;
+  } else if (field === 'plan_enable_thinking') {
+    (tierCfg as any)[field] = value === 'true' || value === '1' || value === 'on';
+  } else {
+    (tierCfg as any)[field] = value;
+  }
+
+  await saveConfig();
+  console.log(`Set ${tier}.${field} = ${value}`);
+}
+
+async function cmdModeDetect(promptText: string) {
+  const result = detectIntentMode(promptText);
+  const pct = (result.confidence * 100).toFixed(0);
+  console.log(`Mode: ${result.mode}, Confidence: ${pct}%, Plan score: ${result.planScore}, Act score: ${result.actScore}`);
+}
+
 async function main() {
   if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
     printUsage();
@@ -418,6 +488,24 @@ async function main() {
       break;
     case 'training':
       await cmdTraining(args[1], args[2]);
+      break;
+    case 'mode-status':
+      await cmdModeStatus();
+      break;
+    case 'mode-set':
+      if (args.length < 4) {
+        console.error('Usage: gateswarm mode-set <tier> <field> <value>');
+        console.error('  Fields: plan_model, plan_provider, plan_max_tokens, plan_enable_thinking');
+        process.exit(1);
+      }
+      await cmdModeSet(args[1], args[2], args[3]);
+      break;
+    case 'mode-detect':
+      if (args.length < 2) {
+        console.error('Usage: gateswarm mode-detect <prompt text>');
+        process.exit(1);
+      }
+      await cmdModeDetect(args.slice(1).join(' '));
       break;
 
     default:

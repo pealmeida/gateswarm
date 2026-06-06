@@ -56,8 +56,8 @@ import { recordFeedback, getInteractionCount, getFeedbackEntries, getTierAccurac
 import { selfEvaluate } from './self-eval.js';
 import { addRagEntry, initRagIndex, startRagAutoFlush } from './rag-index.js';
 import { retrainIfNeeded, getActiveWeights } from './retraining.js';
-import { getConfig, getTierModel, getAllTierModels, getReasoningStatus, saveConfig } from './v04-config.js';
-import type { EffortLevel } from './types.js';
+import { getConfig, getTierModel, getAllTierModels, getReasoningStatus, saveConfig, getTierModelForMode, detectIntentMode } from './v04-config.js';
+import type { EffortLevel, IntentMode } from './types.js';
 import { agentRegistry, AgentConfig } from './agent-registry.js';
 import { estimateTokens } from './token-estimator.js';
 import { getCliProvidersEnabled } from './v04-config.js';
@@ -525,6 +525,14 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
 
 
 
+// Mode override: body.mode or X-Mode header; else auto-detect
+  let modeOverride: IntentMode | null = null;
+  if (body.mode === 'plan' || body.mode === 'act') modeOverride = body.mode as IntentMode;
+  if (!modeOverride && req.headers['x-mode']) {
+    const hdr = (req.headers['x-mode'] as string).trim().toLowerCase();
+    if (hdr === 'plan' || hdr === 'act') modeOverride = hdr as IntentMode;
+  }
+
 // ─── v0.5.1: Direct Routing Bypass ──────────────────────────
   // Users can skip complexity scoring by specifying provider+model directly.
   // Three methods supported (in priority order):
@@ -552,10 +560,14 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
     || body.session
     || `${agent.id}:${promptText.slice(0, 100)}`;
 
+  const modeDetection = detectIntentMode(promptText);
+  const activeMode: IntentMode = modeOverride ?? modeDetection.mode;
+  const tierModelConfig = getTierModelForMode(effort, activeMode);
+
   const continuity = getContinuity(sessionId);
-  if (continuity && continuity.lastModel !== (getTierModel(effort)?.model ?? '')) {
+  if (continuity && continuity.lastModel !== (tierModelConfig?.model ?? '')) {
     // Model switch detected — inject continuity summary
-    console.log(`🔄 [${agent.name}] Model switch: ${continuity.lastModel} → ${getTierModel(effort)?.model}`);
+    console.log(`🔄 [${agent.name}] Model switch: ${continuity.lastModel} → ${tierModelConfig?.model}`);
   }
 
   const resolved = agentRegistry.resolveModel(agent, effort);
@@ -764,7 +776,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
     }
 
     const url = `${baseUrl}/chat/completions`;
-    const tierModel = getTierModel(effort);
+    const tierModel = tierModelConfig ?? getTierModel(effort);
     const payload: any = { ...body, model, messages: compressedMessages };
     // v3.6: Only send enable_thinking to ZAI when TRUE — ZAI rejects enable_thinking=false
     if (tierModel?.enable_thinking === true && providerId === 'zai') {
@@ -800,7 +812,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
 
     // Build retry chain: primary → fallback_models from v04 config
     const retryTargets: RetryTarget[] = [initial];
-    const tierCfg = getTierModel(effort);
+    const tierCfg = tierModelConfig ?? getTierModel(effort);
     if (tierCfg) {
       const fbModels = (tierCfg as any).fallback_models as Array<{model: string; provider: string}> | undefined;
       if (fbModels) {
@@ -998,6 +1010,8 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
         });
       }
 
+      res.setHeader('X-Mode', activeMode);
+      res.setHeader('X-Mode-Confidence', modeDetection.confidence.toFixed(2));
       return jsonResponse(res, 200, data);
     } catch (err: any) {
       console.error(`❌ Provider error: ${err.message}`);
