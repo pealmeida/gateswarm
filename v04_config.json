@@ -59,7 +59,7 @@
   },
   "tier_models": {
     "trivial": {
-      "model": "glm-4.7",
+      "model": "glm-4.5-air",
       "provider": "zai",
       "max_tokens": 256,
       "enable_thinking": false,
@@ -83,12 +83,12 @@
       ]
     },
     "light": {
-      "model": "glm-4.7",
-      "provider": "zai",
+      "model": "deepseek-v4-flash",
+      "provider": "opencodego",
       "max_tokens": 512,
       "enable_thinking": false,
-      "plan_model": "glm-4.5-air",
-      "plan_provider": "zai",
+      "plan_model": "deepseek-v4-flash",
+      "plan_provider": "opencodego",
       "plan_max_tokens": 512,
       "plan_enable_thinking": false,
       "fallback_models": [
