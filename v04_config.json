@@ -107,12 +107,12 @@
       ]
     },
     "moderate": {
-      "model": "MiniMax-M2.5",
-      "provider": "bailian",
+      "model": "glm-4.7",
+      "provider": "zai",
       "max_tokens": 2048,
       "enable_thinking": false,
-      "plan_model": "glm-4.7-flash",
-      "plan_provider": "zai",
+      "plan_model": "cx/gpt-5.4-codex",
+      "plan_provider": "codex-cli",
       "plan_max_tokens": 1024,
       "plan_enable_thinking": false,
       "fallback_models": [
@@ -135,12 +135,12 @@
       ]
     },
     "heavy": {
-      "model": "cc/claude-sonnet-4-6",
-      "provider": "claude-cli",
+      "model": "deepseek-v4-pro",
+      "provider": "opencodego",
       "max_tokens": 4096,
       "enable_thinking": true,
-      "plan_model": "MiniMax-M2.5",
-      "plan_provider": "bailian",
+      "plan_model": "cx/gpt-5.5-codex",
+      "plan_provider": "codex-cli",
       "plan_max_tokens": 2048,
       "plan_enable_thinking": false,
       "fallback_models": [
@@ -163,12 +163,12 @@
       ]
     },
     "intensive": {
-      "model": "cx/gpt-5.5-codex",
-      "provider": "codex-cli",
+      "model": "glm-5.1",
+      "provider": "zai",
       "max_tokens": 4096,
       "enable_thinking": false,
-      "plan_model": "qwen3.5-plus",
-      "plan_provider": "bailian",
+      "plan_model": "cc/claude-sonnet-4-6",
+      "plan_provider": "claude-cli",
       "plan_max_tokens": 2048,
       "plan_enable_thinking": false,
       "fallback_models": [
@@ -191,12 +191,12 @@
       ]
     },
     "extreme": {
-      "model": "cc/claude-opus-4-7",
-      "provider": "claude-cli",
+      "model": "qwen3.7-plus",
+      "provider": "opencodego",
       "max_tokens": 8192,
       "enable_thinking": true,
-      "plan_model": "qwen3.5-plus",
-      "plan_provider": "bailian",
+      "plan_model": "cc/claude-opus-4-8",
+      "plan_provider": "claude-cli",
       "plan_max_tokens": 4096,
       "plan_enable_thinking": true,
       "fallback_models": [

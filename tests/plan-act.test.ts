@@ -82,10 +82,10 @@ describe('getTierModelForMode', () => {
     }
   });
 
-  it('mode "plan" on heavy returns plan_model "MiniMax-M2.5" and plan_enable_thinking false', () => {
+  it('mode "plan" on heavy returns plan_model "cx/gpt-5.5-codex" and plan_enable_thinking false', () => {
     const result = getTierModelForMode('heavy', 'plan');
     expect(result).not.toBeNull();
-    expect(result!.model).toBe('MiniMax-M2.5');
+    expect(result!.model).toBe('cx/gpt-5.5-codex');
     expect(result!.enable_thinking).toBe(false);
   });
 
