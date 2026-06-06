@@ -1243,7 +1243,7 @@ async function init() {
         return jsonResponse(res, 200, {
           status: 'healthy',
           router: 'GateSwarm MoMA Router v0.5.1 (CLI Providers + Direct Routing Bypass)',
-          turboquant: 'v3.7 (structure-aware + dynamic KV + RAG + CWM + RTK output filter)',
+          turboquant: 'v3.6',
           ensemble: 'enabled',
           feedback: 'enabled',
           llmJudge: 'bailian/qwen3.5-plus',
@@ -1254,9 +1254,6 @@ async function init() {
           timestamp: new Date().toISOString(),
           providers: agentRegistry.getProviders().map(p => {
             const base: any = { id: p.id, name: p.name, type: p.type ?? 'http-api' };
-            if ((p as any).data_sources) {
-              base.data_sources = (p as any).data_sources;
-            }
             if (p.type === 'cli-agent') {
               return { ...base, quota: agentRegistry.getCliProviderQuotaStatus(p.id) };
             }

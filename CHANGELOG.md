@@ -13,8 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `X-Direct-Provider` / `X-Direct-Model` headers — header-based override
   - `provider/model` syntax in model field — e.g. `"cc/claude-sonnet-4-6"`, `"bailian/qwen3.5-plus"`
   - CLI providers: Claude Code (`cc/`), Codex (`cx/`), Pi (`pi/`), Hermes (`hm/`), OpenClaw (`oc/`)
-- **Provider Listing Endpoint** — `GET /v05/providers` lists all HTTP + CLI providers with types, health, quota
-- **Direct Chat Endpoint** — `POST /v05/direct/chat` for direct routing without agent lookup
+- **Provider Listing Endpoint** — `GET /v1/providers` lists all HTTP + CLI providers with types, health, quota
+- **Direct Chat Endpoint** — `POST /v1/direct/chat` for direct routing without agent lookup
 - **CLI Provider Context Windows** — `turboquant-compressor.ts` v0.5 extension with per-CLI-provider context windows
 
 ### Changed
@@ -140,44 +140,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Intent-engine boundary mismatch (code synced with weights.json)
 - Version labels: all updated to v0.4
 
----
-
-## [Unreleased — v0.4.0 Planned]
-
-### Added (Planned)
-- **Ensemble Voter** — Combines heuristic (40%), cascade (30%), RAG context (15%), and history bias (15%) for improved accuracy
-- **RAG Index** — TurboQuant compressed history as retrievable context for feature extraction
-- **Self-Optimizing Feedback Loop** — SQLite feedback buffer, periodic LLM judge, automatic retraining with hot-swap
-- **25-Feature Extractor** — Extended from 15 to 25 features (domain detection, code block size, entity count, novelty score, etc.)
-- **Confidence-Based Routing** — Routes one tier higher when ensemble confidence is low
-- **A/B Testing Framework** — 10% holdout for weight comparison before full deployment
-- **Metrics Dashboard** — Per-tier accuracy, cost, latency, and misrouting rate tracking
-
-### Changed (Planned)
-- Router accuracy targets: overall ≥85%, moderate ≥80%, heavy ≥75%, intensive ≥70% (from 74.7%/42%/39%/19%)
-- Gradual rollout: heuristic-only → ensemble read-only → A/B → full deployment
-
-### Fixed (Planned)
-- Gateway `compressedMessages` crash bug (used before declaration)
-- Intent-engine boundary mismatch (code vs weights.json)
-- All version labels updated to v3.5/v0.4
-
----
-
-## [1.0.0-mvp] - 2025-05-05
-
-### Added
-- Intent Engine with heuristic complexity scoring (6 effort levels)
-- 6×5 Effort × Device routing matrix (30 cells, 7 models)
-- 3 adapter backends: Local (WebGPU/WASM), Cloud (SSE streaming), CLI (Ollama)
-- Self-improving self-improvement learning loop
-- CLI with interactive mode, single query, pipeline test, model listing
-- Read-only metrics dashboard with auto-refresh
-- Metrics HTTP server (GET/POST/DELETE)
-- WebGPU ONNX model loader (WebGPU → WebNN → WASM cascade)
-- Tauri v2 desktop wrapper with Rust intent scorer
-- Training dataset: 549 balanced prompts across 36 categories
-- DeBERTa fine-tuning guide for RunPod (1,047 lines)
-- Rust evaluation (Tauri vs Electron analysis)
-- 75 unit tests + 5 live Ollama tests
-- Documentation: ARCHITECTURE, PRD, REQUIREMENTS, IMPLEMENTATION_PLAN, QUICKSTART

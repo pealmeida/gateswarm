@@ -1,10 +1,10 @@
 {
-  "name": "gateswarm-gateway",
+  "name": "gateswarm-router",
   "version": "0.5.1",
   "description": "GateSwarm MoMA Gateway v0.5.1 — CLI Providers + Direct Routing Bypass.",
   "type": "module",
-  "main": "src/moma-gateway.ts",
-  "types": "src/moma-gateway.ts",
+  "main": "dist/moma-gateway.js",
+  "types": "dist/moma-gateway.d.ts",
   "exports": {
     ".": {
       "import": "./src/moma-gateway.ts",
@@ -37,6 +37,8 @@
     "gateswarm-gateway": "./src/moma-gateway.ts"
   },
   "scripts": {
+    "build": "tsc --outDir dist --declaration",
+    "prepublishOnly": "npm run build && npm test",
     "start": "tsx src/moma-gateway.ts --port 8900",
     "dev": "tsx watch src/moma-gateway.ts --port 8900",
     "cli": "tsx src/gateswarm-cli.ts",
@@ -47,10 +49,12 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
-    "@huggingface/transformers": "^3.4.0",
     "idb-keyval": "^6.2.1",
-    "onnxruntime-web": "^1.21.0",
     "tiktoken": "^1.0.22"
+  },
+  "optionalDependencies": {
+    "@huggingface/transformers": "^3.4.0",
+    "onnxruntime-web": "^1.21.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
@@ -73,11 +77,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/pealmeida/gateswarm-moma-router.git"
+    "url": "git+https://github.com/pealmeida/gateswarm-router.git"
   },
-  "homepage": "https://github.com/pealmeida/gateswarm-moma-router#readme",
+  "homepage": "https://github.com/pealmeida/gateswarm-router#readme",
   "bugs": {
-    "url": "https://github.com/pealmeida/gateswarm-moma-router/issues"
+    "url": "https://github.com/pealmeida/gateswarm-router/issues"
   },
   "engines": {
     "node": ">=18.0.0"
