@@ -147,7 +147,7 @@ export const DEFAULT_CLI_PROVIDERS: Record<string, CliProviderEntry> = {
     id: 'claude-cli',
     name: 'Claude Code CLI',
     type: 'cli-agent',
-    models: ['cc/claude-sonnet-4-6', 'cc/claude-opus-4-7', 'cc/claude-haiku-4-5'],
+    models: ['cc/claude-sonnet-4-6', 'cc/claude-opus-4-7', 'cc/claude-opus-4-8', 'cc/claude-haiku-4-5'],
     cliConfig: {
       command: 'claude',
       argsTemplate: ['--print', '--model', '{model}', '-p', '{prompt}'],
@@ -160,6 +160,7 @@ export const DEFAULT_CLI_PROVIDERS: Record<string, CliProviderEntry> = {
       modelAlias: {
         'cc/claude-sonnet-4-6': 'claude-sonnet-4-6',
         'cc/claude-opus-4-7': 'claude-opus-4-7',
+        'cc/claude-opus-4-8': 'claude-opus-4-8',
         'cc/claude-haiku-4-5': 'claude-haiku-4-5',
       },
       healthCheck: { command: 'claude --version', expectedExitCode: 0 },
@@ -309,6 +310,17 @@ export class AgentRegistry {
       baseUrl: process.env.OPENROUTER_BASE || 'https://openrouter.ai/api/v1',
       apiKey: process.env.OPENROUTER_API_KEY || '',
       models: ['owl-alpha', 'glm-4.7-flash', 'qwen-plus', 'gemini-2.5-flash', 'claude-sonnet-4.6', 'claude-opus-4.6'],
+    });
+
+    this.registerProvider({
+      id: 'opencodego',
+      name: 'OpenCode Go (Multi-model)',
+      type: 'http-api',
+      baseUrl: process.env.OPENCODEGO_BASE || 'https://opencode.ai/zen/go/v1',
+      apiKey: process.env.OPENCODEGO_KEY || '',
+      models: ['deepseek-v4-flash', 'deepseek-v4-pro', 'qwen3.7-plus', 'qwen3.7-max',
+               'qwen3.6-plus', 'kimi-k2.5', 'kimi-k2.6', 'glm-5', 'glm-5.1',
+               'minimax-m3', 'minimax-m2.7', 'mimo-v2.5', 'mimo-v2.5-pro'],
     });
 
     // Load persisted state (providers + agents)

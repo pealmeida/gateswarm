@@ -151,6 +151,20 @@ function resolveProviderId(prefix: string): string | null {
  * Execute direct route — skip all classification/RAG/fallback logic.
  * Validates provider, dispatches to CLI or HTTP as appropriate.
  */
+/** Emit X-Mode / X-Mode-Confidence headers. Reads explicit override from X-Mode request header;
+ *  falls back to detectIntentMode on promptText. */
+function emitModeHeaders(req: IncomingMessage, res: ServerResponse, promptText: string): void {
+  const reqMode = (req.headers['x-mode'] as string | undefined)?.trim().toLowerCase();
+  if (reqMode === 'plan' || reqMode === 'act') {
+    res.setHeader('X-Mode', reqMode);
+    res.setHeader('X-Mode-Confidence', '1.00');
+  } else {
+    const det = detectIntentMode(promptText);
+    res.setHeader('X-Mode', det.mode);
+    res.setHeader('X-Mode-Confidence', det.confidence.toFixed(2));
+  }
+}
+
 async function handleDirectRoute(
   req: IncomingMessage,
   res: ServerResponse,
@@ -186,7 +200,7 @@ async function handleDirectRoute(
 
   // CLI provider dispatch
   if (agentRegistry.isCliProvider(providerId)) {
-    return handleCliProviderDirect(providerId, model, agent, sanitizedMessages, res);
+    return handleCliProviderDirect(providerId, model, agent, sanitizedMessages, res, req, promptText);
   }
 
   // HTTP provider dispatch
@@ -233,6 +247,7 @@ async function handleDirectRoute(
       status: 'success',
     });
 
+    emitModeHeaders(req, res, promptText);
     return jsonResponse(res, 200, data);
   } catch (err: any) {
     console.error(`❌ Direct route error (${providerId}): ${err.message}`);
@@ -249,6 +264,8 @@ async function handleCliProviderDirect(
   agent: AgentConfig,
   messages: any[],
   res: ServerResponse,
+  req?: IncomingMessage,
+  promptText?: string,
 ): Promise<void> {
   const cliConfig = agentRegistry.getCliProviderConfig(providerId);
   if (!cliConfig) {
@@ -301,6 +318,7 @@ async function handleCliProviderDirect(
       choices: [{ index: 0, message: { role: 'assistant', content: result.content }, finish_reason: result.finishReason }],
       usage: result.usage || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
     };
+    if (req) emitModeHeaders(req, res, promptText || '');
     return jsonResponse(res, 200, openaiResponse);
   } catch (err: any) {
     console.error(`❌ CLI provider error (direct, ${providerId}): ${err.message}`);
