@@ -330,8 +330,8 @@ async function cmdRetrain() {
   console.log('🔄 Triggering manual retraining...');
   const result = await retrainIfNeeded();
   if (result.retrained) {
-    console.log(`✅ Retraining complete. Accuracy: ${(result.accuracy! * 100).toFixed(1)}%`);
-    console.log('   New weights hot-swapped (no restart needed).');
+    console.log(`✅ Retraining complete. Accuracy: ${((result.accuracyBefore ?? 0) * 100).toFixed(1)}% → ${((result.accuracyAfter ?? 0) * 100).toFixed(1)}%`);
+    console.log(`   Recalibrated tier boundaries: ${JSON.stringify(result.boundaries)} (live, no restart needed).`);
   } else {
     console.log('⏭️  Not enough data for retraining yet.');
     console.log('   Need min 50 samples per tier with LLM-judged ground truth.');

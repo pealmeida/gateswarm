@@ -189,45 +189,47 @@ function zeroFeatures(): FeatureVector {
 }
 
 /**
- * Compute v3.3 heuristic score from features.
+ * Compute heuristic complexity score from features.
+ *
+ * v0.5.2 recalibration: the previous formula relied almost entirely on
+ * architecture/design lexicon and produced near-zero scores for natural-language
+ * prompts, leaving moderate/heavy/intensive indistinguishable (all ≈0.04). The
+ * dominant, most reliable complexity signal — prompt length/structure — was unused
+ * except as a gate on the system bonus.
+ *
+ * This version makes length + structure first-class while keeping the lexical
+ * signals as secondary discriminators. Calibrated against a labeled golden set
+ * (see eval/): monotonic per-tier medians, ~48% exact / ~86% adjacent accuracy.
+ * Tier boundaries that pair with this score live in scoreToEffort()/v04_config.json.
  */
 export function heuristicScoreFromFeatures(features: FeatureVector, wordCount: number): number {
   const t = features;
-  const archSignal = t.has_architecture + t.has_design;
-  const codeSignal = t.has_code;
-  const impSignal = t.has_imperative;
 
-  // Architecture/design: 0.12 per signal (max 0.24 for both)
-  const archScore = Math.min(archSignal * 0.12, 0.24);
-  // Code keywords: 0.08
-  const codeScore = codeSignal * 0.08;
-  // Imperative verbs: 0.04
-  const imperativeScore = impSignal * 0.04;
-  // Weak signals (questions, arithmetic, sequential)
-  const weakSignals = (t.has_question + t.has_arithmetic + t.has_sequential) * 0.01;
-  // Constraints
-  const constraintScore = t.has_constraint * 0.03;
-  // Context requirements
-  const contextScore = t.has_context * 0.03;
-  // Technical terms: 0.04 each, max 0.20
-  const techTermScore = Math.min(t.technical_terms * 0.04, 0.20);
-
-  // System bonus: architecture-level prompts with many tech terms get big bonus
-  // This is the key differentiator for extreme tier
+  // Length: dominant complexity signal, saturating (log1p, ~45 words → full weight)
+  const lengthScore = Math.min(Math.log1p(wordCount) / Math.log1p(45), 1) * 0.34;
+  // Structure: multiple sentences/clauses indicate compound requests
+  const structScore = (Math.min(t.sentence_count, 5) / 5) * 0.10;
+  // Architecture & design lexicon (max 0.20)
+  const archScore = Math.min((t.has_architecture + t.has_design) * 0.10, 0.20);
+  // Technical terms, saturating (max 0.12)
+  const techScore = Math.min(t.technical_terms * 0.025, 0.12);
+  // Code presence (inline + fenced block)
+  const codeScore = t.has_code * 0.05 + (t.code_block_size > 0 ? 0.05 : 0);
+  // Reasoning / constraint signals
+  const reasonScore =
+    t.has_constraint * 0.04 + t.has_context * 0.03 + t.multi_step * 0.04 +
+    t.has_negation * 0.02 + t.has_sequential * 0.02;
+  // Domain specificity & user expertise
+  const domainScore = t.multi_domain * 0.05 + t.user_expertise_level * 0.03 +
+    ((t.domain_finance + t.domain_legal + t.domain_medical + t.domain_engineering) > 0 ? 0.03 : 0);
+  // System-design bonus: compound complexity (architecture + many tech terms + length)
   const sysCount = t.has_architecture + t.technical_design +
     (t.technical_terms > 3 ? 1 : 0) + t.multi_domain;
-  let systemBonus = 0;
-  if (wordCount >= 10 && sysCount >= 3) systemBonus = 0.20;
-  else if (wordCount >= 10 && sysCount >= 2) systemBonus = 0.15;
-  else if (wordCount >= 8 && sysCount >= 2) systemBonus = 0.10;
-  else if (wordCount >= 6 && sysCount >= 2) systemBonus = 0.06;
-  else if (sysCount >= 2) systemBonus = 0.03;
+  const systemBonus = wordCount >= 12 && sysCount >= 3 ? 0.12
+    : wordCount >= 10 && sysCount >= 2 ? 0.06 : 0;
 
-  // Multi-step reasoning bonus
-  const multiStepBonus = t.multi_step * 0.05;
-
-  let score = archScore + codeScore + imperativeScore + weakSignals +
-    constraintScore + contextScore + techTermScore + systemBonus + multiStepBonus;
+  const score = lengthScore + structScore + archScore + techScore + codeScore +
+    reasonScore + domainScore + systemBonus;
 
   return Math.min(Math.max(score, 0), 1);
 }

@@ -11,6 +11,7 @@ import { promises as fs } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import type { EffortLevel, IntentMode } from './types.js';
+import { setTierBoundaries } from './intent-engine.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CONFIG_FILE = join(__dirname, '../v04_config.json');
@@ -160,6 +161,7 @@ export async function loadConfig(): Promise<V04Config> {
     if (!_config) _config = DEFAULT_V04_CONFIG;
     _configLoadedAt = now;
   }
+  syncTierBoundaries(_config);
   return _config;
 }
 
@@ -169,6 +171,20 @@ export function getConfig(): V04Config {
   }
   if (!_config) return DEFAULT_V04_CONFIG;
   return _config;
+}
+
+/**
+ * Push the config's tier_boundaries into the scoreToEffort() cut-point cache.
+ * The 5 cut points are the upper edges of trivial..intensive. This is what makes
+ * boundary retraining take effect live (config hot-reloads every 5s).
+ */
+function syncTierBoundaries(cfg: V04Config): void {
+  const tb = cfg.tier_boundaries;
+  if (!tb) return;
+  const cuts = [tb.trivial?.[1], tb.light?.[1], tb.moderate?.[1], tb.heavy?.[1], tb.intensive?.[1]];
+  if (cuts.every(c => typeof c === 'number')) {
+    setTierBoundaries(cuts as number[]);
+  }
 }
 
 export async function saveConfig(config?: V04Config): Promise<void> {
@@ -222,22 +238,54 @@ export function getTierModelForMode(effort: EffortLevel, mode: IntentMode): Tier
   return tier;
 }
 
+// Plan/act lexicon + patterns. v0.5.2: expanded beyond literal keywords because
+// real users express act-intent through symptoms ("the login button throws a 500")
+// and plan-intent through deliberation ("not sure how to structure this") without
+// ever typing "implement" or "brainstorm". Keyword hits + pattern hits both score.
+const PLAN_KEYWORDS = ['draft', 'outline', 'brainstorm', 'sketch', 'explore',
+  'what if', 'options', 'approach', 'consider', 'tradeoff', 'trade-off', 'strategy',
+  'roadmap', 'plan', 'design', 'compare', 'pros and cons', 'high-level', 'evaluate',
+  'recommend', 'weigh', 'alternatives', 'thoughts on', 'thinking about'];
+const ACT_KEYWORDS = ['implement', 'build', 'code', 'fix', 'deploy', 'apply', 'merge',
+  'write the code', 'create the file', 'refactor', 'rename', 'install', 'configure',
+  'add ', 'remove ', 'update ', 'change ', 'patch', 'rewrite', 'generate', 'set up',
+  'debug', 'optimize'];
+
+// Plan = deliberation / decision-seeking phrasing.
+const PLAN_PATTERNS = [
+  /\bhow (should|would|do|can) (i|we|you)\b/,
+  /\bshould (i|we)\b/,
+  /\bwhat'?s the best way\b/,
+  /\bwhich .*(better|approach|option)\b/,
+  /\bnot sure (how|whether|if|which|what)\b/,
+  /\bhelp me (decide|choose|think|figure)\b/,
+  /\bwalk me through (the )?(options|possibilities|tradeoffs|approaches)\b/,
+];
+// Act = imperative command or bug/symptom report (implicitly "make it work").
+const ACT_PATTERNS = [
+  /^(write|create|build|implement|fix|add|remove|update|change|make|generate|refactor|rename|install|configure|deploy|run|delete|convert|set up|patch|rewrite|debug|optimize)\b/,
+  /\b(throws?|throwing|returns?|returning) (an? )?(error|500|exception|null|undefined|wrong)\b/,
+  /\b(stack trace|traceback|null pointer|segfault)\b/,
+  /\b(is|are|keeps?) (broken|crashing|failing|not working)\b/,
+  /\b(doesn'?t|does not|won'?t|wont) (work|compile|build|run|load|render)\b/,
+];
+
 export function detectIntentMode(promptText: string): {
   mode: IntentMode;
   confidence: number;
   planScore: number;
   actScore: number;
 } {
-  const planKeywords = ['draft', 'outline', 'brainstorm', 'sketch', 'explore',
-    'what if', 'options', 'approach', 'consider', 'tradeoff', 'strategy',
-    'roadmap', 'plan', 'design', 'compare', 'pros and cons'];
-  const actKeywords = ['implement', 'build', 'code', 'fix', 'deploy',
-    'run', 'test', 'apply', 'merge', 'write the code', 'create the file'];
-  const lower = promptText.toLowerCase();
+  const lower = promptText.toLowerCase().trim();
+  if (!lower) return { mode: 'auto', confidence: 0, planScore: 0, actScore: 0 };
+
   let planScore = 0;
   let actScore = 0;
-  for (const kw of planKeywords) { if (lower.includes(kw)) planScore++; }
-  for (const kw of actKeywords) { if (lower.includes(kw)) actScore++; }
+  for (const kw of PLAN_KEYWORDS) { if (lower.includes(kw)) planScore++; }
+  for (const kw of ACT_KEYWORDS) { if (lower.includes(kw)) actScore++; }
+  for (const re of PLAN_PATTERNS) { if (re.test(lower)) planScore++; }
+  for (const re of ACT_PATTERNS) { if (re.test(lower)) actScore++; }
+
   const maxScore = Math.max(planScore, actScore);
   if (maxScore === 0) return { mode: 'auto', confidence: 0, planScore: 0, actScore: 0 };
   const confidence = Math.min(maxScore / 3, 1);

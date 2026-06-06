@@ -773,7 +773,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
 
     return handleCliProvider(
       providerId, model, agent, messages, effort,
-      compressionResult, promptText, res,
+      compressionResult, promptText, res, score,
     );
   }
   if (isCli && agent.id === providerId) {
@@ -965,6 +965,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
         adequacyScore: null,
         escalated: false,
         userSatisfaction: null,
+        score,
       });
 
       selfEvaluate({
@@ -1042,7 +1043,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
       console.log(`📝 [${agent.name}] Streaming disabled for CLI provider ${providerId}, using sync dispatch`);
       return handleCliProvider(
         providerId, model, agent, messages, effort,
-        compressionResult, promptText, res,
+        compressionResult, promptText, res, score,
       );
     }
     if (agentRegistry.isCliProvider(providerId) && agent.id === providerId) {
@@ -1071,6 +1072,7 @@ async function handleCliProvider(
   compressionResult: any,
   promptText: string,
   res: ServerResponse,
+  score: number = 0,
 ): Promise<void> {
   const cliConfig = agentRegistry.getCliProviderConfig(providerId);
   if (!cliConfig) {
@@ -1143,6 +1145,7 @@ async function handleCliProvider(
       adequacyScore: null,
       escalated: false,
       userSatisfaction: null,
+      score,
     });
 
     // Self-eval (non-blocking)
@@ -1537,10 +1540,12 @@ async function init() {
         const result = await retrainIfNeeded();
         return jsonResponse(res, 200, {
           retrained: result.retrained,
-          accuracy: result.accuracy,
+          accuracyBefore: result.accuracyBefore,
+          accuracyAfter: result.accuracyAfter,
+          boundaries: result.boundaries,
           message: result.retrained
-            ? 'Weights retrained and hot-swapped'
-            : 'Not enough data for retraining',
+            ? `Tier boundaries recalibrated and applied live (${result.reason})`
+            : `No retraining: ${result.reason ?? 'not enough data'}`,
         });
       }
 

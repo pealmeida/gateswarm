@@ -27,6 +27,7 @@ export interface FeedbackEntry {
   adequacyScore: number | null;    // 0.0–1.0, null = not judged yet
   escalated: boolean;
   userSatisfaction: number | null; // 1-5, null = not rated
+  score?: number;                  // v0.5.2: routing complexity score (enables boundary recalibration)
 }
 
 // ─── Persistence Layer ──────────────────────────────────────────
@@ -107,6 +108,7 @@ export function recordFeedback(entry: Omit<FeedbackEntry, 'id' | 'timestamp' | '
     adequacyScore: entry.adequacyScore,
     escalated: entry.escalated,
     userSatisfaction: entry.userSatisfaction,
+    score: entry.score,
   });
 
   _totalInteractions++;

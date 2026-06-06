@@ -162,11 +162,34 @@ export function v33Score(prompt: string): V33ScoreResult {
 }
 
 // Canonical tier-boundary mapping. Matches v04_config.json tier_boundaries.
+// v0.5.2: recalibrated for the length/structure-aware heuristic (see eval/),
+// and made CONFIG-DRIVEN so the training loop can recalibrate boundaries from
+// real labels without a code change. The 5 cut points are kept in a module-level
+// cache with a validated setter; defaults are the calibrated values.
+const DEFAULT_BOUNDARIES: [number, number, number, number, number] = [0.21, 0.28, 0.32, 0.37, 0.46];
+let _boundaries: [number, number, number, number, number] = [...DEFAULT_BOUNDARIES];
+
+/** Update tier cut points (e.g. after retraining). Ignores invalid/non-monotonic input. */
+export function setTierBoundaries(b: number[]): boolean {
+  if (!Array.isArray(b) || b.length !== 5) return false;
+  for (let i = 0; i < 5; i++) {
+    if (typeof b[i] !== 'number' || b[i] <= 0 || b[i] >= 1) return false;
+    if (i > 0 && b[i] <= b[i - 1]) return false; // must be strictly increasing
+  }
+  _boundaries = [b[0], b[1], b[2], b[3], b[4]];
+  return true;
+}
+
+export function getTierBoundaries(): number[] {
+  return [..._boundaries];
+}
+
 export function scoreToEffort(score: number): EffortLevel {
-  if (score < 0.1557) return 'trivial';
-  if (score < 0.1842) return 'light';
-  if (score < 0.2788) return 'moderate';
-  if (score < 0.3488) return 'heavy';
-  if (score < 0.4611) return 'intensive';
+  const [b0, b1, b2, b3, b4] = _boundaries;
+  if (score < b0) return 'trivial';
+  if (score < b1) return 'light';
+  if (score < b2) return 'moderate';
+  if (score < b3) return 'heavy';
+  if (score < b4) return 'intensive';
   return 'extreme';
 }

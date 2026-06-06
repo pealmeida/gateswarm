@@ -15,6 +15,7 @@ import { extractFeatures, heuristicScoreFromFeatures } from './feature-extractor
 import { ensembleVote, type EnsembleVote } from './ensemble-voter.js';
 import { queryRag, getRagSignalEntries } from './rag-index.js';
 import { getConfig } from './v04-config.js';
+import { scoreToEffort } from './intent-engine.js';
 
 // ─── v3.3 Fallback ───────────────────────────────────────
 
@@ -23,14 +24,9 @@ function v33Fallback(prompt: string): ComplexityScore {
   const words = prompt.split(/\s+/).filter(Boolean);
   const score = heuristicScoreFromFeatures(features, words.length);
 
-  // v3.6: UNIFIED tier boundaries matching v04_config.json / routing-matrix.ts
-  let tier: EffortLevel;
-  if (score < 0.15) tier = 'trivial';
-  else if (score < 0.22) tier = 'light';
-  else if (score < 0.35) tier = 'moderate';
-  else if (score < 0.42) tier = 'heavy';
-  else if (score < 0.50) tier = 'intensive';
-  else tier = 'extreme';
+  // v0.5.2: UNIFIED tier boundaries — uses the canonical scoreToEffort mapping
+  // (previously hardcoded divergent boundaries here, causing fallback misrouting).
+  const tier: EffortLevel = scoreToEffort(score);
 
   return {
     value: score,
@@ -54,7 +50,8 @@ export async function scoreIntent(prompt: string): Promise<ComplexityScore> {
   const words = prompt.split(/\s+/).filter(Boolean);
   const heuristicScore = heuristicScoreFromFeatures(features, words.length);
 
-  // RAG signal
+  // RAG signal — pass undefined when no prior context exists so the voter does
+  // NOT inject a neutral 0.5 floor (the old behaviour added a flat +0.125 to every score).
   const keywords = prompt.toLowerCase().split(/\s+/)
     .filter(w => w.length > 4 && !/^(the|and|for|with|this|that|from|have|been)/.test(w));
   const ragEntries = getRagSignalEntries(keywords.slice(0, 10));
@@ -66,7 +63,7 @@ export async function scoreIntent(prompt: string): Promise<ComplexityScore> {
         };
         return sum + (tierScores[e.tier] ?? 0.3);
       }, 0) / ragEntries.length
-    : 0.5;
+    : undefined;
 
   // Ensemble vote
   try {

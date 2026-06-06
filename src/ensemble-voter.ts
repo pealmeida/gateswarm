@@ -233,6 +233,22 @@ export interface EnsembleInput {
   enableCascade?: boolean;
 }
 
+// Tier cut points — MUST match scoreToEffort()/v04_config.json (v0.5.2 calibration).
+const TIER_BOUNDARIES = [0.21, 0.28, 0.32, 0.37, 0.46];
+const TIER_ORDER: EffortLevel[] = ['trivial', 'light', 'moderate', 'heavy', 'intensive', 'extreme'];
+
+/**
+ * Real confidence from distance to the nearest tier boundary.
+ * A score sitting deep inside a tier band is confident; one hugging a
+ * boundary is a near coin-flip. ~0.06 margin → full confidence; at the
+ * boundary → 0.5. Replaces the old constant 0.7 (which forced 100% escalation).
+ */
+function confidenceFromMargin(score: number): number {
+  let d = Math.min(score, 1 - score);
+  for (const b of TIER_BOUNDARIES) d = Math.min(d, Math.abs(score - b));
+  return Math.max(0.5, Math.min(0.95, 0.5 + (d / 0.06) * 0.45));
+}
+
 export function ensembleVote(input: EnsembleInput): EnsembleVote {
   const heuristic = input.heuristicScore;
 
@@ -241,10 +257,12 @@ export function ensembleVote(input: EnsembleInput): EnsembleVote {
     ? cascadeScore(input.prompt)
     : -1;
 
-  // RAG signal (default neutral)
-  const rag = input.ragSignal ?? 0.5;
+  // RAG signal is OPTIONAL. When absent (no prior context), it must NOT be
+  // injected as a neutral 0.5 — doing so added a flat bias to every score.
+  const ragPresent = typeof input.ragSignal === 'number';
+  const rag = ragPresent ? (input.ragSignal as number) : null;
 
-  // History bias
+  // History bias (additive, −0.1..+0.1)
   const bias = calcHistoryBias();
 
   let finalScore: number;
@@ -252,43 +270,51 @@ export function ensembleVote(input: EnsembleInput): EnsembleVote {
   let method: 'ensemble-v0.4' | 'heuristic-fallback';
 
   if (casc < 0 || casc === undefined) {
-    // Cascade not available → use heuristic + RAG + history (cascade weight already 0 in v3.6)
+    // Active default path (no trained cascade).
     method = 'heuristic-fallback';
-    // v3.6: weights already sum to 1.0 without cascade, so use them directly
-    finalScore = heuristic * weights.heuristic + rag * weights.ragSignal + bias;
+    if (ragPresent) {
+      // Heuristic primary, RAG as a light nudge.
+      finalScore = heuristic * 0.8 + (rag as number) * 0.2 + bias;
+    } else {
+      // No RAG context → trust the heuristic directly (full dynamic range).
+      finalScore = heuristic + bias;
+    }
     finalScore = Math.max(0, Math.min(1, finalScore));
-    confidence = 0.7;
+    confidence = confidenceFromMargin(finalScore);
+    if (ragPresent) {
+      // Lower confidence when heuristic and RAG disagree.
+      const agreement = 1 - Math.min(Math.abs(heuristic - (rag as number)), 1);
+      confidence *= 0.7 + 0.3 * agreement;
+    }
   } else {
-    // Full ensemble
+    // Full ensemble (trained cascade available).
     method = 'ensemble-v0.4';
+    const ragVal = ragPresent ? (rag as number) : heuristic; // fall back to heuristic, not 0.5
     finalScore =
       heuristic * weights.heuristic +
       casc * weights.cascade +
-      rag * weights.ragSignal +
+      ragVal * weights.ragSignal +
       bias;
     finalScore = Math.max(0, Math.min(1, finalScore));
 
-    // Confidence = agreement between methods
-    const methods = [heuristic, casc, rag];
+    // Confidence = agreement between methods (genuine variance-based).
+    const methods = ragPresent ? [heuristic, casc, rag as number] : [heuristic, casc];
     const mean = methods.reduce((a, b) => a + b, 0) / methods.length;
     const variance = methods.reduce((s, m) => s + (m - mean) ** 2, 0) / methods.length;
     confidence = Math.max(0, 1 - Math.sqrt(variance) * 3);
   }
 
-  // Confidence-based routing
-  let escalated = false;
+  // Tier from score. Safety escalation ONLY for genuine boundary coin-flips
+  // (confidence < 0.55 ≈ within ~0.007 of a cut point). Bounded to a single
+  // tier and erring upward (better to slightly over-serve than under-serve).
+  // This replaces the old behaviour that escalated EVERY request and dumped
+  // very-low-confidence cases straight into 'intensive'.
   let tier = scoreToEffort(finalScore);
-
-  if (confidence < 0.5) {
-    // Very uncertain → safe default (intensive)
-    tier = 'intensive';
-    escalated = true;
-  } else if (confidence < 0.8) {
-    // Moderate uncertainty → escalate one tier
-    const tiers: EffortLevel[] = ['trivial', 'light', 'moderate', 'heavy', 'intensive', 'extreme'];
-    const idx = tiers.indexOf(tier);
-    if (idx < tiers.length - 1) {
-      tier = tiers[idx + 1];
+  let escalated = false;
+  if (confidence < 0.55) {
+    const idx = TIER_ORDER.indexOf(tier);
+    if (idx < TIER_ORDER.length - 1) {
+      tier = TIER_ORDER[idx + 1];
       escalated = true;
     }
   }
@@ -300,7 +326,7 @@ export function ensembleVote(input: EnsembleInput): EnsembleVote {
     components: {
       heuristicScore: heuristic,
       cascadeScore: casc < 0 ? 0 : casc,
-      ragSignal: rag,
+      ragSignal: ragPresent ? (rag as number) : 0,
       historyBias: bias,
     },
     method,

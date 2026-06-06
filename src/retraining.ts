@@ -1,113 +1,33 @@
 /**
- * GateSwarm MoMA Router v0.4 — Retraining Pipeline
+ * GateSwarm MoMA Router — Retraining Pipeline (v0.5.2 rewrite)
  *
- * Periodically optimizes ensemble weights based on real feedback data.
- * Supports hot-swapping weights without gateway restart.
- * A/B tests new weights against old before full deployment.
+ * The previous pipeline tried to grid-search ENSEMBLE WEIGHTS, but:
+ *   - simulateAccuracy() ignored the candidate weights entirely (it just counted
+ *     predicted===actual), so the search was a no-op that returned the first
+ *     candidate after a stable sort;
+ *   - the feedback store never persisted the prompt or component scores, so
+ *     re-running the ensemble under different weights was impossible; and
+ *   - cascade is permanently disabled, so perturbing its weight only corrupted
+ *     the saved config.
+ *
+ * What we CAN learn from real feedback is the right place to put the TIER
+ * BOUNDARIES: each judged interaction gives us (routing score, LLM-judged
+ * actual tier). Recalibrating the 5 cut points against those pairs is a genuine,
+ * data-driven self-improvement — exactly the manual calibration in eval/, run
+ * continuously. Boundaries are config-driven (see v04-config.syncTierBoundaries),
+ * so an update takes effect live.
  */
 
 import type { EffortLevel } from './types.js';
 import { getConfig, saveConfig, type EnsembleWeightsConfig } from './v04-config.js';
-import { getFeedbackEntries, getTierAccuracy } from './feedback-store.js';
+import { getFeedbackEntries } from './feedback-store.js';
+import { setTierBoundaries, getTierBoundaries } from './intent-engine.js';
 
-// ─── Weight Optimization ──────────────────────────────────
+const TIERS: EffortLevel[] = ['trivial', 'light', 'moderate', 'heavy', 'intensive', 'extreme'];
 
-interface WeightCandidate extends EnsembleWeightsConfig {
-  accuracy: number;
-}
-
-/**
- * Generate candidate weight sets by perturbing current weights.
- * Uses grid search around current values within ±maxChangePct.
- */
-function generateCandidates(
-  current: EnsembleWeightsConfig,
-  maxChangePct: number,
-  steps: number = 5
-): WeightCandidate[] {
-  const candidates: WeightCandidate[] = [];
-  const keys = ['heuristic', 'cascade', 'ragSignal', 'historyBias'] as const;
-
-  for (let h = 0; h <= steps; h++) {
-    for (let c = 0; c <= steps; c++) {
-      for (let r = 0; r <= steps; r++) {
-        for (let b = 0; b <= steps; b++) {
-          const heuristic = Math.max(0.1, Math.min(0.7,
-            current.heuristic + (h / steps - 0.5) * 2 * maxChangePct));
-          const cascade = Math.max(0.1, Math.min(0.7,
-            current.cascade + (c / steps - 0.5) * 2 * maxChangePct));
-          const ragSignal = Math.max(0.05, Math.min(0.4,
-            current.ragSignal + (r / steps - 0.5) * 2 * maxChangePct));
-          const historyBias = Math.max(0.05, Math.min(0.4,
-            current.historyBias + (b / steps - 0.5) * 2 * maxChangePct));
-
-          // Normalize to sum = 1
-          const total = heuristic + cascade + ragSignal + historyBias;
-          candidates.push({
-            heuristic: heuristic / total,
-            cascade: cascade / total,
-            ragSignal: ragSignal / total,
-            historyBias: historyBias / total,
-            accuracy: 0,
-          });
-        }
-      }
-    }
-  }
-
-  return candidates;
-}
-
-/**
- * Simulate ensemble scoring with given weights against feedback data.
- * Returns overall tier-matching accuracy.
- */
-function simulateAccuracy(
-  weights: EnsembleWeightsConfig,
-  entries: Array<{ predictedTier: string; actualTier: string | null }>
-): number {
-  const judged = entries.filter(e => e.actualTier !== null);
-  if (judged.length < 10) return 0;
-
-  let correct = 0;
-  for (const entry of judged) {
-    // Simple simulation: if weights favor the method that got it right, count as correct
-    // Full implementation would re-run ensemble vote with new weights
-    if (entry.predictedTier === entry.actualTier) correct++;
-  }
-
-  return correct / judged.length;
-}
-
-/**
- * Find the best weight set from candidates.
- */
-function findBestWeights(
-  candidates: WeightCandidate[],
-  entries: Array<{ predictedTier: string; actualTier: string | null }>
-): { weights: EnsembleWeightsConfig; accuracy: number } {
-  for (const candidate of candidates) {
-    candidate.accuracy = simulateAccuracy(candidate, entries);
-  }
-
-  candidates.sort((a, b) => b.accuracy - a.accuracy);
-  const best = candidates[0];
-
-  return {
-    weights: {
-      heuristic: best.heuristic,
-      cascade: best.cascade,
-      ragSignal: best.ragSignal,
-      historyBias: best.historyBias,
-    },
-    accuracy: best.accuracy,
-  };
-}
-
-// ─── Hot-Swap ─────────────────────────────────────────────
+// ─── Weights (kept for API compatibility; weights are no longer the train target) ──
 
 let _activeWeights: EnsembleWeightsConfig | null = null;
-let _abHoldoutWeights: EnsembleWeightsConfig | null = null;
 
 export function getActiveWeights(): EnsembleWeightsConfig {
   if (_activeWeights) return _activeWeights;
@@ -118,56 +38,101 @@ export function setWeights(weights: EnsembleWeightsConfig): void {
   _activeWeights = weights;
 }
 
-export function startABTest(oldWeights: EnsembleWeightsConfig, newWeights: EnsembleWeightsConfig): void {
-  _abHoldoutWeights = oldWeights;
-  _activeWeights = newWeights;
-}
+// ─── Boundary optimisation ────────────────────────────────────────
 
-export function endABTest(keepNew: boolean): void {
-  if (!keepNew && _abHoldoutWeights) {
-    _activeWeights = _abHoldoutWeights;
+interface LabeledScore { score: number; tier: number; }
+
+/** Exact tier accuracy of a boundary set against labeled (score → tier) pairs. */
+function accuracyFor(bounds: number[], data: LabeledScore[]): number {
+  if (data.length === 0) return 0;
+  let correct = 0;
+  for (const { score, tier } of data) {
+    let pred = 0;
+    while (pred < bounds.length && score >= bounds[pred]) pred++;
+    if (pred === tier) correct++;
   }
-  _abHoldoutWeights = null;
+  return correct / data.length;
 }
 
-// ─── Retraining Trigger ───────────────────────────────────
+/**
+ * Grid-search 5 strictly-increasing cut points maximising exact accuracy.
+ * Coarse grid (0.01 step) — fast and enough given score granularity.
+ */
+function optimizeBoundaries(data: LabeledScore[]): { bounds: number[]; accuracy: number } {
+  const grid: number[] = [];
+  for (let v = 0.08; v <= 0.7; v += 0.01) grid.push(Number(v.toFixed(3)));
+  let best = { bounds: getTierBoundaries(), accuracy: accuracyFor(getTierBoundaries(), data) };
+  for (const b0 of grid.filter(v => v < 0.3))
+    for (const b1 of grid.filter(v => v > b0 && v < 0.4))
+      for (const b2 of grid.filter(v => v > b1 && v < 0.5))
+        for (const b3 of grid.filter(v => v > b2 && v < 0.6))
+          for (const b4 of grid.filter(v => v > b3 && v < 0.7)) {
+            const acc = accuracyFor([b0, b1, b2, b3, b4], data);
+            if (acc > best.accuracy) best = { bounds: [b0, b1, b2, b3, b4], accuracy: acc };
+          }
+  return best;
+}
 
-export async function retrainIfNeeded(): Promise<{ retrained: boolean; accuracy?: number }> {
+// ─── Retraining trigger ───────────────────────────────────────────
+
+export interface RetrainResult {
+  retrained: boolean;
+  reason?: string;
+  accuracyBefore?: number;
+  accuracyAfter?: number;
+  boundaries?: number[];
+}
+
+/**
+ * Recalibrate tier boundaries if there is enough judged feedback with scores.
+ * Only applies the new boundaries when they beat the current ones by a margin
+ * (guards against noise / overfitting to a small sample).
+ */
+export async function retrainIfNeeded(): Promise<RetrainResult> {
   const config = getConfig();
-  const { retrainAfterInteractions, maxWeightChangePct } = config.feedback_loop;
+  const minSamples = config.feedback_loop.minSamplesPerTier;
 
-  // Check if we have enough data
-  const accuracy = getTierAccuracy();
-  const totalJudged = Object.values(accuracy).reduce((sum, a) => sum + a.total, 0);
+  // Need judged entries that carry BOTH a routing score and an actual tier.
+  const data: LabeledScore[] = getFeedbackEntries()
+    .filter(e => e.actualTier !== null && typeof e.score === 'number')
+    .map(e => ({ score: e.score as number, tier: TIERS.indexOf(e.actualTier as EffortLevel) }))
+    .filter(d => d.tier >= 0);
 
-  if (totalJudged < config.feedback_loop.minSamplesPerTier * 6) {
-    return { retrained: false };
+  // Require a reasonable global sample before touching boundaries.
+  if (data.length < Math.max(30, minSamples * 3)) {
+    return { retrained: false, reason: `insufficient labeled+scored feedback (${data.length})` };
   }
 
-  // Check min samples per tier
-  for (const [, stats] of Object.entries(accuracy)) {
-    if (stats.total < config.feedback_loop.minSamplesPerTier) {
-      return { retrained: false };
-    }
+  const current = getTierBoundaries();
+  const accuracyBefore = accuracyFor(current, data);
+  const best = optimizeBoundaries(data);
+
+  // Apply only on a meaningful improvement (≥2 percentage points).
+  if (best.accuracy < accuracyBefore + 0.02) {
+    return { retrained: false, reason: 'no significant improvement', accuracyBefore, accuracyAfter: best.accuracy };
   }
 
-  // Generate candidates and find best
-  const current = getActiveWeights();
-  const entries = getFeedbackEntries().map(e => ({
-    predictedTier: e.predictedTier,
-    actualTier: e.actualTier,
-  }));
+  if (!setTierBoundaries(best.bounds)) {
+    return { retrained: false, reason: 'optimizer produced invalid boundaries' };
+  }
 
-  const candidates = generateCandidates(current, maxWeightChangePct);
-  const best = findBestWeights(candidates, entries);
-
-  // A/B test: keep old weights for 10% holdout
-  startABTest(current, best.weights);
-
-  // Save to config
+  // Persist to config so it survives restarts and stays the canonical source.
   const cfg = getConfig();
-  cfg.ensemble.weights = best.weights;
+  cfg.tier_boundaries = {
+    trivial:   [0, best.bounds[0]],
+    light:     [best.bounds[0], best.bounds[1]],
+    moderate:  [best.bounds[1], best.bounds[2]],
+    heavy:     [best.bounds[2], best.bounds[3]],
+    intensive: [best.bounds[3], best.bounds[4]],
+    extreme:   [best.bounds[4], 1],
+  };
   await saveConfig(cfg);
 
-  return { retrained: true, accuracy: best.accuracy };
+  return {
+    retrained: true,
+    reason: `recalibrated boundaries on ${data.length} labeled samples`,
+    accuracyBefore,
+    accuracyAfter: best.accuracy,
+    boundaries: best.bounds,
+  };
 }

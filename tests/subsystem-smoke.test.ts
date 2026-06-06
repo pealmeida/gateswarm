@@ -20,10 +20,11 @@ describe('v0.4 subsystems', () => {
   });
 
   it('scoreToEffort maps boundaries correctly', () => {
+    // v0.5.2 recalibrated boundaries: [0.21, 0.28, 0.32, 0.37, 0.46]
     expect(scoreToEffort(0.05)).toBe('trivial');
-    expect(scoreToEffort(0.16)).toBe('light');
-    expect(scoreToEffort(0.25)).toBe('moderate');
-    expect(scoreToEffort(0.30)).toBe('heavy');
+    expect(scoreToEffort(0.25)).toBe('light');
+    expect(scoreToEffort(0.30)).toBe('moderate');
+    expect(scoreToEffort(0.34)).toBe('heavy');
     expect(scoreToEffort(0.40)).toBe('intensive');
     expect(scoreToEffort(0.80)).toBe('extreme');
   });
