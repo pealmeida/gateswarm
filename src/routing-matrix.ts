@@ -21,13 +21,14 @@ export type { EffortLevel, DeviceProfileName } from './types.js';
 import type { EffortLevel, ModelTier, DeviceProfileName } from './types.js';
 
 export const EFFORT_RANGES: Record<EffortLevel, [number, number]> = {
-  // v3.6: UNIFIED — matches v04_config.json tier_boundaries
-  trivial:   [0.00, 0.1557],
-  light:     [0.1557, 0.1842],
-  moderate:  [0.1842, 0.2788],
-  heavy:     [0.2788, 0.3488],
-  intensive: [0.3488, 0.4611],
-  extreme:   [0.4611, 1.00],
+  // v0.5.2: recalibrated for the length/structure-aware heuristic (see eval/).
+  // Unified with v04_config.json tier_boundaries and scoreToEffort().
+  trivial:   [0.00, 0.21],
+  light:     [0.21, 0.28],
+  moderate:  [0.28, 0.32],
+  heavy:     [0.32, 0.37],
+  intensive: [0.37, 0.46],
+  extreme:   [0.46, 1.00],
 };
 
 export const EFFORT_LABELS: Record<EffortLevel, string> = {
