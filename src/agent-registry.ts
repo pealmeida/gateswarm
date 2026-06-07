@@ -84,32 +84,32 @@ export interface RegistryState {
 // ─── Default Tier Mappings ─────────────────────────────
 
 export const DEFAULT_TIER_CONFIGS: Record<string, AgentTierConfig> = {
-  // Cost-optimized (Coding Plan) — smallest models for low tiers
+  // Cost-optimized — v0.5.2 aligned with available models
   'cost-optimized': {
-    trivial: 'qwen3.5-plus',        // Bailian — greetings, simple math, facts
-    light: 'glm-4.7-flash',        // ZAI — summaries, short Q&A, formatting
-    moderate: 'qwen3-coder-plus',  // Bailian — code-capable for code/analysis
-    heavy: 'qwen3.6-plus',         // Bailian — Deep reasoning (ZAI glm-5.1 quota exhausted)
-    intensive: 'qwen3.5-plus',     // Bailian — complex systems, multi-constraint
-    extreme: 'qwen3.6-plus',       // Bailian — elite reasoning, planning
+    trivial: 'zai/glm-4.5-air',               // Free tier — greetings, simple math
+    light: 'opencodego/deepseek-v4-flash',     // Fast summaries, Q&A
+    moderate: 'opencodego/deepseek-v4-flash',  // Code-capable analysis (flash is faster/cheaper)
+    heavy: 'opencodego/deepseek-v4-pro',       // Deep reasoning
+    intensive: 'opencodego/glm-5.1',           // Complex systems
+    extreme: 'opencodego/deepseek-v4-pro',      // Elite reasoning (deepseek-v4-pro is stable)
   },
-  // Quality-focused — higher baseline for dev/architect agents
+  // Quality-focused — CLI providers for heavy tiers
   'quality': {
-    trivial: 'qwen3.5-plus',        // Bailian
-    light: 'glm-4.7-flash',        // ZAI Flash for speed
-    moderate: 'qwen3-coder-plus',  // Bailian — code-optimized
-    heavy: 'qwen3.6-plus',         // Bailian Deep reasoning
-    intensive: 'qwen3.5-plus',     // Bailian — strong reasoning
-    extreme: 'qwen3.6-plus',       // Bailian Flagship
+    trivial: 'zai/glm-4.5-air',
+    light: 'opencodego/deepseek-v4-flash',
+    moderate: 'opencodego/deepseek-v4-flash',
+    heavy: 'cc/claude-sonnet-4-6',             // Claude Code for quality
+    intensive: 'cc/claude-sonnet-4-6',
+    extreme: 'cc/claude-opus-4-8',
   },
-  // Balanced — cost/quality tradeoff (Bailian-first)
+  // Balanced — cost/quality tradeoff (v0.5.2 aligned)
   'balanced': {
-    trivial: 'qwen3.5-plus',        // Bailian
-    light: 'qwen3.5-plus',         // Fast + reliable
-    moderate: 'qwen3-coder-plus',  // Bailian — code-capable
-    heavy: 'qwen3.6-plus',         // Deep reasoning
-    intensive: 'qwen3.5-plus',     // Bailian — strong reasoning
-    extreme: 'qwen3.6-plus',       // Flagship
+    trivial: 'zai/glm-4.5-air',
+    light: 'opencodego/deepseek-v4-flash',
+    moderate: 'opencodego/deepseek-v4-flash',
+    heavy: 'opencodego/deepseek-v4-pro',
+    intensive: 'opencodego/glm-5.1',
+    extreme: 'opencodego/qwen3.7-max',
   },
   // OpenRouter benchmark
   'benchmark': {
@@ -138,6 +138,20 @@ export const DEFAULT_TIER_CONFIGS: Record<string, AgentTierConfig> = {
     intensive: 'cx/gpt-5.3-codex',
     extreme: 'cc/claude-opus-4-7',
   },
+};
+
+// ─── HTTP Provider Model Catalogs ──────────────────────
+// Single source of truth for which models each HTTP provider serves. Used both
+// to register providers at startup and by eval/consistency-check.ts so routing
+// config can be validated against real catalogs without the (gitignored)
+// data/agent-registry.json being present (e.g. in CI).
+export const HTTP_PROVIDER_MODELS: Record<string, string[]> = {
+  bailian: ['qwen3.6-plus', 'qwen3.5-plus', 'qwen3-coder-plus', 'qwen3.6-max-preview', 'qwen4.6'],
+  zai: ['glm-4.5-air', 'glm-4.7', 'glm-4.7-flash', 'glm-5', 'glm-5-turbo', 'glm-5.1'],
+  openrouter: ['owl-alpha', 'glm-4.7-flash', 'qwen-plus', 'gemini-2.5-flash', 'claude-sonnet-4.6', 'claude-opus-4.6'],
+  opencodego: ['deepseek-v4-flash', 'deepseek-v4-pro', 'qwen3.7-plus', 'qwen3.7-max',
+    'qwen3.6-plus', 'kimi-k2.5', 'kimi-k2.6', 'glm-5', 'glm-5.1',
+    'minimax-m3', 'minimax-m2.7', 'mimo-v2.5', 'mimo-v2.5-pro'],
 };
 
 // ─── CLI Provider Defaults ─────────────────────────────
@@ -291,7 +305,7 @@ export class AgentRegistry {
       type: 'http-api',
       baseUrl: process.env.BAILIAN_BASE || 'https://coding-intl.dashscope.aliyuncs.com/v1',
       apiKey: process.env.BAILIAN_KEY || process.env.OPENAI_API_KEY || '',
-      models: ['qwen3.6-plus', 'qwen3.5-plus', 'qwen3-coder-plus', 'qwen3.6-max-preview', 'qwen4.6'],
+      models: HTTP_PROVIDER_MODELS.bailian,
     });
 
     this.registerProvider({
@@ -300,7 +314,7 @@ export class AgentRegistry {
       type: 'http-api',
       baseUrl: process.env.ZAI_BASE || 'https://api.z.ai/api/coding/paas/v4',
       apiKey: process.env.ZAI_KEY || process.env.GLM_API_KEY || '',
-      models: ['glm-4.7', 'glm-4.7-flash', 'glm-5', 'glm-5-turbo', 'glm-5.1'],
+      models: HTTP_PROVIDER_MODELS.zai,
     });
 
     this.registerProvider({
@@ -309,7 +323,7 @@ export class AgentRegistry {
       type: 'http-api',
       baseUrl: process.env.OPENROUTER_BASE || 'https://openrouter.ai/api/v1',
       apiKey: process.env.OPENROUTER_API_KEY || '',
-      models: ['owl-alpha', 'glm-4.7-flash', 'qwen-plus', 'gemini-2.5-flash', 'claude-sonnet-4.6', 'claude-opus-4.6'],
+      models: HTTP_PROVIDER_MODELS.openrouter,
     });
 
     this.registerProvider({
@@ -318,9 +332,7 @@ export class AgentRegistry {
       type: 'http-api',
       baseUrl: process.env.OPENCODEGO_BASE || 'https://opencode.ai/zen/go/v1',
       apiKey: process.env.OPENCODEGO_KEY || '',
-      models: ['deepseek-v4-flash', 'deepseek-v4-pro', 'qwen3.7-plus', 'qwen3.7-max',
-               'qwen3.6-plus', 'kimi-k2.5', 'kimi-k2.6', 'glm-5', 'glm-5.1',
-               'minimax-m3', 'minimax-m2.7', 'mimo-v2.5', 'mimo-v2.5-pro'],
+      models: HTTP_PROVIDER_MODELS.opencodego,
     });
 
     // Load persisted state (providers + agents)
@@ -568,11 +580,18 @@ export class AgentRegistry {
     if (model.startsWith('zai/')) {
       return { providerId: 'zai', model: model.replace('zai/', '') };
     }
+    if (model.startsWith('opencodego/')) {
+      return { providerId: 'opencodego', model: model.replace('opencodego/', '') };
+    }
 
     // No prefix — detect provider by model name pattern
     // Z.AI models: glm-*
     if (model.startsWith('glm-')) {
       return { providerId: 'zai', model };
+    }
+    // OpenCodeGo models: deepseek-*, qwen3.7-*
+    if (model.startsWith('deepseek-') || model.startsWith('qwen3.7-')) {
+      return { providerId: 'opencodego', model };
     }
     // Bailian models: qwen*, kimi*, MiniMax*
     if (model.startsWith('qwen') || model.startsWith('kimi') || model.startsWith('MiniMax')) {

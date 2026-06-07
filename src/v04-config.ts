@@ -103,13 +103,16 @@ export const DEFAULT_V04_CONFIG: V04Config = {
       'context markers', 'architecture keywords', 'design keywords',
     ],
   },
+  // v0.5.2: unified with v04_config.json + intent-engine DEFAULT_BOUNDARIES.
+  // These were stale (old [0.1557…] cut points), so a config-load failure would
+  // silently fall back to divergent boundaries and misroute every tier.
   tier_boundaries: {
-    trivial: [0.00, 0.1557],
-    light: [0.1557, 0.1842],
-    moderate: [0.1842, 0.2788],
-    heavy: [0.2788, 0.3488],
-    intensive: [0.3488, 0.4611],
-    extreme: [0.4611, 1.00],
+    trivial: [0.00, 0.21],
+    light: [0.21, 0.28],
+    moderate: [0.28, 0.32],
+    heavy: [0.32, 0.37],
+    intensive: [0.37, 0.46],
+    extreme: [0.46, 1.00],
   },
   tier_models: {
     trivial:   { model: 'glm-4.5-air',    provider: 'zai',     max_tokens: 256,  enable_thinking: false,
@@ -246,10 +249,9 @@ const PLAN_KEYWORDS = ['draft', 'outline', 'brainstorm', 'sketch', 'explore',
   'what if', 'options', 'approach', 'consider', 'tradeoff', 'trade-off', 'strategy',
   'roadmap', 'plan', 'design', 'compare', 'pros and cons', 'high-level', 'evaluate',
   'recommend', 'weigh', 'alternatives', 'thoughts on', 'thinking about'];
-const ACT_KEYWORDS = ['implement', 'build', 'code', 'fix', 'deploy', 'apply', 'merge',
+const ACT_KEYWORDS = ['implement', 'build', 'deploy', 'apply', 'merge',
   'write the code', 'create the file', 'refactor', 'rename', 'install', 'configure',
-  'add ', 'remove ', 'update ', 'change ', 'patch', 'rewrite', 'generate', 'set up',
-  'debug', 'optimize'];
+  'patch', 'rewrite', 'generate', 'set up', 'debug', 'optimize'];
 
 // Plan = deliberation / decision-seeking phrasing.
 const PLAN_PATTERNS = [
@@ -260,15 +262,36 @@ const PLAN_PATTERNS = [
   /\bnot sure (how|whether|if|which|what)\b/,
   /\bhelp me (decide|choose|think|figure)\b/,
   /\bwalk me through (the )?(options|possibilities|tradeoffs|approaches)\b/,
+  /\bwhether to\b/,
+  /\bbefore (i|we) (write|code|build|implement|start|begin)\b/,
+  /\bwhere would (the|you|i|we)\b/,
+  /\bmap out\b/,
 ];
 // Act = imperative command or bug/symptom report (implicitly "make it work").
+// v0.5.2: broadened verb list + symptom phrasing — real act requests are often
+// imperatives ("Replace…", "Spin up…") or bug reports ("it shows $0", "stopped
+// firing", "can't upload") that never contain a literal act keyword.
 const ACT_PATTERNS = [
-  /^(write|create|build|implement|fix|add|remove|update|change|make|generate|refactor|rename|install|configure|deploy|run|delete|convert|set up|patch|rewrite|debug|optimize)\b/,
-  /\b(throws?|throwing|returns?|returning) (an? )?(error|500|exception|null|undefined|wrong)\b/,
-  /\b(stack trace|traceback|null pointer|segfault)\b/,
-  /\b(is|are|keeps?) (broken|crashing|failing|not working)\b/,
-  /\b(doesn'?t|does not|won'?t|wont) (work|compile|build|run|load|render)\b/,
+  /^(write|create|build|implement|fix|add|remove|update|change|make|generate|refactor|rename|install|configure|deploy|redeploy|run|delete|convert|set ?up|patch|rewrite|debug|optimize|replace|migrate|spin ?up|bump|swap|enable|disable|upgrade|downgrade|revert|roll ?back|wire|hook ?up|point|move|extract|split|merge|integrate|connect|expose|seed|backfill|provision|scaffold)\b/,
+  /\b(throws?|throwing|returns?|returning|raises?) (an? )?(error|500|404|exception|null|undefined|nan|wrong|empty)\b/,
+  /\b(stack trace|traceback|null pointer|segfault|call stack|memory leak)\b/,
+  /\b(is|are|was|were|keeps?|looks?|shows?|appears?|stays?|goes?) (broken|crashing|failing|not working|blank|empty|null|undefined|grey|gray|frozen|stuck)\b/,
+  /\b(doesn'?t|does not|won'?t|wont|can'?t|cannot|unable to|fails? to|stopped|stops) (work|compile|build|run|load|render|upload|download|save|submit|open|fire|firing|respond|responding|connect|start|update)\b/,
+  /\bsilently\b/,
+  /\bshows? \$?0\b/,
 ];
+
+// Stem-friendly word-boundary keyword matcher: anchors at a word start and allows
+// inflectional suffixes (\w*), so "weigh"→"weighing" and "consider"→"considering"
+// match, but interior hits like "ex<plan>ation" or "<code>base" do not.
+function keywordHits(lower: string, keywords: string[]): number {
+  let n = 0;
+  for (const kw of keywords) {
+    const re = new RegExp('\\b' + kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\w*');
+    if (re.test(lower)) n++;
+  }
+  return n;
+}
 
 export function detectIntentMode(promptText: string): {
   mode: IntentMode;
@@ -279,10 +302,8 @@ export function detectIntentMode(promptText: string): {
   const lower = promptText.toLowerCase().trim();
   if (!lower) return { mode: 'auto', confidence: 0, planScore: 0, actScore: 0 };
 
-  let planScore = 0;
-  let actScore = 0;
-  for (const kw of PLAN_KEYWORDS) { if (lower.includes(kw)) planScore++; }
-  for (const kw of ACT_KEYWORDS) { if (lower.includes(kw)) actScore++; }
+  let planScore = keywordHits(lower, PLAN_KEYWORDS);
+  let actScore = keywordHits(lower, ACT_KEYWORDS);
   for (const re of PLAN_PATTERNS) { if (re.test(lower)) planScore++; }
   for (const re of ACT_PATTERNS) { if (re.test(lower)) actScore++; }
 
