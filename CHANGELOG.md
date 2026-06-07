@@ -16,6 +16,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `X-Mode` and `X-Mode-Confidence` response headers on all routed requests
 - CLI commands: `mode-status` (view all tier plan/act models), `mode-set` (update plan_* config),
   `mode-detect` (test auto-detection on prompt text)
+- **OpenCodeGo provider** — HTTP adapter for deepseek-v4-flash, deepseek-v4-pro, qwen3.7-plus
+- **claude-opus-4-8** CLI alias in agent registry
+
+### Changed
+- **Effort ranges recalibrated** for length/structure-aware heuristic (trivial 0.00–0.21, light 0.21–0.28,
+  moderate 0.28–0.32, heavy 0.32–0.37, intensive 0.37–0.46, extreme 0.46–1.00)
+- trivial tier: free model → glm-4.5-air/zai
+- light tier: glm-4.7/zai → deepseek-v4-flash/opencodego
+- moderate tier: MiniMax-M2.5/bailian → glm-4.7/zai (act), cx/gpt-5.4-codex/codex-cli (plan)
+- heavy tier: cc/claude-sonnet-4-6 → deepseek-v4-pro/opencodego (act), cx/gpt-5.5-codex/codex-cli (plan)
+- intensive tier: cx/gpt-5.5-codex → glm-5.1/zai (act), cc/claude-sonnet-4-6/claude-cli (plan)
+- extreme tier: cc/claude-opus-4-7 → qwen3.7-plus/opencodego (act), cc/claude-opus-4-8/claude-cli (plan)
+- Unified effort ranges between `routing-matrix.ts`, `v04_config.json`, and `intent-engine-v04.ts`
+- README fully rewritten with plan/act tier tables, mode commands, provider catalog
 
 ## [0.5.1-direct-routing] — 2026-05-19
 
