@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.5.2] - 2026-06-06
 
+### Fixed
+- **Plan mode now actually dispatches to the plan model.** The gateway computed the
+  plan/act-resolved model but routed the primary request via `resolveModel(agent, effort)`,
+  which ignores mode — so plan mode only flipped `X-Mode` headers while still calling the
+  act model. Plan mode now dispatches to the tier's configured plan model/provider (CLI
+  reasoning models for heavy/intensive/extreme); act/auto keep per-agent routing.
+- **Plan-tier models corrected** in `v04_config.json` (were stale copies of the act model):
+  moderate→`cx/gpt-5.4-codex`, heavy→`cx/gpt-5.5-codex`, intensive→`cc/claude-sonnet-4-6`,
+  extreme→`cc/claude-opus-4-8`.
+- **Provider/model consistency**: `glm-4.5-air` added to the zai catalog; `kimi-k2.5` and
+  `MiniMax-M2.5` fallbacks repointed from bailian (which doesn't serve them) to opencodego
+  (`minimax-m2.7`). New `eval/consistency-check.ts` + enforced test guard against config
+  referencing models absent from a provider catalog.
+- **Mode detection accuracy** (golden set): act recall 60%→100%, plan recall 87%→93%.
+  Imperative verb list broadened (replace, spin up, migrate, …), bug/symptom patterns added
+  (`can't upload`, `is blank`, `shows $0`, `stopped firing`), and keyword matching switched to
+  stem-aware word boundaries (kills substring false positives like `explanation`/`codebase`,
+  catches inflections like `weighing`/`considering`).
+- **Complexity over-routing removed**: the ensemble's "escalate up one tier on low confidence"
+  rule was dropped — it cut exact tier accuracy (41%→49%), nearly tripled adjacent error, and
+  added a systematic +0.36-tier over-routing bias (paying for bigger models on simple prompts).
+  Exact 41%→49%, ±1 83%→88%, bias +0.36→+0.12. (Boundary re-tuning was tested and rejected:
+  cross-validation showed it overfit the 90-sample set without generalizing.)
+- **Stale fallback boundaries** in `DEFAULT_V04_CONFIG` (used when config load fails) unified
+  with the live `v04_config.json`/`intent-engine` cut points (were old `[0.1557…]` values).
+
 ### Added
 - **Plan/Act router modes**: configure separate, cheaper models for planning (exploration/drafting)
   vs. acting (implementation/execution) per complexity tier

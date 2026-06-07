@@ -2,7 +2,7 @@
 import * as dotenv from 'dotenv';
 dotenv.config({ path: new URL('../.env', import.meta.url).pathname });
 /**
- * GateSwarm MoMA Router v0.5.1 — Multi-Agent API Gateway
+ * GateSwarm MoMA Router v0.5.2 — Multi-Agent API Gateway
  *
  * v0.5.1: Direct Routing Bypass
  *   - Skip complexity scoring and route directly to user-specified provider/model
@@ -589,9 +589,18 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
   }
 
   const resolved = agentRegistry.resolveModel(agent, effort);
-  const providerId = resolved.providerId;
-  const model = resolved.model;
-  console.log(`🧠 [${agent.name}] Score: ${score.toFixed(3)} → ${effort} → ${providerId}/${model}`);
+  let providerId = resolved.providerId;
+  let model = resolved.model;
+  // v0.5.2 fix: in plan mode, actually dispatch to the tier's configured plan
+  // model/provider. Previously tierModelConfig was computed but never used as the
+  // primary target — plan mode only flipped X-Mode headers while still routing to
+  // the act model. The act/auto path keeps per-agent resolveModel routing.
+  const rawTier = getTierModel(effort);
+  if (activeMode === 'plan' && rawTier?.plan_model && tierModelConfig) {
+    providerId = tierModelConfig.provider;
+    model = tierModelConfig.model;
+  }
+  console.log(`🧠 [${agent.name}] Score: ${score.toFixed(3)} → ${effort} (${activeMode}) → ${providerId}/${model}`);
   const interactionId = `${agent.id}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
   // ─── TurboQuant Context Compression v3.5 ──────────────────
@@ -1246,7 +1255,7 @@ async function init() {
   console.log('📦 Persistence: feedback + RAG stores initialized');
 
   const agents = agentRegistry.getAgents();
-  console.log(`🚀 GateSwarm MoMA Router v0.5.1 (CLI Providers + Direct Routing Bypass) starting on :${PORT}`);
+  console.log(`🚀 GateSwarm MoMA Router v0.5.2 (Plan/Act + CLI Providers) starting on :${PORT}`);
   console.log(`📊 Providers: ${agentRegistry.getProviders().map(p => p.id).join(', ')}`);
   console.log(`🤖 Registered agents: ${agents.map(a => a.name).join(', ')}`);
 
@@ -1277,7 +1286,7 @@ async function init() {
         const agents = agentRegistry.getAgents();
         return jsonResponse(res, 200, {
           status: 'healthy',
-          router: 'GateSwarm MoMA Router v0.5.1 (CLI Providers + Direct Routing Bypass)',
+          router: 'GateSwarm MoMA Router v0.5.2 (Plan/Act + CLI Providers)',
           turboquant: 'v3.6',
           ensemble: 'enabled',
           feedback: 'enabled',
@@ -1642,7 +1651,7 @@ async function init() {
   });
 
   server.listen(PORT, () => {
-    console.log(`✅ GateSwarm MoMA Router v0.5.1 (CLI Providers + Direct Routing Bypass) listening on http://localhost:${PORT}`);
+    console.log(`✅ GateSwarm MoMA Router v0.5.2 (Plan/Act + CLI Providers) listening on http://localhost:${PORT}`);
     console.log(`📡 Endpoint: http://localhost:${PORT}/v1/chat/completions`);
     console.log(`📊 Metrics: http://localhost:${PORT}/metrics`);
     console.log(`🤖 Agents: http://localhost:${PORT}/v1/agents`);

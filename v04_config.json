@@ -69,8 +69,8 @@
       "plan_enable_thinking": false,
       "fallback_models": [
         {
-          "model": "MiniMax-M2.5",
-          "provider": "bailian"
+          "model": "minimax-m2.7",
+          "provider": "opencodego"
         },
         {
           "model": "glm-4.5-air",
@@ -93,8 +93,8 @@
       "plan_enable_thinking": false,
       "fallback_models": [
         {
-          "model": "MiniMax-M2.5",
-          "provider": "bailian"
+          "model": "minimax-m2.7",
+          "provider": "opencodego"
         },
         {
           "model": "glm-4.5-air",
@@ -107,8 +107,8 @@
       ]
     },
     "moderate": {
-      "model": "glm-4.7",
-      "provider": "zai",
+      "model": "deepseek-v4-flash",
+      "provider": "opencodego",
       "max_tokens": 2048,
       "enable_thinking": false,
       "plan_model": "cx/gpt-5.4-codex",
@@ -122,7 +122,7 @@
         },
         {
           "model": "kimi-k2.5",
-          "provider": "bailian"
+          "provider": "opencodego"
         },
         {
           "model": "glm-4.7",
@@ -164,7 +164,7 @@
     },
     "intensive": {
       "model": "glm-5.1",
-      "provider": "zai",
+      "provider": "opencodego",
       "max_tokens": 4096,
       "enable_thinking": false,
       "plan_model": "cc/claude-sonnet-4-6",
@@ -186,12 +186,12 @@
         },
         {
           "model": "kimi-k2.5",
-          "provider": "bailian"
+          "provider": "opencodego"
         }
       ]
     },
     "extreme": {
-      "model": "qwen3.7-plus",
+      "model": "deepseek-v4-pro",
       "provider": "opencodego",
       "max_tokens": 8192,
       "enable_thinking": true,
@@ -214,7 +214,7 @@
         },
         {
           "model": "kimi-k2.5",
-          "provider": "bailian"
+          "provider": "opencodego"
         }
       ]
     }

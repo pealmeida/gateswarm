@@ -10,12 +10,22 @@
 
 ## What's New in v0.5.2
 
-- **Plan/Act Dual-Model Routing** — Separate cheaper models for planning (exploration, drafting, research) vs. acting (implementation, execution). Auto-detects intent mode from prompt keywords with explicit `X-Mode` header override.
-- **Recalibrated Effort Classifier** — Length/structure-aware heuristic with tighter tier boundaries for more accurate routing.
-- **OpenCodeGo Provider** — New HTTP provider for deepseek-v4-flash, deepseek-v4-pro, and qwen3.7-plus.
-- **Expanded CLI Provider Models** — claude-opus-4-8 alias, gpt-5.4/5.5-codex for plan tiers.
-- **Mode CLI Commands** — `mode-status`, `mode-set`, `mode-detect` for managing plan/act configurations.
-- **X-Mode Response Headers** — `X-Mode` and `X-Mode-Confidence` returned on every routed request.
+- **Plan/Act Dual-Model Routing** — Each tier carries an *act* model (default) and a *plan*
+  model; plan mode dispatches the **actual request** to the plan model (upper tiers route to
+  Codex / Claude Code CLI reasoning agents), not just a response header. Intent mode is
+  auto-detected, or overridden via `body.mode` / the `X-Mode` header.
+- **More accurate intent detection** — Stem-aware word-boundary keyword matching plus
+  imperative + bug-symptom patterns. On the golden set: **act recall 60% → 100%**, **plan
+  recall 87% → 93%**, no substring false positives (`explanation` ≠ `plan`, `codebase` ≠ `code`).
+- **Less over-routing, more accurate tiers** — Removed a confidence-based escalation rule that
+  pushed simple prompts to pricier models. Exact-tier accuracy **41% → 49%**, within-±1
+  **83% → 88%**, over-routing bias **+0.36 → +0.12** tiers.
+- **Provider/model consistency enforced** — `eval/consistency-check.ts` (wired into the test
+  suite) verifies every act/plan/fallback model exists in its provider's catalog. Fixed stale
+  references (`glm-4.5-air` catalog entry; `kimi-k2.5`/`MiniMax-M2.5` repointed to OpenCodeGo).
+- **OpenCodeGo provider** — HTTP adapter for deepseek-v4-flash/pro, qwen3.7, kimi, minimax, mimo.
+- **Mode CLI commands** — `mode-status`, `mode-set`, `mode-detect`; `X-Mode` /
+  `X-Mode-Confidence` response headers on every routed request.
 
 ---
 
@@ -47,18 +57,36 @@ GateSwarm (:8900)
 
 ## Plan/Act Dual-Model Routing
 
-Every tier has two model assignments — one for **planning** (cheaper, good at exploration) and one for **acting** (more capable, good at execution):
+Every tier has two model assignments — one for **acting** (the default: implementation,
+execution, bug-fixing) and one for **planning** (exploration, drafting, architecture). For
+the upper tiers, planning routes to CLI reasoning agents (Codex, Claude Code) while acting
+stays on fast/cheap HTTP models:
 
 | Tier | Act Model | Act Provider | Plan Model | Plan Provider |
 |------|-----------|-------------|------------|---------------|
 | **trivial** | glm-4.5-air | zai | glm-4.5-air | zai |
 | **light** | deepseek-v4-flash | opencodego | deepseek-v4-flash | opencodego |
-| **moderate** | glm-4.7 | zai | cx/gpt-5.4-codex | codex-cli |
+| **moderate** | deepseek-v4-flash | opencodego | cx/gpt-5.4-codex | codex-cli |
 | **heavy** | deepseek-v4-pro | opencodego | cx/gpt-5.5-codex | codex-cli |
-| **intensive** | glm-5.1 | zai | cc/claude-sonnet-4-6 | claude-cli |
-| **extreme** | qwen3.7-plus | opencodego | cc/claude-opus-4-8 | claude-cli |
+| **intensive** | glm-5.1 | opencodego | cc/claude-sonnet-4-6 | claude-cli |
+| **extreme** | deepseek-v4-pro | opencodego | cc/claude-opus-4-8 | claude-cli |
 
-**Auto-detection**: The gateway scores 16 plan keywords (explain, research, design, compare, analyze, brainstorm, outline, review, document, plan, explore, summarize, evaluate, architect, draft, study) and 11 act keywords (implement, fix, build, write, create, deploy, refactor, test, debug, generate, execute). Override explicitly with `"mode": "plan"` or `"mode": "act"` in the request body, or via the `X-Mode` header.
+> Plan mode dispatches the *primary* request to the plan model (not just a header) — in
+> `act`/`auto` mode each agent keeps its own per-tier model. Values above are the live
+> `v04_config.json` defaults and are hot-reloaded; edit them with `mode-set` or directly.
+
+**Auto-detection** (`detectIntentMode`): the gateway scores stem-aware keyword hits plus
+intent patterns for each mode. **Act** is detected from imperative commands (`implement`,
+`fix`, `refactor`, `replace`, `spin up`, `migrate`, …) and bug/symptom reports (`it throws a
+500`, `the page is blank`, `can't upload`, `shows $0`, `stopped firing`). **Plan** is detected
+from deliberation phrasing (`brainstorm`, `outline`, `compare`, `weighing whether to…`,
+`how should we…`, `not sure how to…`, `before I write any code…`). Word-boundary matching
+avoids substring false positives (e.g. `explanation` no longer counts as `plan`, `codebase`
+no longer counts as `code`). Override explicitly with `"mode": "plan"` / `"mode": "act"` in
+the request body, or the `X-Mode` request header.
+
+On the labeled golden set (`eval/dataset.json`), detection scores **100% act recall, 93% plan
+recall**, with ambiguous prompts correctly left as `auto` 87% of the time.
 
 ---
 
@@ -90,12 +118,17 @@ All 6 tiers and their current model assignments (from `v04_config.json`, hot-rel
 |------|-------------|-----------|-------------|-----------|-----------|
 | **trivial** | 0.00 – 0.21 | glm-4.5-air | zai | 256 | — |
 | **light** | 0.21 – 0.28 | deepseek-v4-flash | opencodego | 512 | — |
-| **moderate** | 0.28 – 0.32 | glm-4.7 | zai | 2048 | — |
+| **moderate** | 0.28 – 0.32 | deepseek-v4-flash | opencodego | 2048 | — |
 | **heavy** | 0.32 – 0.37 | deepseek-v4-pro | opencodego | 4096 | ✓ |
-| **intensive** | 0.37 – 0.46 | glm-5.1 | zai | 4096 | — |
-| **extreme** | 0.46 – 1.00 | qwen3.7-plus | opencodego | 8192 | ✓ |
+| **intensive** | 0.37 – 0.46 | glm-5.1 | opencodego | 4096 | — |
+| **extreme** | 0.46 – 1.00 | deepseek-v4-pro | opencodego | 8192 | ✓ |
 
 Reasoning (`enable_thinking`) is on for heavy and extreme tiers. Tier models, plan/act overrides, and fallback chains are fully configurable via CLI or by editing `v04_config.json` directly.
+
+**Classifier accuracy** (measured by `eval/assess.ts` on the golden set): exact-tier 49%,
+within-±1-tier **88%**, with near-zero over-routing bias. v0.5.2 removed a confidence-based
+"escalate up one tier" rule that was systematically over-routing simple prompts to pricier
+models (it cost ~8 points of exact accuracy and added a +0.36-tier bias).
 
 ---
 
@@ -173,9 +206,13 @@ npx tsx src/gateswarm-cli.ts direct claude-cli cc/claude-sonnet-4-6 "What is 2+2
 
 | Provider | ID | Models |
 |----------|----|--------|
-| Alibaba Bailian | `bailian` | MiniMax-M2.5, qwen3.5-plus, qwen3.6-plus, qwen3.6-max-preview, kimi-k2.5 |
-| Z.AI | `zai` | glm-4.5-air, glm-4.7, glm-5.1 |
-| OpenCodeGo | `opencodego` | deepseek-v4-flash, deepseek-v4-pro, qwen3.7-plus |
+| Alibaba Bailian | `bailian` | qwen3.5-plus, qwen3.6-plus, qwen3-coder-plus, qwen3.6-max-preview, qwen4.6 |
+| Z.AI | `zai` | glm-4.5-air, glm-4.7, glm-4.7-flash, glm-5, glm-5-turbo, glm-5.1 |
+| OpenCodeGo | `opencodego` | deepseek-v4-flash, deepseek-v4-pro, qwen3.7-plus, qwen3.7-max, kimi-k2.5/k2.6, glm-5.1, minimax-m2.7/m3, mimo-v2.5 |
+
+> Provider model catalogs are validated against the routing config by
+> `eval/consistency-check.ts` (enforced in the test suite) — a tier or fallback can never
+> reference a model a provider doesn't serve.
 
 ### CLI Providers
 
