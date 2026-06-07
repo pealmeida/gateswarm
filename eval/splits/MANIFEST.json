@@ -1,0 +1,15 @@
+{
+  "version": "v1",
+  "seed": 42,
+  "k": 5,
+  "testFrac": 0.3,
+  "counts": {
+    "effort": 90,
+    "mode": 45
+  },
+  "hashes": {
+    "dataset.json": "6454042db0c5e85fef4dbf855c3ce0b8466d85f2d494177bae5f06da47656472",
+    "folds.v1.json": "686f6e698a307865bb3493483b0efb8336a2d619c59458a903b8a86b9eee0850",
+    "holdout.v1.json": "0ee0c512ac47e72fb3979352fa519d325c4e2acf9b320ffcb3fc14dfe6665e93"
+  }
+}

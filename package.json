@@ -45,6 +45,10 @@
     "benchmark": "tsx src/benchmark-logger.ts",
     "test": "vitest run",
     "test:watch": "vitest",
+    "eval:split": "tsx eval/split.ts",
+    "eval:cv": "tsx eval/cv.ts",
+    "eval:leaderboard": "tsx eval/leaderboard.ts",
+    "eval:features": "tsx eval/feature-report.ts",
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit"
   },
