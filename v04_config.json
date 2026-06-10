@@ -216,7 +216,9 @@
           "model": "kimi-k2.5",
           "provider": "opencodego"
         }
-      ]
+      ],
+      "plan_model": "deepseek-v4-pro",
+      "plan_provider": "opencodego"
     }
   },
   "feedback_loop": {
