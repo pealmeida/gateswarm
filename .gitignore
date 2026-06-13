@@ -45,3 +45,22 @@ pip-install-*/
 
 # Flash debug
 .flash/
+
+# Node dependencies
+node_modules/
+
+# Runtime logs
+tee/
+
+# Backup files
+*.bak
+
+# Sensitive agent registry (tokens — DO NOT COMMIT)
+data/agent-registry.json
+
+# Runtime data (regenerated at runtime — DO NOT COMMIT)
+data/feedback/
+data/rag/
+data/benchmark-logs/
+data/training/
+data/token-economy.json

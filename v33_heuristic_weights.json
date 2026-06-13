@@ -1,0 +1,62 @@
+{
+  "version": "v3.3-heuristic-llm-validated",
+  "trained": "2026-05-09T00:50:00Z",
+  "dataset": "50K Alpaca + LLM-validated on 1460 stratified samples",
+  "method": "heuristic-scoring-with-percentile-boundaries",
+  "llm_validation": {
+    "samples": 1460,
+    "agreement_formula_vs_llm": 0.99,
+    "note": "LLM (glm-4.7-flash with enable_thinking=false) confirmed formula labels on 99% of samples"
+  },
+  "scoring": {
+    "formula": "signals * 0.15 + log1p(word_count) * 0.08 + has_context * 0.1",
+    "signal_types": 9,
+    "signals": [
+      "question mark present",
+      "code keywords (function, def, class, import, etc.)",
+      "imperative verbs (write, create, build, implement, etc.)",
+      "arithmetic operators",
+      "sequential markers (first, then, finally, step)",
+      "constraint words (must, should, required, only)",
+      "context markers (given, consider, assume, based on)",
+      "architecture keywords",
+      "design/implementation keywords"
+    ]
+  },
+  "tier_boundaries": {
+    "trivial":    [0.00, 0.1557],
+    "light":      [0.1557, 0.1842],
+    "moderate":   [0.1842, 0.2788],
+    "heavy":      [0.2788, 0.3488],
+    "intensive":  [0.3488, 0.4611],
+    "extreme":    [0.4611, 1.00]
+  },
+  "tier_models": {
+    "trivial":   {"model": "glm-4.5-air",    "provider": "zai",     "max_tokens": 256},
+    "light":     {"model": "glm-4.7-flash",   "provider": "zai",     "max_tokens": 512},
+    "moderate":  {"model": "qwen3-coder-plus","provider": "bailian", "max_tokens": 2048},
+    "heavy":     {"model": "glm-5.1",         "provider": "zai",     "max_tokens": 2048},
+    "intensive": {"model": "qwen3.5-plus",    "provider": "bailian", "max_tokens": 4096},
+    "extreme":   {"model": "qwen3.6-plus",    "provider": "bailian", "max_tokens": 8192}
+  },
+  "score_statistics": {
+    "min": 0.129,
+    "max": 0.927,
+    "median": 0.316,
+    "mean": 0.298
+  },
+  "expected_distribution": {
+    "trivial": "2.7%",
+    "light": "15.2%",
+    "moderate": "26.3%",
+    "heavy": "24.7%",
+    "intensive": "20.9%",
+    "extreme": "10.1%"
+  },
+  "notes": [
+    "Cascade training failed (predicts everything as light) — using heuristic scoring instead",
+    "LLM judge confirmed formula labels at 99% — formula is reliable ground truth",
+    "Boundaries set at 5th/20th/45th/70th/90th percentiles of 50K Alpaca score distribution",
+    "Calibration: 3/7 exact (heuristic favors instruction-style prompts over conversational Qs)"
+  ]
+}

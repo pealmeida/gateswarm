@@ -1,4 +1,4 @@
-# Contributing to GateSwarm MoA Router
+# Contributing to GateSwarm MoMA Router
 
 Thank you for your interest! This project makes AI model routing more efficient through data-driven complexity classification.
 
@@ -60,7 +60,7 @@ npm run test
 
 ## Reporting Issues
 
-- Bug reports: [GitHub Issues](https://github.com/pealmeida/gateswarm-moa-router/issues)
+- Bug reports: [GitHub Issues](https://github.com/pealmeida/gateswarm-moma-router/issues)
 - Feature requests: GitHub Issues with `enhancement` label
 - Security vulnerabilities: See [SECURITY.md](SECURITY.md) — **do not** open public issues
 

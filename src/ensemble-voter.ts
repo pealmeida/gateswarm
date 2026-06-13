@@ -1,0 +1,331 @@
+/**
+ * GateSwarm MoMA Router v0.4.4 — Ensemble Voter
+ *
+ * Combines scoring methods into a weighted ensemble:
+ *   - Heuristic (55%): v3.3 9-signal formula (boosted from cascade redistribution)
+ *   - Cascade (0%):  DISABLED — no trained cascade weights (was 30%, dead code)
+ *   - RAG signal (25%): prior context complexity (was 15%)
+ *   - History bias (20%): user interaction patterns (was 15%)
+ *
+ * v0.4.4: History bias wired from persistent feedback store (was inert).
+ * v3.6: Cascade weight redistributed because cascade weights were NEVER loaded
+ * in any version. Declared 40/30/15/15 but cascade was always -1 (unavailable),
+ * so effective weights were heuristic 70% + RAG 30%. Now weights are honest.
+ *
+ * Confidence-based routing:
+ *   - confidence > 0.8 → route to predicted tier
+ *   - confidence 0.5–0.8 → escalate one tier (safety margin)
+ *   - confidence < 0.5 → route to intensive (safe default)
+ */
+
+import type { EffortLevel } from './types.js';
+import { getRecentEntries } from './feedback-store.js';
+
+export interface EnsembleVote {
+  finalScore: number;
+  tier: EffortLevel;
+  confidence: number;
+  components: {
+    heuristicScore: number;    // 0.0–1.0
+    cascadeScore: number;      // 0.0–1.0 (if available, else 0)
+    ragSignal: number;         // 0.0–1.0
+    historyBias: number;       // -0.1 to +0.1
+  };
+  method: 'ensemble-v0.4' | 'heuristic-fallback';
+  escalated: boolean;
+}
+
+// ─── Configurable Weights ───────────────────────────────
+
+let weights = {
+  heuristic: 0.55,
+  cascade: 0.00,  // v3.6: cascade disabled — no trained weights available
+  ragSignal: 0.25,
+  historyBias: 0.20,
+};
+
+export function setEnsembleWeights(w: Partial<typeof weights>): void {
+  weights = { ...weights, ...w };
+  // Normalize to sum=1
+  const total = Object.values(weights).reduce((a, b) => a + b, 0);
+  if (total > 0) {
+    for (const k of Object.keys(weights) as (keyof typeof weights)[]) {
+      weights[k] /= total;
+    }
+  }
+}
+
+export function getEnsembleWeights(): typeof weights {
+  return { ...weights };
+}
+
+// ─── Cascade Score ──────────────────────────────────────
+
+// Placeholder: cascade scores loaded from v3.2 weights file
+let cascadeWeights: number[] = [];
+let cascadeThresholds: number[] = [0.08, 0.18, 0.32, 0.52, 0.72];
+
+export function loadCascadeWeights(weightsArr: number[], thresholds: number[]): void {
+  cascadeWeights = weightsArr;
+  cascadeThresholds = thresholds;
+}
+
+function cascadeScore(prompt: string): number {
+  if (cascadeWeights.length === 0) return -1; // not loaded
+  // Simplified: use heuristic-derived features and cascade weights
+  // Full implementation: load trained logistic regression weights
+  const features = extractCascadeFeatures(prompt);
+  let score = 0;
+  for (let i = 0; i < Math.min(features.length, cascadeWeights.length); i++) {
+    score += features[i] * cascadeWeights[i];
+  }
+  return 1 / (1 + Math.exp(-score)); // sigmoid
+}
+
+function extractCascadeFeatures(text: string): number[] {
+  const words = text.toLowerCase().split(/\s+/).filter(Boolean);
+  const sentences = text.split(/[.!?]+/).filter(s => s.trim().length > 0);
+  const wc = words.length;
+  const sc = sentences.length;
+  const avgWl = wc > 0 ? words.reduce((s, w) => s + w.length, 0) / wc : 0;
+  const hasQ = text.includes('?');
+  const hasCode = /def |function |class |import |const |let |var /.test(text);
+  const hasArch = /architecture|system design|microservice|distributed/.test(text);
+  const hasTechDesign = /implementation|deployment|pipeline|schema/.test(text);
+  const hasImperative = /^(write|create|build|implement|generate|fix|debug|analyze)/.test(text.trim().toLowerCase());
+  const techTerms = words.filter(w => /^(api|http|rest|docker|kubernetes|database|algorithm|security|async|await|error|type)$/.test(w)).length;
+  const multiStep = /(first|then|next|finally|step\s*\d+)/.test(text.toLowerCase());
+  const needsContext = /(the file|this project|my code|our system|given that|consider)/.test(text.toLowerCase());
+  const ambiguity = /^(help|what|how|why|do|can|is|are)/.test(text.trim().toLowerCase()) ? 1 : 0;
+  const domainSpec = /(finance|legal|medical|engineering|compliance|gdpr|hipaa|wacc|ebitda)/.test(text.toLowerCase()) ? 1 : 0;
+
+  return [
+    sc / 10,          // sentence_count (normalized)
+    avgWl / 10,       // avg_word_length (normalized)
+    hasQ ? 1 : 0,
+    (hasQ && techTerms > 0) ? 1 : 0,
+    hasTechDesign ? 1 : 0,
+    hasCode ? 1 : 0,
+    hasArch ? 1 : 0,
+    wc / 100,         // word_count (normalized)
+    (sc > 4) ? 1 : 0, // four_plus sentences
+    hasImperative ? 1 : 0,
+    techTerms / 5,    // technical_terms (normalized)
+    multiStep ? 1 : 0,
+    needsContext ? 1 : 0,
+    domainSpec,
+    ambiguity,
+  ];
+}
+
+// ─── RAG Signal ─────────────────────────────────────────
+
+export interface RagSignalInput {
+  retrievedEntries: Array<{
+    tier: EffortLevel;
+    complexityAvg: number;
+    escalationHistory: boolean;
+  }>;
+}
+
+const tierComplexityMap: Record<EffortLevel, number> = {
+  trivial: 0.05,
+  light: 0.15,
+  moderate: 0.30,
+  heavy: 0.50,
+  intensive: 0.70,
+  extreme: 0.90,
+};
+
+export function calcRagSignal(input: RagSignalInput): number {
+  if (input.retrievedEntries.length === 0) return 0.5; // neutral
+  const tiers = input.retrievedEntries.map(e => tierComplexityMap[e.tier] ?? 0.5);
+  const avg = tiers.reduce((a, b) => a + b, 0) / tiers.length;
+  const escalationBonus = input.retrievedEntries.filter(e => e.escalationHistory).length > 0 ? 0.1 : 0;
+  return Math.min(1, avg + escalationBonus);
+}
+
+// ─── History Bias ──────────────────────────────────────────────
+// v0.4.4: Backed by the persistent feedback store, not a separate in-memory buffer.
+// This was the root cause of history bias always being 0.
+
+interface HistoryEntry {
+  timestamp: number;
+  promptTier: EffortLevel;
+  actualTier: EffortLevel | null;
+  adequacyScore: number;
+}
+
+// In-memory cache of feedback entries for fast history bias calculation
+let historyBuffer: HistoryEntry[] = [];
+let _historyLoaded = false;
+
+/**
+ * Populate the history buffer from the persistent feedback store.
+ * Called once at startup or after retraining.
+ */
+function loadHistoryFromFeedback(): void {
+  if (_historyLoaded) return;
+  const feedbackEntries = getRecentEntries(500);
+  historyBuffer = feedbackEntries.map(e => ({
+    timestamp: e.timestamp,
+    promptTier: e.predictedTier as EffortLevel,
+    actualTier: e.actualTier as EffortLevel | null,
+    adequacyScore: e.adequacyScore ?? 0.5,
+  }));
+  _historyLoaded = true;
+}
+
+/**
+ * Record a new interaction to the in-memory buffer.
+ * Also persisted via feedback-store.ts recordFeedback().
+ */
+export function recordInteraction(entry: Omit<HistoryEntry, 'timestamp'>): void {
+  historyBuffer.push({ ...entry, timestamp: Date.now() });
+  if (historyBuffer.length > 500) historyBuffer.shift();
+}
+
+/**
+ * Reset history cache — forces reload from feedback store on next call.
+ * Useful after retraining or manual intervention.
+ */
+export function resetHistoryCache(): void {
+  _historyLoaded = false;
+  historyBuffer = [];
+}
+
+/**
+ * Calculate history bias based on recent interaction patterns.
+ * Returns -0.1 to +0.1 adjustment.
+ * v0.4.4: Loads from persistent feedback store on first call.
+ */
+export function calcHistoryBias(recentCount = 50): number {
+  if (!_historyLoaded) loadHistoryFromFeedback();
+  const recent = historyBuffer.slice(-recentCount);
+  if (recent.length < 5) return 0;
+
+  // Check if recent prompts were systematically under/over-classified
+  const misclassified = recent.filter(e => e.actualTier !== null && e.promptTier !== e.actualTier);
+  if (misclassified.length < 3) return 0;
+
+  let bias = 0;
+  for (const e of misclassified) {
+    const tiers: EffortLevel[] = ['trivial', 'light', 'moderate', 'heavy', 'intensive', 'extreme'];
+    const promptIdx = tiers.indexOf(e.promptTier);
+    const actualIdx = tiers.indexOf(e.actualTier!);
+    if (actualIdx > promptIdx) bias += 0.02;  // under-classified → bias up
+    else bias -= 0.02;                         // over-classified → bias down
+  }
+
+  // Also factor in adequacy scores
+  const lowAdequacy = recent.filter(e => e.adequacyScore < 0.6).length / recent.length;
+  if (lowAdequacy > 0.3) bias += 0.05;  // many low-adequacy → bias up
+
+  return Math.max(-0.1, Math.min(0.1, bias));
+}
+
+// ─── Ensemble Vote ──────────────────────────────────────
+
+export interface EnsembleInput {
+  prompt: string;
+  heuristicScore: number;
+  ragSignal?: number;
+  enableCascade?: boolean;
+}
+
+// Tier cut points — MUST match scoreToEffort()/v04_config.json (v0.5.2 calibration).
+const TIER_BOUNDARIES = [0.21, 0.28, 0.32, 0.37, 0.46];
+
+/**
+ * Real confidence from distance to the nearest tier boundary.
+ * A score sitting deep inside a tier band is confident; one hugging a
+ * boundary is a near coin-flip. ~0.06 margin → full confidence; at the
+ * boundary → 0.5. Replaces the old constant 0.7 (which forced 100% escalation).
+ */
+function confidenceFromMargin(score: number): number {
+  let d = Math.min(score, 1 - score);
+  for (const b of TIER_BOUNDARIES) d = Math.min(d, Math.abs(score - b));
+  return Math.max(0.5, Math.min(0.95, 0.5 + (d / 0.06) * 0.45));
+}
+
+export function ensembleVote(input: EnsembleInput): EnsembleVote {
+  const heuristic = input.heuristicScore;
+
+  // Cascade score (if enabled and weights loaded)
+  const casc = (input.enableCascade !== false && cascadeWeights.length > 0)
+    ? cascadeScore(input.prompt)
+    : -1;
+
+  // RAG signal is OPTIONAL. When absent (no prior context), it must NOT be
+  // injected as a neutral 0.5 — doing so added a flat bias to every score.
+  const ragPresent = typeof input.ragSignal === 'number';
+  const rag = ragPresent ? (input.ragSignal as number) : null;
+
+  // History bias (additive, −0.1..+0.1)
+  const bias = calcHistoryBias();
+
+  let finalScore: number;
+  let confidence: number;
+  let method: 'ensemble-v0.4' | 'heuristic-fallback';
+
+  if (casc < 0 || casc === undefined) {
+    // Active default path (no trained cascade).
+    method = 'heuristic-fallback';
+    if (ragPresent) {
+      // Heuristic primary, RAG as a light nudge.
+      finalScore = heuristic * 0.8 + (rag as number) * 0.2 + bias;
+    } else {
+      // No RAG context → trust the heuristic directly (full dynamic range).
+      finalScore = heuristic + bias;
+    }
+    finalScore = Math.max(0, Math.min(1, finalScore));
+    confidence = confidenceFromMargin(finalScore);
+    if (ragPresent) {
+      // Lower confidence when heuristic and RAG disagree.
+      const agreement = 1 - Math.min(Math.abs(heuristic - (rag as number)), 1);
+      confidence *= 0.7 + 0.3 * agreement;
+    }
+  } else {
+    // Full ensemble (trained cascade available).
+    method = 'ensemble-v0.4';
+    const ragVal = ragPresent ? (rag as number) : heuristic; // fall back to heuristic, not 0.5
+    finalScore =
+      heuristic * weights.heuristic +
+      casc * weights.cascade +
+      ragVal * weights.ragSignal +
+      bias;
+    finalScore = Math.max(0, Math.min(1, finalScore));
+
+    // Confidence = agreement between methods (genuine variance-based).
+    const methods = ragPresent ? [heuristic, casc, rag as number] : [heuristic, casc];
+    const mean = methods.reduce((a, b) => a + b, 0) / methods.length;
+    const variance = methods.reduce((s, m) => s + (m - mean) ** 2, 0) / methods.length;
+    confidence = Math.max(0, 1 - Math.sqrt(variance) * 3);
+  }
+
+  // Tier from score. v0.5.2: the previous "escalate up one tier on confidence
+  // < 0.55" rule was removed — measured against the golden set it cut exact
+  // accuracy by ~8 points (41% vs 49%) and introduced a systematic +0.36-tier
+  // over-routing bias (paying for bigger models on simple prompts). Near a
+  // boundary the score is already a coin-flip; bumping up is pure upward bias,
+  // not signal. Trust the calibrated band the score lands in.
+  const tier = scoreToEffort(finalScore);
+  const escalated = false;
+
+  return {
+    finalScore,
+    tier,
+    confidence,
+    components: {
+      heuristicScore: heuristic,
+      cascadeScore: casc < 0 ? 0 : casc,
+      ragSignal: ragPresent ? (rag as number) : 0,
+      historyBias: bias,
+    },
+    method,
+    escalated,
+  };
+}
+
+import { scoreToEffort as _scoreToEffort } from './intent-engine.js';
+export const scoreToEffort = _scoreToEffort;

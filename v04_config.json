@@ -1,0 +1,239 @@
+{
+  "version": "v0.5.1-cli-providers",
+  "trained": "2026-05-27T23:59:52.685Z",
+  "method": "ensemble-voter-with-feedback-loop",
+  "ensemble": {
+    "weights": {
+      "heuristic": 0.55,
+      "cascade": 0,
+      "ragSignal": 0.25,
+      "historyBias": 0.2
+    },
+    "confidenceThresholds": {
+      "high": 0.8,
+      "low": 0.5
+    },
+    "lowConfidenceAction": "escalateOneTier"
+  },
+  "scoring": {
+    "formula": "signals * 0.15 + log1p(word_count) * 0.08 + has_context * 0.1",
+    "signal_types": 9,
+    "feature_count": 25,
+    "signals": [
+      "question mark",
+      "code keywords",
+      "imperative verbs",
+      "arithmetic operators",
+      "sequential markers",
+      "constraint words",
+      "context markers",
+      "architecture keywords",
+      "design keywords"
+    ]
+  },
+  "tier_boundaries": {
+    "trivial": [
+      0,
+      0.21
+    ],
+    "light": [
+      0.21,
+      0.28
+    ],
+    "moderate": [
+      0.28,
+      0.32
+    ],
+    "heavy": [
+      0.32,
+      0.37
+    ],
+    "intensive": [
+      0.37,
+      0.46
+    ],
+    "extreme": [
+      0.46,
+      1
+    ]
+  },
+  "tier_models": {
+    "trivial": {
+      "model": "glm-4.5-air",
+      "provider": "zai",
+      "max_tokens": 256,
+      "enable_thinking": false,
+      "plan_model": "glm-4.5-air",
+      "plan_provider": "zai",
+      "plan_max_tokens": 256,
+      "plan_enable_thinking": false,
+      "fallback_models": [
+        {
+          "model": "minimax-m2.7",
+          "provider": "opencodego"
+        },
+        {
+          "model": "glm-4.5-air",
+          "provider": "zai"
+        },
+        {
+          "model": "pi/qwen3.5-plus",
+          "provider": "pi-agent"
+        }
+      ]
+    },
+    "light": {
+      "model": "deepseek-v4-flash",
+      "provider": "opencodego",
+      "max_tokens": 512,
+      "enable_thinking": false,
+      "plan_model": "deepseek-v4-flash",
+      "plan_provider": "opencodego",
+      "plan_max_tokens": 512,
+      "plan_enable_thinking": false,
+      "fallback_models": [
+        {
+          "model": "minimax-m2.7",
+          "provider": "opencodego"
+        },
+        {
+          "model": "glm-4.5-air",
+          "provider": "zai"
+        },
+        {
+          "model": "pi/glm-4.7-flash",
+          "provider": "pi-agent"
+        }
+      ]
+    },
+    "moderate": {
+      "model": "deepseek-v4-flash",
+      "provider": "opencodego",
+      "max_tokens": 2048,
+      "enable_thinking": false,
+      "plan_model": "cx/gpt-5.4-codex",
+      "plan_provider": "codex-cli",
+      "plan_max_tokens": 1024,
+      "plan_enable_thinking": false,
+      "fallback_models": [
+        {
+          "model": "qwen3.5-plus",
+          "provider": "bailian"
+        },
+        {
+          "model": "kimi-k2.5",
+          "provider": "opencodego"
+        },
+        {
+          "model": "glm-4.7",
+          "provider": "zai"
+        },
+        {
+          "model": "pi/glm-4.7-flash",
+          "provider": "pi-agent"
+        }
+      ]
+    },
+    "heavy": {
+      "model": "deepseek-v4-pro",
+      "provider": "opencodego",
+      "max_tokens": 4096,
+      "enable_thinking": true,
+      "plan_model": "cx/gpt-5.5-codex",
+      "plan_provider": "codex-cli",
+      "plan_max_tokens": 2048,
+      "plan_enable_thinking": false,
+      "fallback_models": [
+        {
+          "model": "cx/gpt-5.5-codex",
+          "provider": "codex-cli"
+        },
+        {
+          "model": "qwen3.6-plus",
+          "provider": "bailian"
+        },
+        {
+          "model": "qwen3.5-plus",
+          "provider": "bailian"
+        },
+        {
+          "model": "glm-4.7",
+          "provider": "zai"
+        }
+      ]
+    },
+    "intensive": {
+      "model": "glm-5.1",
+      "provider": "opencodego",
+      "max_tokens": 4096,
+      "enable_thinking": false,
+      "plan_model": "cc/claude-sonnet-4-6",
+      "plan_provider": "claude-cli",
+      "plan_max_tokens": 2048,
+      "plan_enable_thinking": false,
+      "fallback_models": [
+        {
+          "model": "cc/claude-sonnet-4-6",
+          "provider": "claude-cli"
+        },
+        {
+          "model": "cx/gpt-5.4-codex",
+          "provider": "codex-cli"
+        },
+        {
+          "model": "qwen3.6-plus",
+          "provider": "bailian"
+        },
+        {
+          "model": "kimi-k2.5",
+          "provider": "opencodego"
+        }
+      ]
+    },
+    "extreme": {
+      "model": "deepseek-v4-pro",
+      "provider": "opencodego",
+      "max_tokens": 8192,
+      "enable_thinking": true,
+      "plan_model": "deepseek-v4-pro",
+      "plan_provider": "opencodego",
+      "plan_max_tokens": 4096,
+      "plan_enable_thinking": true,
+      "fallback_models": [
+        {
+          "model": "cx/gpt-5.5-codex",
+          "provider": "codex-cli"
+        },
+        {
+          "model": "qwen3.6-max-preview",
+          "provider": "bailian"
+        },
+        {
+          "model": "qwen3.5-plus",
+          "provider": "bailian"
+        },
+        {
+          "model": "kimi-k2.5",
+          "provider": "opencodego"
+        }
+      ]
+    }
+  },
+  "feedback_loop": {
+    "retrainAfterInteractions": 500,
+    "minSamplesPerTier": 50,
+    "maxWeightChangePct": 0.2,
+    "llmJudgeModel": "bailian/qwen3.5-plus",
+    "llmJudgeSamplingRate": 0.1,
+    "cascadeRetraining": true,
+    "cascadeRetrainingSource": "real_feedback_labels",
+    "abTestHoldoutPct": 0.1
+  },
+  "rag": {
+    "inMemory": true,
+    "sqlite": true,
+    "maxEntries": 10000,
+    "ttlMs": 86400000,
+    "queryMaxResults": 3
+  }
+}

@@ -14,7 +14,7 @@ GateSwarm v0.4.4 introduced **persistent storage** for RAG, feedback, and traini
 ## 2. File Structure
 
 ```
-gateswarm-moa-router/data/
+gateswarm-moma-router/data/
 ├── rag/
 │   └── index.json              ← RAG entries (interaction + compression)
 ├── feedback/

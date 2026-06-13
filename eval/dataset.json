@@ -1,0 +1,186 @@
+{
+  "effort": [
+    {
+      "tier": "trivial",
+      "prompts": [
+        "hey, good morning",
+        "what's the capital of Japan",
+        "is 17 a prime number",
+        "how do you spell restaurant",
+        "what's 48 divided by 6",
+        "who wrote Romeo and Juliet",
+        "thanks, that helped!",
+        "what year did World War 2 end",
+        "convert 10 km to miles",
+        "what day of the week is it today",
+        "how many ounces are in a pound",
+        "what does CPU stand for",
+        "is the sky blue, yes or no",
+        "what time zone is London in",
+        "give me a synonym for happy"
+      ]
+    },
+    {
+      "tier": "light",
+      "prompts": [
+        "Can you shorten this sentence for me: We are writing to inform you that your order has shipped and should arrive soon.",
+        "What does the term annual recurring revenue actually mean?",
+        "Convert this date 03/07/2025 into a more readable format like written-out month and day.",
+        "Sum up what this means in one line: the meeting got pushed to Friday because the client needed more time.",
+        "What's the difference between gross and net income, in plain terms?",
+        "Rewrite this so it sounds a bit more polite: Send me the report now.",
+        "Give me a quick definition of what a webhook is.",
+        "Turn 2.5 kilometers into miles for me.",
+        "Make this headline punchier: New Coffee Shop Opens Downtown Next Week.",
+        "What does the HTTP 404 status code mean?",
+        "Reword this for a text message instead of an email: I would like to confirm our appointment scheduled for tomorrow afternoon.",
+        "Explain what a fiscal quarter is in one or two sentences.",
+        "Take this list of three items and turn it into a single comma-separated line: apples, bread, eggs.",
+        "Summarize this in a sentence: the app keeps crashing whenever I try to upload a photo larger than ten megabytes.",
+        "What's a simpler word I could use instead of utilize in a casual email?"
+      ]
+    },
+    {
+      "tier": "moderate",
+      "prompts": [
+        "Write a Python function that checks whether a given string is a valid palindrome, ignoring spaces and punctuation.",
+        "Can you explain how a hash table actually works and why lookups are usually fast?",
+        "My JavaScript loop prints undefined for the last item in the array. Here's the snippet, what's wrong?",
+        "I need a SQL query to find all customers who placed more than three orders last month.",
+        "Write a function in Go that takes a slice of integers and returns the second largest value.",
+        "Explain the difference between processes and threads in a way a junior dev would get.",
+        "Convert this list of users into a function that groups them by their country field.",
+        "What's causing this off-by-one error in my pagination code? It skips the first record on page two.",
+        "Write a small helper that retries a failing HTTP request up to three times with a short delay.",
+        "Help me understand how garbage collection works in Java and when objects get collected.",
+        "Give me a regex that matches valid email addresses and a quick explanation of each part.",
+        "Write a function that flattens a nested array of arbitrary depth into a single flat array.",
+        "Explain how JWT authentication works from login to validating a request on the server.",
+        "I have a CSV of sales records; write a script that totals revenue per product and sorts descending.",
+        "Walk me through why my recursive Fibonacci is so slow and how memoization would fix it."
+      ]
+    },
+    {
+      "tier": "heavy",
+      "prompts": [
+        "Build a token bucket rate limiter in Go that supports per-client limits and burst capacity, with thread-safe refill logic.",
+        "Write a recursive descent parser for a small arithmetic grammar that handles parentheses, operator precedence, and unary minus.",
+        "Implement an LRU cache with O(1) get and put using a hash map plus doubly linked list, including eviction.",
+        "I need a retry helper with exponential backoff and jitter that respects a max attempts cap and a deadline. Walk me through the implementation.",
+        "Design a connection pool for a database client that handles idle timeouts, max connections, and graceful checkout under contention.",
+        "Create a debounce and throttle utility pair in TypeScript with proper cleanup, leading and trailing edge options.",
+        "Write a function that merges k sorted linked lists efficiently and explain the time complexity tradeoff you chose.",
+        "Implement a sliding window log-based rate counter that gives accurate per-minute request counts without storing every timestamp.",
+        "Build a small event-driven state machine for an order lifecycle: pending, paid, shipped, cancelled, with guarded transitions.",
+        "Design a circuit breaker that trips after a failure threshold, half-opens after a cooldown, and tracks rolling error rates.",
+        "Help me write a Trie that supports insert, search, prefix matching, and wildcard single-character queries.",
+        "Implement a job scheduler that runs tasks at fixed intervals, handles overlapping runs, and supports pause and resume per task.",
+        "I want a streaming CSV parser that handles quoted fields, embedded newlines, and configurable delimiters without loading the whole file.",
+        "Write a binary serialization layer for a struct with versioning so older readers can skip unknown fields gracefully.",
+        "Build a priority queue backed by a binary heap and use it to implement Dijkstra shortest path on a weighted graph."
+      ]
+    },
+    {
+      "tier": "intensive",
+      "prompts": [
+        "Our checkout latency spiked from 200ms to 1.4s after the last deploy and I'm not sure if it's the new caching layer or the database connection pool. Walk me through how to isolate the cause.",
+        "I have ten years of monthly revenue, churn, and ad-spend data for three product lines. Figure out which channels actually drive retention versus just acquisition and how confident we can be.",
+        "Redesign our image-upload pipeline so it handles 50MB files, retries on failure, deduplicates, and stays under our current memory budget. Lay out the tradeoffs.",
+        "Compare adopting a monorepo against keeping our twelve separate repos given our team size, CI costs, and how often changes span services, then recommend a path.",
+        "We need to migrate authentication from session cookies to JWTs without logging everyone out and without breaking the mobile apps mid-rollout. How should we sequence it?",
+        "Profile why this report-generation job uses 8GB of RAM and takes four minutes, then propose specific changes ranked by effort versus payoff.",
+        "Plan a phased rewrite of our legacy billing engine into the new service while both run in parallel and reconcile nightly so finance never sees a discrepancy.",
+        "Given conflicting requirements from sales (fast onboarding) and security (strict approvals), design an account-provisioning flow that satisfies both and explain the compromises.",
+        "Help me restructure this 4000-word strategy memo so the argument builds logically, the evidence supports each claim, and the recommendations don't contradict the risks section.",
+        "We're seeing intermittent data corruption when two services write to the same record. Diagnose the likely race conditions and lay out fixes with their consistency tradeoffs.",
+        "Model the cash-flow impact of switching from annual to monthly billing across our customer base, accounting for churn changes, deferred revenue, and collection timing.",
+        "Refactor our error-handling so every service reports failures consistently, retries are bounded, and we stop swallowing exceptions, without rewriting business logic everywhere.",
+        "Design a feature-flag rollout strategy for shipping the new search backend to 5% then 100% of users while keeping a clean rollback path and measuring impact.",
+        "Audit our Kubernetes setup for why pods get evicted under load and recommend resource limits, autoscaling rules, and scheduling changes with the reasoning behind each.",
+        "I need to consolidate three overlapping customer datasets with mismatched IDs and date formats into one clean source of truth, deciding how to resolve conflicts."
+      ]
+    },
+    {
+      "tier": "extreme",
+      "prompts": [
+        "Design a globally distributed ledger that guarantees strict serializability across five regions while surviving any single region going dark, and walk me through the consensus and clock-sync choices.",
+        "We need to migrate a 40-billion-row monolithic Postgres into a sharded multi-tenant fleet with zero downtime, online resharding, and consistent cross-shard transactions. How would you stage this end to end?",
+        "Architect a real-time fraud detection platform processing two million events per second with sub-100ms decisions, exactly-once semantics, and a feedback loop that retrains models without disrupting live scoring.",
+        "Help me think through a multi-region active-active CQRS system where writes can originate anywhere, conflicts must auto-resolve deterministically, and read replicas stay within a bounded staleness window.",
+        "Lay out a complete plan to rewrite our payments core from a synchronous monolith into an event-sourced saga-based architecture while keeping reconciliation provably correct during the cutover.",
+        "I want to build a planet-scale object store with erasure coding, self-healing on disk failure, tunable consistency per bucket, and predictable tail latency under correlated failures. Where do I start?",
+        "Reason through how to shard and replicate a social graph of a billion users so that friend-of-friend queries stay fast, hot nodes don't melt, and a datacenter loss doesn't lose edges.",
+        "Propose an end-to-end strategy for hedging a multi-currency derivatives book in real time given correlated market shocks, liquidity constraints, regulatory capital rules, and conflicting desk objectives.",
+        "Design a federated learning system across thousands of hospitals that preserves differential privacy, tolerates dropout and stragglers, defends against poisoning, and still converges on a useful model.",
+        "Work out the full failover and quorum design for a metadata service that must never lose a committed write, recover automatically from split-brain, and keep latency stable during leader churn.",
+        "How would you build a deterministic, reproducible build-and-deploy pipeline for a thousand-microservice estate with progressive rollout, automatic rollback on SLO breach, and cross-service version compatibility guarantees?",
+        "Plan a research-grade evaluation of three competing consensus protocols under partition, clock skew, and Byzantine nodes, then synthesize which to adopt given our latency and durability targets.",
+        "Help me redesign our streaming data platform so that backfills, late-arriving events, schema evolution, and exactly-once sinks all coexist without ever producing duplicate or dropped records downstream.",
+        "I'm trying to architect a globally consistent inventory system for flash sales where overselling is impossible, latency is low everywhere, and a regional outage degrades gracefully instead of failing.",
+        "Untangle how to do a live cross-cutting refactor splitting our shared auth, billing, and tenancy layers out of the monolith while three teams keep shipping and zero customer sessions break."
+      ]
+    }
+  ],
+  "mode": [
+    {
+      "mode": "plan",
+      "prompts": [
+        "I want to add real-time collaboration to our doc editor but I'm torn between CRDTs and operational transforms, can you walk me through the tradeoffs before we commit?",
+        "Help me brainstorm a few different ways we could structure the onboarding flow for first-time users",
+        "I am not sure how to structure the auth layer for this app, walk me through the possibilities",
+        "Let's outline a migration roadmap for moving our monolith to microservices over the next two quarters",
+        "What approach would you take for caching here, Redis vs in-memory vs a CDN edge layer? Just thinking out loud for now",
+        "Before I write any code, I want to map out the data model for a multi-tenant billing system",
+        "We keep getting flaky tests in CI and I haven't decided how to tackle it, what are my options?",
+        "Sketch out the high level architecture for an event-driven order processing pipeline",
+        "I'm weighing whether to build our own feature flag system or pay for LaunchDarkly, talk me through the considerations",
+        "Considering how to split this 4000-line component, where would the natural boundaries be?",
+        "Give me a rough plan for rolling out dark mode across the whole product without a huge rewrite",
+        "How should we think about rate limiting our public API? I haven't picked a strategy yet",
+        "Let's design the schema for storing nested comment threads, I want to compare a few modeling approaches",
+        "Thinking about the offline-first sync story for the mobile app, what are the main paths I could go down?",
+        "Walk me through how you'd approach reducing our cold start times on the serverless functions, top to bottom"
+      ]
+    },
+    {
+      "mode": "act",
+      "prompts": [
+        "Add a dark mode toggle to the settings page and persist the choice in localStorage",
+        "the login button throws a 500, here is the stack trace: TypeError: Cannot read properties of undefined (reading 'token') at AuthController.signIn",
+        "Refactor the payment service to use the new Stripe SDK and update the webhook handler accordingly",
+        "Bump the Postgres connection pool to 50 and redeploy staging",
+        "Users on Safari can't upload images, the file picker just closes silently",
+        "Migrate the users table to add a phone_number column with a unique index",
+        "Write a Python script that scrapes the sitemap and exports all URLs to a CSV",
+        "our nightly cron job stopped firing after the last release, logs show no errors",
+        "Spin up a new Redis cache instance and point the session store at it",
+        "Change the button color from blue to green across the whole dashboard",
+        "Cart total shows $0 when there's exactly one item but works fine with two or more",
+        "Set up GitHub Actions to run the test suite on every pull request",
+        "Generate a JWT auth middleware for the Express API with refresh token support",
+        "checkout page is blank on mobile, console says Maximum call stack size exceeded in CartReducer",
+        "Replace all the inline styles in the header component with Tailwind classes"
+      ]
+    },
+    {
+      "mode": "ambiguous",
+      "prompts": [
+        "the user model",
+        "thoughts on caching?",
+        "next steps?",
+        "what about the auth flow",
+        "hmm, the retry logic",
+        "is this the right approach for the queue",
+        "tell me more about how the router picks a mode",
+        "the migration script",
+        "where does this leave us with the websocket reconnect",
+        "i'm not sure about the pricing tiers",
+        "so about that bug from yesterday",
+        "the way we handle PII scrubbing right now",
+        "any ideas on the rate limiting situation",
+        "wondering if vitest is even the right call here",
+        "the dashboard performance"
+      ]
+    }
+  ]
+}

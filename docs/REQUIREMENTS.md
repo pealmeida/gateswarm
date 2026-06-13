@@ -1,4 +1,4 @@
-# GateSwarm MoA Router v0.4.4 — Technical Requirements
+# GateSwarm MoMA Router v0.4.4 — Technical Requirements
 
 **Version:** 0.4.4-context-aware
 **Date:** 2026-05-14
@@ -11,7 +11,7 @@
 
 | Component | File | Purpose |
 |---|---|---|
-| API Gateway | `moa-gateway.ts` | HTTP server, request orchestration, endpoint routing |
+| API Gateway | `moma-gateway.ts` | HTTP server, request orchestration, endpoint routing |
 | Intent Engine | `intent-engine-v04.ts` | Ensemble complexity scoring |
 | Ensemble Voter | `ensemble-voter.ts` | Weighted vote with confidence + history bias |
 | Feature Extractor | `feature-extractor-v04.ts` | 25-feature prompt analysis |
@@ -76,7 +76,7 @@ ZAI_BASE=https://api.z.ai/api/coding/paas/v4
 
 ### 2.1 Authentication
 
-Agents authenticate via `Authorization: Bearer moa-<key>` header. Keys are managed by `agent-registry.ts`.
+Agents authenticate via `Authorization: Bearer moma-<key>` header. Keys are managed by `agent-registry.ts`.
 
 If no valid API key is provided, the gateway falls back to the `default` agent.
 

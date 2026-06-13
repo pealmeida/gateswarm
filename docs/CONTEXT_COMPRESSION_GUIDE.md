@@ -7,7 +7,7 @@
 
 ## 1. Why Compression Matters
 
-Every request to the MoA gateway includes the **full conversation history**. After 20 turns with tool usage, a session can contain 200+ messages totaling 500K+ tokens. No single API call can send this much, and even if it could, the cost would be prohibitive.
+Every request to the MoMA gateway includes the **full conversation history**. After 20 turns with tool usage, a session can contain 200+ messages totaling 500K+ tokens. No single API call can send this much, and even if it could, the cost would be prohibitive.
 
 Compression solves this by selectively reducing the conversation to fit within each model's practical input budget.
 

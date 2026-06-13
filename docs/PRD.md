@@ -1,4 +1,4 @@
-# GateSwarm MoA Router v0.4.4 — Product Requirements Document
+# GateSwarm MoMA Router v0.4.4 — Product Requirements Document
 
 **Version:** 0.4.4-context-aware
 **Date:** 2026-05-14
@@ -44,7 +44,7 @@ GateSwarm is an **intelligent routing layer** that automatically:
 - Technical: reads logs, understands architecture, adjusts config
 
 ### Primary Agent (Digital Twin)
-- Uses GateSwarm as its MoA provider
+- Uses GateSwarm as its MoMA provider
 - Wants: reliable routing, persistent context, self-improvement
 - Technical: configures tiers, monitors feedback, enables training
 

@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MoA Cross-Platform</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, -apple-system, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; }
+    h1 { margin-bottom: 0.5rem; }
+    .status { display: flex; gap: 0.5rem; margin: 1rem 0; flex-wrap: wrap; }
+    .badge { padding: 0.25rem 0.75rem; border-radius: 999px; font-size: 0.85rem; font-weight: 500; }
+    .badge--green { background: #d1fae5; color: #065f46; }
+    .badge--yellow { background: #fef3c7; color: #92400e; }
+    .badge--gray { background: #f3f4f6; color: #374151; }
+    #chat { border: 1px solid #e5e7eb; border-radius: 8px; height: 400px; overflow-y: auto; padding: 1rem; margin: 1rem 0; }
+    .msg { margin-bottom: 0.75rem; }
+    .msg--user { text-align: right; color: #2563eb; }
+    .msg--ai { text-align: left; color: #111827; }
+    .input-row { display: flex; gap: 0.5rem; }
+    #prompt { flex: 1; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb; border-radius: 6px; font-size: 1rem; }
+    #send { padding: 0.5rem 1.5rem; background: #2563eb; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 1rem; }
+    #send:disabled { background: #93c5fd; cursor: not-allowed; }
+  </style>
+</head>
+<body>
+  <h1>🧠 MoA Cross-Platform</h1>
+  <p>Browser-native Mixture of Agents</p>
+
+  <div class="status">
+    <span id="backend-badge" class="badge badge--gray">Detecting...</span>
+    <span id="online-badge" class="badge badge--green">Online</span>
+    <span id="tier-badge" class="badge badge--gray">Idle</span>
+  </div>
+
+  <div id="chat"></div>
+
+  <div class="input-row">
+    <input id="prompt" type="text" placeholder="Type a prompt..." autocomplete="off" />
+    <button id="send">Send</button>
+  </div>
+
+  <script type="module">
+    import { createMoA } from '../src/index.ts';
+
+    const chatEl = document.getElementById('chat');
+    const promptEl = document.getElementById('prompt');
+    const sendBtn = document.getElementById('send');
+    const backendBadge = document.getElementById('backend-badge');
+    const onlineBadge = document.getElementById('online-badge');
+    const tierBadge = document.getElementById('tier-badge');
+
+    let moa = null;
+
+    async function init() {
+      backendBadge.textContent = 'Initializing...';
+      backendBadge.className = 'badge badge--yellow';
+
+      moa = await createMoA({
+        onStatusChange: (status) => {
+          backendBadge.textContent = `Backend: ${status.backend}`;
+          backendBadge.className = 'badge badge--green';
+          onlineBadge.textContent = status.online ? 'Online' : 'Offline';
+          onlineBadge.className = status.online ? 'badge badge--green' : 'badge badge--yellow';
+        },
+      });
+
+      const status = moa.getStatus();
+      backendBadge.textContent = `Backend: ${status.backend}`;
+      backendBadge.className = 'badge badge--green';
+      addMessage('system', `✅ Initialized — Backend: ${status.backend}`);
+    }
+
+    function addMessage(role, text) {
+      const div = document.createElement('div');
+      div.className = `msg msg--${role}`;
+      div.textContent = text;
+      chatEl.appendChild(div);
+      chatEl.scrollTop = chatEl.scrollHeight;
+    }
+
+    async function handleSend() {
+      const prompt = promptEl.value.trim();
+      if (!prompt || !moa) return;
+
+      promptEl.value = '';
+      sendBtn.disabled = true;
+      addMessage('user', prompt);
+      tierBadge.textContent = 'Processing...';
+      tierBadge.className = 'badge badge--yellow';
+
+      let response = '';
+      try {
+        for await (const chunk of moa.process(prompt)) {
+          if (chunk.token) response += chunk.token;
+          tierBadge.textContent = `Generating...`;
+        }
+        addMessage('ai', response);
+      } catch (err) {
+        addMessage('ai', `❌ Error: ${err.message}`);
+      }
+
+      tierBadge.textContent = 'Idle';
+      tierBadge.className = 'badge badge--gray';
+      sendBtn.disabled = false;
+    }
+
+    sendBtn.addEventListener('click', handleSend);
+    promptEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') handleSend();
+    });
+
+    init().catch((err) => {
+      backendBadge.textContent = 'Failed';
+      backendBadge.className = 'badge badge--yellow';
+      addMessage('system', `❌ Init failed: ${err.message}`);
+    });
+  </script>
+</body>
+</html>

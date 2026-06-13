@@ -1,4 +1,4 @@
-# GateSwarm MoA Router v0.4.4 — Architecture
+# GateSwarm MoMA Router v0.4.4 — Architecture
 
 **Version:** 0.4.4-context-aware
 **Date:** 2026-05-14
@@ -8,7 +8,7 @@
 
 ## 1. Overview
 
-GateSwarm MoA Router is a **multi-agent API gateway** that sits between any LLM client (any LLM client) and multiple LLM providers (Bailian/Qwen, ZAI/GLM, OpenRouter). It intercepts every request, scores prompt complexity, routes to the optimal model per effort tier, compresses long conversations, and continuously learns from feedback.
+GateSwarm MoMA Router is a **multi-agent API gateway** that sits between any LLM client (any LLM client) and multiple LLM providers (Bailian/Qwen, ZAI/GLM, OpenRouter). It intercepts every request, scores prompt complexity, routes to the optimal model per effort tier, compresses long conversations, and continuously learns from feedback.
 
 ```
 ┌─────────────┐     ┌──────────────────────────────────────┐     ┌──────────────────┐
@@ -35,9 +35,9 @@ GateSwarm MoA Router is a **multi-agent API gateway** that sits between any LLM 
 ## 2. System Components
 
 ```
-gateswarm-moa-router/
+gateswarm-moma-router/
 ├── src/
-│   ├── moa-gateway.ts          ← HTTP server, request pipeline, orchestration
+│   ├── moma-gateway.ts          ← HTTP server, request pipeline, orchestration
 │   ├── intent-engine-v04.ts    ← Ensemble scoring (heuristic + RAG + history)
 │   ├── ensemble-voter.ts       ← Weighted ensemble vote with confidence
 │   ├── feature-extractor-v04.ts← 25-feature prompt complexity extractor
@@ -193,6 +193,27 @@ heuristic_score = signals × 0.15 + log1p(word_count) × 0.08 + has_context × 0
 | 0.2788 – 0.3488 | heavy | qwen3.5-plus | bailian |
 | 0.3488 – 0.4611 | intensive | qwen3.5-plus | bailian |
 | 0.4611 – 1.00 | extreme | qwen3.6-plus | bailian |
+
+### Plan/Act Mode Resolution
+
+After complexity scoring assigns a tier, the router resolves an **intent mode** — `plan` or `act` — before selecting the final model. Mode resolution order:
+
+1. Explicit `body.mode` field (`"plan"` | `"act"`) — highest priority
+2. `X-Mode` request header
+3. Auto-detection via keyword scoring: 16 plan keywords (explore, draft, brainstorm, outline, …) vs. 11 act keywords (implement, execute, write, fix, deploy, …); whichever side scores higher wins; ties default to `act`
+
+`act` mode (default) selects the tier's standard `model`/`provider`. `plan` mode selects the lighter `plan_model`/`plan_provider` from the same tier config, enabling cost savings for exploration tasks without changing the complexity tier. Both the resolved mode and its confidence score are returned to the client via `X-Mode` and `X-Mode-Confidence` response headers.
+
+| Tier | Act model (standard) | Plan model (cheaper) |
+|---|---|---|
+| trivial | glm-4.5-air | glm-4.5-air (same) |
+| light | glm-4.7-flash | glm-4.5-air |
+| moderate | MiniMax-M2.5 | glm-4.7-flash |
+| heavy | qwen3.5-plus | MiniMax-M2.5 |
+| intensive | qwen3.5-plus | MiniMax-M2.5 |
+| extreme | qwen3.6-plus | qwen3.5-plus |
+
+Plan model fields (`plan_model`, `plan_provider`, `plan_max_tokens`, `plan_enable_thinking`) are configured per-tier in `v04_config.json` and are updatable live via the `mode-set` CLI command.
 
 ---
 
@@ -440,20 +461,20 @@ Any agent connects via:
 
 ```yaml
 base_url: http://localhost:8900/v1
-api_key:  moa-<agent-key>  # from agent registry
+api_key:  moma-<agent-key>  # from agent registry
 ```
 
 Pi agent config (`~/.pi/agent/models.json`):
 ```json
 {
   "providers": {
-    "moa": {
+    "moma": {
       "baseUrl": "http://localhost:8900/v1",
-      "apiKey": "moa-<jack-key>",
+      "apiKey": "moma-<jack-key>",
       "api": "openai-completions",
       "models": [{
         "id": "gateswarm",
-        "name": "GateSwarm MoA v0.4.4 (TurboQuant v3.6 + Context-Aware)"
+        "name": "GateSwarm MoMA v0.4.4 (TurboQuant v3.6 + Context-Aware)"
       }]
     }
   }

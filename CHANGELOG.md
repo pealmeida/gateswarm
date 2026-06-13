@@ -1,195 +1,194 @@
 # Changelog
 
-All notable changes to the GateSwarm MoA Router project.
+All notable changes to this project will be documented in this file.
 
-## [0.3.5] — 2026-05-11
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [0.5.2] - 2026-06-06
+
+### Fixed
+- **Plan mode now actually dispatches to the plan model.** The gateway computed the
+  plan/act-resolved model but routed the primary request via `resolveModel(agent, effort)`,
+  which ignores mode — so plan mode only flipped `X-Mode` headers while still calling the
+  act model. Plan mode now dispatches to the tier's configured plan model/provider (CLI
+  reasoning models for heavy/intensive/extreme); act/auto keep per-agent routing.
+- **Plan-tier models corrected** in `v04_config.json` (were stale copies of the act model):
+  moderate→`cx/gpt-5.4-codex`, heavy→`cx/gpt-5.5-codex`, intensive→`cc/claude-sonnet-4-6`,
+  extreme→`cc/claude-opus-4-8`.
+- **Provider/model consistency**: `glm-4.5-air` added to the zai catalog; `kimi-k2.5` and
+  `MiniMax-M2.5` fallbacks repointed from bailian (which doesn't serve them) to opencodego
+  (`minimax-m2.7`). New `eval/consistency-check.ts` + enforced test guard against config
+  referencing models absent from a provider catalog.
+- **Mode detection accuracy** (golden set): act recall 60%→100%, plan recall 87%→93%.
+  Imperative verb list broadened (replace, spin up, migrate, …), bug/symptom patterns added
+  (`can't upload`, `is blank`, `shows $0`, `stopped firing`), and keyword matching switched to
+  stem-aware word boundaries (kills substring false positives like `explanation`/`codebase`,
+  catches inflections like `weighing`/`considering`).
+- **Complexity over-routing removed**: the ensemble's "escalate up one tier on low confidence"
+  rule was dropped — it cut exact tier accuracy (41%→49%), nearly tripled adjacent error, and
+  added a systematic +0.36-tier over-routing bias (paying for bigger models on simple prompts).
+  Exact 41%→49%, ±1 83%→88%, bias +0.36→+0.12. (Boundary re-tuning was tested and rejected:
+  cross-validation showed it overfit the 90-sample set without generalizing.)
+- **Stale fallback boundaries** in `DEFAULT_V04_CONFIG` (used when config load fails) unified
+  with the live `v04_config.json`/`intent-engine` cut points (were old `[0.1557…]` values).
+
+### Added
+- **Plan/Act router modes**: configure separate, cheaper models for planning (exploration/drafting)
+  vs. acting (implementation/execution) per complexity tier
+- `plan_model`, `plan_provider`, `plan_max_tokens`, `plan_enable_thinking` fields on all 6 tier configs
+- Auto-detection of intent mode via keyword scoring (16 plan keywords, 11 act keywords)
+- Explicit override via `body.mode` ("plan" | "act") or `X-Mode` request header
+- `X-Mode` and `X-Mode-Confidence` response headers on all routed requests
+- CLI commands: `mode-status` (view all tier plan/act models), `mode-set` (update plan_* config),
+  `mode-detect` (test auto-detection on prompt text)
+- **OpenCodeGo provider** — HTTP adapter for deepseek-v4-flash, deepseek-v4-pro, qwen3.7-plus
+- **claude-opus-4-8** CLI alias in agent registry
 
 ### Changed
-- **Rebranded** from `moa-v3-finetuning` to `gateswarm-moa-router`
-- Version scheme updated: v1.x → v0.1.x, v2.x → v0.2.x, v3.x → v0.3.x
-- **Standalone router** — `router.py` works without RunPod SDK or any cloud dependency
-- **Cleaned codebase** — removed 30 unused files (stale handlers, RunPod wrappers, internal reports)
-- Renamed core files: `handler_v32_cascade.py` → `train.py`, `handler_v33_inference.py` → `router.py`
-- Added HTTP API server, CLI, and batch scoring to `router.py`
-- Simplified Dockerfiles (removed 4 RunPod-specific, kept 2 generic)
-- Updated `requirements.txt` — removed `runpod`, added `scikit-learn`
+- **Effort ranges recalibrated** for length/structure-aware heuristic (trivial 0.00–0.21, light 0.21–0.28,
+  moderate 0.28–0.32, heavy 0.32–0.37, intensive 0.37–0.46, extreme 0.46–1.00)
+- trivial tier: free model → glm-4.5-air/zai
+- light tier: glm-4.7/zai → deepseek-v4-flash/opencodego
+- moderate tier: MiniMax-M2.5/bailian → glm-4.7/zai (act), cx/gpt-5.4-codex/codex-cli (plan)
+- heavy tier: cc/claude-sonnet-4-6 → deepseek-v4-pro/opencodego (act), cx/gpt-5.5-codex/codex-cli (plan)
+- intensive tier: cx/gpt-5.5-codex → glm-5.1/zai (act), cc/claude-sonnet-4-6/claude-cli (plan)
+- extreme tier: cc/claude-opus-4-7 → qwen3.7-plus/opencodego (act), cc/claude-opus-4-8/claude-cli (plan)
+- Unified effort ranges between `routing-matrix.ts`, `v04_config.json`, and `intent-engine-v04.ts`
+- README fully rewritten with plan/act tier tables, mode commands, provider catalog
 
----
-
-## [0.3.4] — 2026-05-10
+## [0.5.1-direct-routing] — 2026-05-19
 
 ### Added
-- **v3.3 LLM-as-Judge labeling** (`handler_v33_llm_labeling.py`) — Full empirical labeling pipeline with LLM validation
-- **Label validation handler** (`handler_v33_label_validation.py`) — Cross-validation between formula and LLM labels
-- **Weight export handler** (`handler_v33_weight_export.py`) — Label correction + production weight export
-- **Inference handler** (`handler_v33_inference.py`) — Production-ready complexity scoring for RunPod serverless
-- **Parallel LLM judge** (`llm_judge_parallel.py`) — Concurrent LLM judging for large datasets
-- **Dockerfile.v33**, **Dockerfile.inference**, **Dockerfile.weight-export** — Specialized containers
-- **entrypoint_v33.sh** — v3.3 label correction entrypoint
-- **Documentation**
-  - `docs/V3_3_EMPIRICAL_LABELING_DESIGN.md` — Empirical labeling pipeline design
-  - `docs/V3_3_MODEL_ROUTING_STRATEGY.md` — 6-model cost-efficient routing strategy
-  - `docs/CHIEF_SCIENTIST_EVALUATION.md` — Independent pipeline evaluation
-  - `docs/LABEL_VALIDITY_FIX.md` — Label validity correction approach
+- **Direct Routing Bypass** — Skip classification/RAG/fallback entirely for explicit routing
+  - `body.direct_route: { provider, model }` — JSON body parameter
+  - `X-Direct-Provider` / `X-Direct-Model` headers — header-based override
+  - `provider/model` syntax in model field — e.g. `"cc/claude-sonnet-4-6"`, `"bailian/qwen3.5-plus"`
+  - CLI providers: Claude Code (`cc/`), Codex (`cx/`), Pi (`pi/`), Hermes (`hm/`), OpenClaw (`oc/`)
+- **Provider Listing Endpoint** — `GET /v1/providers` lists all HTTP + CLI providers with types, health, quota
+- **Direct Chat Endpoint** — `POST /v1/direct/chat` for direct routing without agent lookup
+- **CLI Provider Context Windows** — `turboquant-compressor.ts` v0.5 extension with per-CLI-provider context windows
 
 ### Changed
-- `handler.py` → v3.3 label correction handler (active)
-- `runpod_handler.py` → wraps v3.3 handler for RunPod SDK
-- `Dockerfile.serverless` → updated for v3.3
+- Startup banner: "GateSwarm MoMA Router v0.5.1 (TurboQuant v3.6 + CLI Providers)"
+- Health endpoint `router` field: "GateSwarm MoMA Router v0.5.1"
+- Gateway version in `/health` response and meta objects: v0.5.1
+- `resolveModel()` handles CLI prefixes (cc/, cx/, pi/, hm/, oc/) seamlessly
+- CLI streaming detection: CLI providers auto-downgrade streaming requests to sync
 
 ---
 
-## [0.3.3] — 2026-05-08
-
-### Problem Identified
-The Chief Scientist evaluation found a **critical weakness**: formula-based labels have **2.0/10 validity** (synthetic, no ground truth). The labels are circular with features — the optimizer learns to reproduce the formula, not real complexity. Production readiness rated **6.0/10** (safe for trivial/light only).
+## [0.5.0-cli-providers] — 2026-05-17
 
 ### Added
-- **Chief Scientist evaluation** — Complete independent review of v0.3.0–v0.3.2 pipeline
-  - Engineering quality: 8.5/10
-  - Label validity: 2.0/10 (critical)
-  - Production readiness: 6.0/10
-  - 5-phase roadmap for improvement
-- **6-model cost-efficient routing strategy** — Specialized model per tier
-  - trivial → glm-4.5-air (FREE), extreme → claude-opus-4.6 ($5.00/M)
-  - 80–84% savings vs always-Opus
-  - 3 optimization strategies: downgrade, confidence-based, escalation
-  - Bailian-first provider profile for cost optimization
+- **CLI Provider Adapter** — Subprocess dispatch for CLI-based coding agents
+  - File: `src/adapters/cli-provider.ts`
+  - Supports: Claude Code, OpenAI Codex, Pi, Hermes, OpenClaw
+  - Quota tracking per provider (5-hour + weekly windows)
+  - Health checks and status reporting
+- **Agent Registry CLI Methods** — `resolveCliProvider()`, `registerCliProvider()`, `listCliProviders()`
+- **CLI Provider Dispatch** — Gateway routes to CLI providers via subprocess spawn
+  - Stdin/stdout protocol for chat completions
+  - Graceful handling of CLI provider output format
+- **CLI Provider Status Endpoint** — `GET /v05/cli` reports all CLI providers, their status, and quotas
+- **Gateway CLI Commands** — `providers` and `direct` commands in `gateswarm-cli.ts` (v0.5.1)
+  - `gateswarm providers` — list all providers with types, health, quota
+  - `gateswarm direct <provider> <model> "prompt"` — direct routing test
 
 ### Changed
-- Identified that pairwise cascade was achieving only **21% accuracy** on real prompts (predicting all "light") — the formula labels were misleading during training
-- Pivoted approach: from pure data-driven back to validated heuristic formula
+- Agent registry: v0.5 CLI provider methods added (Claude Code, Codex, Pi, Hermes, OpenClaw)
+- Gateway: CLI provider dispatch integrated into request pipeline (line ~718)
+- CLI providers auto-detected and registered on gateway startup (line ~1196)
+- Streaming detection: CLI providers do not support streaming — auto-downgrade to sync
+- Ensemble voter extended to support both HTTP and CLI providers
+- Gateway startup log: lists all 5 CLI providers with their status
+
+### Fixed
+- `compressedMessages` declaration order with CLI provider integration
+- CLI provider subprocess error handling (timeout, stderr capture)
+- Quota tracking persistence across gateway restarts
 
 ---
 
-## [0.3.4] — 2026-05-09
+## [0.4.4-context-aware] — 2026-05-14
+
+### Fixed
+- **RAG persistence** — RAG index now persists to JSON file (`data/rag/index.json`), survives gateway restarts. Auto-flush every 60s.
+- **Feedback persistence** — Feedback store now persists to JSON file (`data/feedback/entries.json`), survives gateway restarts. Auto-flush every 60s.
+- **History bias inert** — History bias was always 0 because the ensemble voter had a separate in-memory buffer that was never written to. Now wired to the persistent feedback store.
+- **actualTier never populated** — Self-eval's LLM judge result now wires back to the feedback store via `updateAdequacy()`.
+- **Training mode not wired** — Entire training mode system (vote requests, SILVER/BRONZE labels, calibration) was never connected to the request pipeline. Now integrated.
+- **Dual RAG injection** — Removed redundant RAG retrieval from compressor; single injection point in gateway.
+- **LLM judge circularity** — Judge was using same model (qwen3.5-plus) as the intensive tier. Now uses qwen3.6-plus (extreme tier) for anti-circularity.
+- **enable_thinking disabled everywhere** — All tiers had reasoning off. Now enabled for heavy/intensive/extreme tiers.
+- **Fallback chain skipped 5xx** — Retry loop only retried on 429/1305/1308. Now also retries on 5xx server errors.
+- **Training mode `require()` in ESM** — Fixed `require('crypto')` to use ES import.
 
 ### Added
-- **Label correction pipeline** — Cascade trained on balanced data corrects systematic formula errors
-  - Cascade predictions as primary labels: **65.84% accuracy** vs 30.11% formula baseline
-  - Key insight: balanced training + binary cascade architecture fixes formula errors even when trained on formula labels
-- **LLM-as-Judge labeling** — Ground-truth labels from qwen3.6-plus for empirical validation
-  - Stratified sampling: ~300 prompts per tier
-  - Batch judging (20 per API call) — ~$5 total cost for 100K samples
-  - Cross-validation between formula, cascade, and LLM labels
-- **Label validation handler** — Compares formula vs cascade predictions, identifies systematic disagreements
-- **Production inference handler** — Real-time complexity scoring with pre-trained cascade weights
-  - Returns tier + confidence + score + recommended model/provider
-  - Batch support (multiple prompts in one call)
-  - Feature extraction included in response
-- **Weight export handler** — Label correction + production weight export in one pass
-- **Parallel LLM judge** — Concurrent judging for large datasets
-- **TurboQuant context compression** — Model switching context optimization
+- **Context continuity anchor** — Tracks per-session summaries across model switches. When router changes models between turns, the new model gets key decisions from the previous turn.
+- **Training mode HTTP endpoints** — `GET /v04/training`, `POST /v04/training/enable`, `POST /v04/training/vote`, `POST /v04/training/vote/reply`.
+- **SILVER labels** — RAG consensus inference now runs on every request (when enabled) for semi-supervised learning.
+- **BRONZE calibration** — LLM judge results now calibrate bronze weight against quick heuristic.
 
 ### Changed
-- `handler.py` → v3.3 label correction (cascade predictions as primary labels)
-- Scoring method: **9-signal heuristic formula** (99% LLM-validated) replaces pure cascade
-- Tier profiles: Bailian-first model assignments (glm-4.5-air → qwen3.6-plus → claude-opus)
-- Docker: 3 new specialized images (v33, inference, weight-export)
+- **Banner updated** — v0.4.4 (TurboQuant v3.6)
+- **Heavy tier model** — Changed from glm-5.1/zai to qwen3.5-plus/bailian (glm-5.1 quota exhausted)
+- **Extreme tier fallbacks** — Removed glm-5.1/zai fallback (same reason)
 
-### Results
-- Label accuracy improved from 30.11% (formula) to **65.84%** (corrected cascade)
-- Heuristic formula validated at **99%** agreement with LLM judge
-- Production inference latency: ~12ms per prompt (CPU-only)
+## [0.4.3-timeout-hardening] — 2026-05-14
 
----
-
-## [0.3.2] — 2026-05-08
+### Fixed
+- **Request timeout on upstream providers** — `fetch` calls to Bailian/ZAI had no timeout, causing indefinite hangs when providers stalled
+  - `forwardToProvider()`: Added 120s `AbortSignal.timeout()` with AbortError handling → returns 504 on timeout
+  - `handleChatCompletion()` retry loop: Added 120s timeout per target with proper fallback continuation
+  - Streaming reader: Added 30s idle timeout between SSE chunks to prevent silent hangs
+- **MoMA provider config**: Added `timeoutSeconds: 180` to prevent client-side timeout before gateway can respond
 
 ### Added
-- **Tier-pair binary cascade** (`handler_v32_cascade.py`) — 5 independent binary classifiers for full 6-tier classification
-- **scikit-learn integration** — LogisticRegression with LBFGS solver
-- **Balanced training** — 1:1 positive/negative sampling per classifier
-- **RunPod test results** — 75K samples across 3 datasets, 15K test set, **74.7% overall accuracy**
-- **Documentation**
-  - `docs/V3_2_CASCADE_REPORT.md` — Full cascade analysis
+- **Auto-restart loop** in `scripts/start-gateway.sh` — exponential backoff (5s→10s→20s→60s), max 10 restarts
+- **PORT parsing fix** in startup script — was broken when `--port` flag was used
 
-### Results
-| Dataset | Method | Baseline | Optimized | Improvement |
-|---------|--------|----------|-----------|-------------|
-| 75K (3 datasets) | Cascade | 24.3% | **74.7%** | +50.4pp |
+## [0.4.0-self-optimizing] — 2026-05-11
 
-**Per-tier:** trivial 100.0%, light 93.1%, moderate 42.4%, heavy 38.7%, intensive 19.3%, extreme 68.8%
+### Added
+- **Ensemble Voter** — Combines heuristic (40%), cascade (30%), RAG context (15%), and history bias (15%)
+  - File: `src/ensemble-voter.ts`
+  - Confidence-based routing: >0.8 → predicted tier, 0.5-0.8 → escalate one tier, <0.5 → intensive default
+- **RAG Index** — TurboQuant compressed history as retrievable context
+  - File: `src/rag-index.ts`
+  - Dual persistence: in-memory + SQLite-backed
+  - Keyword overlap scoring with 24h TTL
+- **Self-Optimizing Feedback Loop** — Every interaction logged, periodic LLM judge, auto-retraining
+  - File: `src/feedback-store.ts`, `src/self-eval.ts`, `src/retraining.ts`
+  - LLM judge: `bailian/qwen3.5-plus` (10% sampling rate)
+  - Hot-swap weights without gateway restart
+  - A/B testing with 10% holdout
+- **25-Feature Extractor** — Extended from 15 to 25 features
+  - File: `src/feature-extractor-v04.ts`
+  - NEW: has_negation, entity_count, code_block_size, domain detection (finance/legal/medical/engineering), temporal_references, output_format_spec, prior_context_needed, novelty_score, multi_domain, user_expertise_level
+- **Reasoning Toggle** — Per-tier `enable_thinking` control
+  - Config: `v04_config.json` → `tier_models[tier].enable_thinking`
+  - Applied to provider payload in gateway
+- **GateSwarm CLI** — 11 commands for v0.4 configuration
+  - File: `src/gateswarm-cli.ts`
+  - Commands: status, models, model, reasoning, retrain-freq, weights, feedback, rag, retrain
+- **Cascade Retraining on Real Labels** — v3.2 cascade retrained on feedback data (not formula)
+  - File: `scripts/cascade-retrain.py`
+  - Uses LLM-judged ground truth from feedback buffer
+- **v0.4 HTTP Endpoints** — `/v04/status`, `/v04/feedback`, `/v04/retrain`
+  - Integrated into gateway request handler
+- **Config Manager** — Centralized v0.4 configuration with hot-reload
+  - File: `src/v04-config.ts`
+  - User-configurable: tier models, reasoning toggle, retrain frequency, ensemble weights
 
 ### Changed
-- `handler.py` → uses cascade handler
-- `Dockerfile.serverless` → updated with sklearn
-- `entrypoint.sh` → updated for cascade handler
+- Intent engine: `heuristicScore()` → `scoreIntentV04()` (ensemble-based)
+- Provider payload: includes `enable_thinking` from tier model config
+- Gateway startup banner: "GateSwarm MoMA Router v0.4"
+- Health check: reports ensemble, feedback, llmJudge status
 
----
+### Fixed
+- Gateway `compressedMessages` crash bug (declared before RAG injection)
+- Intent-engine boundary mismatch (code synced with weights.json)
+- Version labels: all updated to v0.4
 
-## [0.3.1] — 2026-05-08
-
-### Added
-- **Multi-dataset training** — GPD (50K synthetic), Alpaca, workspace data
-- **LLMFit Dataset Factory** (`llmfit/`) — Complete pipeline for personalized dataset creation
-  - `llmfit.py` — Core engine: workspace scanning, feature extraction, labeling, validation
-  - `anonymizer.py` — 35-rule anonymization engine
-  - `self_eval.py` — Self-evaluation with SQLite feedback buffer
-  - `gpd_generator.py` — 50K synthetic prompt generator
-- **General-Purpose Dataset (GPD)** — 50,000 synthetic prompts
-- **Documentation**
-  - `docs/ARCHITECTURE_V3_1.md` — Full architecture spec
-  - `docs/TRAINING_REPORT_V3_1.md` — Training results & anonymization
-
-### Results
-| Dataset | Baseline | Optimized | Improvement |
-|---------|----------|-----------|-------------|
-| GPD 50K | 19.3% | 99.6% | +80.2% |
-| Alpaca 10K | 2.3% | 87.2% | +84.9% |
-
----
-
-## [0.3.0] — 2026-05-07
-
-### Added
-- **Full training pipeline** with scipy MSE optimization
-- **RunPod Serverless deployment** — Docker + entrypoint for serverless training
-- **13-feature complexity vector** — word_count, question, code, imperative, math, multi_step, constraints, context, sentence_count, avg_word_length, architecture, technical_design, four_plus
-- **Synthetic complexity labels** — Signal count + length + lexical richness → 6 tiers
-- **COMPARISON.md** — Version evolution analysis
-
-### Results
-| Dataset | Baseline | Optimized | Improvement |
-|---------|----------|-----------|-------------|
-| Alpaca 10K | 2.3% | 87.2% | +84.9% |
-
----
-
-## [0.2.1] — 2026-05-06
-
-### Added
-- `architecture` bonus (0.28) for architecture-heavy prompts
-- `technical_design` bonus (0.18) for system design terms
-- Extended architecture regex keywords
-- Length dampener skip for architecture-heavy prompts
-
-### Changed
-- Result: 40% on 30 prompts (confirmed overfitting with manual tuning)
-
----
-
-## [0.2.0] — 2026-05-06
-
-### Added
-- Manual weight tuning based on v0.1 misclassification analysis
-- `question_technical` bonus (0.12)
-- `architecture` bonus (0.15)
-- Length dampener for short prompts
-
-### Results
-- 67% accuracy on 15 prompts (+14pp over v0.1)
-- Dropped to 40% on 30 prompts (overfitting confirmed)
-
----
-
-## [0.1.0] — 2026-05-05
-
-### Added
-- Initial heuristic router with 13 hand-tuned features
-- 6-tier complexity classification (trivial → extreme)
-- Static weight assignment
-
-### Results
-- 53% accuracy on 15 manual prompts
-- No training data, no optimization
