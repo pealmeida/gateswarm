@@ -1052,6 +1052,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
   try {
     decision = consumptionIntelligence.selectModel(effort, {
       estimatedPromptTokens: estimateTokens(messages),
+      source: 'request',
     });
   } catch {
     console.log(`🧠 [${agent.name}] Intelligence engine failed — using static config`);
@@ -1065,6 +1066,8 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
       estimatedCost: 0,
       confidence: 0.1,
       alternatives: [],
+      source: 'request',
+      timestamp: Date.now(),
     };
   }
 
@@ -1642,6 +1645,14 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
 
       res.setHeader('X-Mode', activeMode);
       res.setHeader('X-Mode-Confidence', modeDetection.confidence.toFixed(2));
+      // v0.5.6: debug headers so operators can verify the actual classification
+      // and routing decision without tailing server logs.
+      res.setHeader('X-Tier', effort);
+      res.setHeader('X-Score', score.toFixed(4));
+      res.setHeader('X-Routed-Model', `${actualTarget.providerId}/${actualTarget.model}`);
+      res.setHeader('X-Routed-Tier', effort);
+      res.setHeader('X-Routing-Method', decision.source || 'request');
+      if (decision.reason) res.setHeader('X-Routing-Reason', decision.reason);
       return jsonResponse(res, 200, data);
     } catch (err: any) {
       console.error(`❌ Provider error: ${err.message}`);
@@ -2027,7 +2038,7 @@ async function init() {
         for (const tier of tiers) {
           try {
             const allModels = modelMatrix.getAvailableModels();
-            const decision = consumptionIntelligence.selectModel(tier);
+            const decision = consumptionIntelligence.selectModel(tier, { source: 'balance-check' });
             rankings[tier] = {
               current: `${decision.provider}/${decision.model}`,
               reason: decision.reason,

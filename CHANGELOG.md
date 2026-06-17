@@ -192,3 +192,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Intent-engine boundary mismatch (code synced with weights.json)
 - Version labels: all updated to v0.4
 
+
+## [0.5.6] - 2026-06-16
+
+### Fixed
+- **Duplicate `scoreToEffort` removed.** `routing-matrix.ts` carried a hardcoded copy
+  with stale cut-points (0.1557, 0.1842, 0.2788, 0.3488, 0.4611) that disagreed with
+  the canonical, config-driven version in `intent-engine.ts` (0.21, 0.28, 0.32, 0.37, 0.46)
+  and with `v04_config.json:tier_boundaries`. Same prompt could score as `light` in one
+  module and `moderate` in another. `routing-matrix.ts:scoreToEffort` now re-exports
+  the canonical version; the constants are dead code.
+- **ActivityPanel polluted by health-check decisions.** `consumptionIntelligence.selectModel`
+  is called from three background paths (tier balance check, recovery check, tier-recommendation
+  refresh) in addition to real request routing. Those background decisions showed up in the
+  ActivityPanel as if a user prompt had been routed to that tier — e.g. the live feed
+  showing `EXTREME → codex-cli` after a "Quanto é 2+2?" prompt that was actually classified
+  as `trivial` and routed to `qwen2.5:0.5b`. The TUI now filters health/balance/recovery
+  sources out of the live feed and shows how many were hidden.
+
+### Added
+- **`ConsumptionDecision.source` field** — `'request' | 'health-check' | 'balance-check' | 'recovery-check'`.
+  `getTierRecommendations()` and the `/v05/intel/balance` endpoint now mark their decisions
+  explicitly. Real request decisions keep `source: 'request'`.
+- **Debug response headers** on `/v1/chat/completions`:
+  - `X-Tier` — the classified effort level
+  - `X-Score` — the 0–1 complexity score
+  - `X-Routed-Model` — the final provider/model that answered (after fallbacks)
+  - `X-Routed-Tier` — same as `X-Tier` (for symmetry with `X-Routed-Model`)
+  - `X-Routing-Method` — the `source` of the decision
+  - `X-Routing-Reason` — why this provider/model was chosen (`cheapest_available`, `consumption_balanced`, `static_fallback`, …)
+- **CLI type alignment** — `TierRecommendation` in `cli/src/types.ts` now exposes the new
+  `source` and `timestamp` fields.

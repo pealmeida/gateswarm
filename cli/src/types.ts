@@ -125,6 +125,9 @@ export interface TierRecommendation {
     model: string;
     reason: string;
   }>;
+  // v0.5.6: distinguish real request decisions from health/balance checks
+  source?: 'request' | 'health-check' | 'balance-check' | 'recovery-check';
+  timestamp?: number;
 }
 
 export interface IntelReport {
