@@ -82,12 +82,12 @@ interface TierRequirements {
 }
 
 const TIER_REQUIREMENTS: Record<EffortLevel, TierRequirements> = {
-  trivial:    { minContextWindow: 8000,   minMaxTokens: 256,   needsReasoning: false, needsVision: false, needsTools: false, maxLatencyMs: 5000,  maxCostPer1kInput: Infinity },
-  light:      { minContextWindow: 32000,  minMaxTokens: 2048,  needsReasoning: false, needsVision: false, needsTools: false, maxLatencyMs: 8000,  maxCostPer1kInput: Infinity },
-  moderate:   { minContextWindow: 64000,  minMaxTokens: 4096,  needsReasoning: true,  needsVision: false, needsTools: true,  maxLatencyMs: 15000, maxCostPer1kInput: Infinity },
-  heavy:      { minContextWindow: 128000, minMaxTokens: 8192,  needsReasoning: true,  needsVision: false, needsTools: true,  maxLatencyMs: 30000, maxCostPer1kInput: Infinity },
-  intensive:  { minContextWindow: 200000, minMaxTokens: 16384, needsReasoning: true,  needsVision: false, needsTools: true,  maxLatencyMs: 60000, maxCostPer1kInput: Infinity },
-  extreme:    { minContextWindow: 500000, minMaxTokens: 32768, needsReasoning: true,  needsVision: false, needsTools: true,  maxLatencyMs: 90000, maxCostPer1kInput: Infinity },
+  trivial:    { minContextWindow: 8000,   minMaxTokens: 256,   needsReasoning: false, needsVision: false, needsTools: false, maxLatencyMs: 15000, maxCostPer1kInput: Infinity },
+  light:      { minContextWindow: 32000,  minMaxTokens: 2048,  needsReasoning: false, needsVision: false, needsTools: false, maxLatencyMs: 20000, maxCostPer1kInput: Infinity },
+  moderate:   { minContextWindow: 64000,  minMaxTokens: 4096,  needsReasoning: true,  needsVision: false, needsTools: true,  maxLatencyMs: 30000, maxCostPer1kInput: Infinity },
+  heavy:      { minContextWindow: 128000, minMaxTokens: 8192,  needsReasoning: true,  needsVision: false, needsTools: true,  maxLatencyMs: 45000, maxCostPer1kInput: Infinity },
+  intensive:  { minContextWindow: 200000, minMaxTokens: 16384, needsReasoning: true,  needsVision: false, needsTools: true,  maxLatencyMs: 75000, maxCostPer1kInput: Infinity },
+  extreme:    { minContextWindow: 500000, minMaxTokens: 32768, needsReasoning: true,  needsVision: false, needsTools: true,  maxLatencyMs: 120000, maxCostPer1kInput: Infinity },
 };
 
 // ─── Consumption Intelligence Engine ─────────────────────
