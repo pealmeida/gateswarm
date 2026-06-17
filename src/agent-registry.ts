@@ -86,7 +86,7 @@ export interface RegistryState {
 export const DEFAULT_TIER_CONFIGS: Record<string, AgentTierConfig> = {
   // Cost-optimized — v0.5.2 aligned with available models
   'cost-optimized': {
-    trivial: 'zai/glm-4.5-air',               // Free tier — greetings, simple math
+    trivial: 'zai/glm-4.5-air',               // Free cloud 7B — fast, free tier
     light: 'opencodego/deepseek-v4-flash',     // Fast summaries, Q&A
     moderate: 'opencodego/deepseek-v4-flash',  // Code-capable analysis (flash is faster/cheaper)
     heavy: 'opencodego/deepseek-v4-pro',       // Deep reasoning
@@ -152,6 +152,8 @@ export const HTTP_PROVIDER_MODELS: Record<string, string[]> = {
   opencodego: ['deepseek-v4-flash', 'deepseek-v4-pro', 'qwen3.7-plus', 'qwen3.7-max',
     'qwen3.6-plus', 'kimi-k2.5', 'kimi-k2.6', 'glm-5', 'glm-5.1',
     'minimax-m3', 'minimax-m2.7', 'mimo-v2.5', 'mimo-v2.5-pro'],
+  ollama: ['qwen2.5:0.5b', 'qwen2.5:1.5b'],
+  'ollama-cloud': ['kimi-k2.5', 'kimi-k2.6', 'glm-5.1', 'gemma3:12b', 'qwen3-vl:235b', 'minimax-m3'],
 };
 
 // ─── CLI Provider Defaults ─────────────────────────────
@@ -335,6 +337,24 @@ export class AgentRegistry {
       models: HTTP_PROVIDER_MODELS.opencodego,
     });
 
+    this.registerProvider({
+      id: 'ollama',
+      name: 'Ollama (Local CPU)',
+      type: 'http-api',
+      baseUrl: process.env.OLLAMA_BASE || 'http://127.0.0.1:11434/v1',
+      apiKey: process.env.OLLAMA_KEY || 'ollama',
+      models: ['qwen2.5:0.5b', 'qwen2.5:1.5b'],
+    });
+
+    this.registerProvider({
+      id: 'ollama-cloud',
+      name: 'Ollama Cloud (Hosted)',
+      type: 'http-api',
+      baseUrl: process.env.OLLAMA_CLOUD_BASE || 'https://ollama.com/v1',
+      apiKey: process.env.OLLAMA_CLOUD_KEY || process.env.OLLAMA_API_KEY || '',
+      models: ['kimi-k2.5', 'kimi-k2.6', 'glm-5.1', 'gemma3:12b', 'minimax-m3'],
+    });
+
     // Load persisted state (providers + agents)
     try {
       const raw = await fs.readFile(REGISTRY_FILE, 'utf-8');
@@ -491,6 +511,12 @@ export class AgentRegistry {
     return this.providers[id];
   }
 
+  getProviderModels(providerId: string): string[] {
+    const p = this.providers[providerId];
+    if (!p || p.type !== 'http-api') return [];
+    return (p as HttpProviderConfig).models || [];
+  }
+
   getProviderBaseUrl(providerId: string): string {
     const p = this.providers[providerId];
     if (!p) return '';
@@ -582,6 +608,12 @@ export class AgentRegistry {
     }
     if (model.startsWith('opencodego/')) {
       return { providerId: 'opencodego', model: model.replace('opencodego/', '') };
+    }
+    if (model.startsWith('ollama/')) {
+      return { providerId: 'ollama', model: model.replace('ollama/', '') };
+    }
+    if (model.startsWith('ollama-cloud/')) {
+      return { providerId: 'ollama-cloud', model: model.replace('ollama-cloud/', '') };
     }
 
     // No prefix — detect provider by model name pattern

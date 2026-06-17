@@ -352,7 +352,7 @@ describe('🏷️ CLI Prefix Notation', () => {
     const cfg = agentRegistry.getCliProviderConfig('codex-cli');
     expect(cfg).not.toBeNull();
     expect(cfg!.modelAlias!['cx/gpt-5.5-codex']).toBe('gpt-5.5');
-    expect(cfg!.modelAlias!['cx/gpt-5.3-codex']).toBe('gpt-5.5');
+    expect(cfg!.modelAlias!['cx/gpt-5.3-codex']).toBe('gpt-5.3');
     expect(cfg!.modelAlias!['cx/gpt-4.1']).toBe('gpt-4.1');
   });
 

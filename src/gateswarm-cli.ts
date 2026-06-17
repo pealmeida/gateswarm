@@ -34,6 +34,27 @@ import { retrainIfNeeded } from './retraining.js';
 // Training mode — queries gateway HTTP API (in-memory state lives there)
 const GATEWAY_URL = process.env.GATESWARM_URL || 'http://localhost:8900';
 
+function bar(pct: number | null, width = 10): string {
+  if (pct === null) return '∞'.padEnd(width);
+  const filled = Math.round((pct / 100) * width);
+  const empty = width - filled;
+  const symbol = pct >= 90 ? '█' : pct >= 60 ? '▓' : '▰';
+  return symbol.repeat(Math.max(0, filled)) + '░'.repeat(Math.max(0, empty));
+}
+
+function fmt(n: number): string {
+  if (n < 1000) return String(n);
+  if (n < 1_000_000) return `${(n / 1_000).toFixed(1)}K`;
+  return `${(n / 1_000_000).toFixed(2)}M`;
+}
+
+function pctColor(pct: number | null): string {
+  if (pct === null) return '∞';
+  if (pct >= 80) return 'HIGH';
+  if (pct >= 50) return 'MED';
+  return 'LOW';
+}
+
 async function gatewayFetch(path: string, method = 'GET', body?: object): Promise<any> {
   const url = `${GATEWAY_URL}${path}`;
   const opts: RequestInit = {
@@ -109,7 +130,7 @@ const args = process.argv.slice(2);
 
 function printUsage() {
   console.log(`
-🧠 GateSwarm MoMA Router v0.5.2 — CLI Providers + Direct Routing + Plan/Act Mode
+🧠 GateSwarm MoMA Router v0.5.4 — CLI + TUI + Consumption Intelligence
 
 Core Commands:
   status                                    Show v0.4 system status
@@ -137,8 +158,24 @@ Plan/Act Mode Commands (v0.5.2):
                                                       plan_max_tokens, plan_enable_thinking
   mode-detect <prompt text>                 Detect intent mode (plan/act/auto) from prompt text
 
+Consumption Intelligence Commands (v0.5.4):
+  intel                                     Show v0.5.4 intel: tier recommendations, stats, providers
+  consumption                               Show per-provider 5h/weekly/monthly consumption + quota
+  consumption <window>                      Filter to one window: 5h | weekly | monthly
+  quota                                     Show per-provider quota (RPM/RPD/tokens/throttled)
+  rediscover                                Force immediate model rediscovery
+
+TUI Commands (v0.5.4):
+  tui                                       Launch GateSwarm Bar TUI (interactive, needs TTY)
+  tui --once                                One-shot JSON dump of consumption
+  tui --once | jq '.'                       Pipe to jq for scripting
+  tui --refresh 5                           5s refresh interval
+  tui --tab providers                       Start on a specific tab
+  tui --mock                                Use built-in mock data (no server needed)
+
 Tiers: trivial, light, moderate, heavy, intensive, extreme
-Providers: zai, bailian, openrouter, claude-cli, codex-cli, pi-agent, hermes-agent, openclaw-agent
+Providers: zai, bailian, openrouter, claude-cli, codex-cli, pi-agent, hermes-agent, openclaw-agent,
+           ollama, ollama-cloud, opencodego
 
 Examples:
   gateswarm model intensive qwen3.5-plus bailian
@@ -151,6 +188,12 @@ Examples:
   gateswarm mode-set heavy plan_model qwen3.6-plus
   gateswarm mode-set heavy plan_enable_thinking true
   gateswarm mode-detect "draft an architecture plan for the new service"
+  gateswarm intel                            # v0.5.4 token consumption intel
+  gateswarm consumption                      # per-provider 5h/weekly/monthly
+  gateswarm consumption weekly               # just the weekly window
+  gateswarm quota                            # RPM/RPD/tokens remaining
+  gateswarm tui                              # launch TUI (TTY only)
+  gateswarm tui --once                       # JSON dump (scriptable)
 `);
 }
 
@@ -435,6 +478,159 @@ async function cmdModeDetect(promptText: string) {
   console.log(`Mode: ${result.mode}, Confidence: ${pct}%, Plan score: ${result.planScore}, Act score: ${result.actScore}`);
 }
 
+// ─── v0.5.4 Consumption Intelligence Commands ────────────────
+
+async function cmdIntel() {
+  const data = await gatewayFetch('/v05/intel');
+  const s = data.stats;
+  const rec = data.recommendations;
+  const errorRate = (s.errorRate * 100).toFixed(2);
+
+  console.log('🧠 GateSwarm v' + data.version + ' — Token Consumption Intelligence\n');
+  console.log('System:');
+  console.log(`  Models: ${s.modelCount} indexed, ${s.availableModels} available, ${s.unhealthyModels} unhealthy`);
+  console.log(`  Requests: ${s.totalRequests}, Errors: ${s.totalErrors} (${errorRate}%)`);
+  console.log(`  Tokens: ${fmt(s.totalTokensIn)} in + ${fmt(s.totalTokensOut)} out = ${fmt(s.totalTokensIn + s.totalTokensOut)} total`);
+  console.log(`  Cost: $${s.estimatedCost.toFixed(4)}`);
+  console.log();
+  console.log('Tier Recommendations:');
+  for (const tier of ['trivial', 'light', 'moderate', 'heavy', 'intensive', 'extreme']) {
+    const r = rec[tier];
+    if (!r) continue;
+    const cand = s.tierDistribution[tier] || 0;
+    const conf = (r.confidence * 100).toFixed(0);
+    console.log(`  ${tier.padEnd(10)} → ${r.provider}/${r.model.padEnd(28)} conf=${conf}% [${r.reason}] (${cand} candidates)`);
+  }
+  console.log();
+  console.log('Provider Traffic:');
+  for (const p of s.providers) {
+    if (p.totalRequests > 0 || p.totalModels > 0) {
+      console.log(`  ${p.provider.padEnd(15)} models: ${p.availableModels}/${p.totalModels}, req: ${p.totalRequests}, errors: ${p.totalErrors}, lat: ${p.avgLatencyMs}ms`);
+    }
+  }
+}
+
+async function cmdConsumption(window?: string) {
+  const data = await gatewayFetch('/v05/intel/consumption');
+  const windows: Array<[string, string]> = [
+    ['5h', 'totalFiveHour'],
+    ['weekly', 'totalWeekly'],
+    ['monthly', 'totalMonthly'],
+  ];
+  const filter = window?.toLowerCase();
+
+  console.log('📊 GateSwarm Consumption (v0.5.4) — Generated: ' + new Date(data.generatedAt).toLocaleString() + '\n');
+
+  for (const [label, key] of windows) {
+    if (filter && !filter.startsWith(label.slice(0, 2))) continue;
+    const w = data[key];
+    console.log(`${label.toUpperCase()} WINDOW (${w.windowMs / 1000 / 60 / 60}h):`);
+    console.log(`  Total: ${w.requests} req, ${fmt(w.totalTokens)} tok (${fmt(w.tokensIn)} in + ${fmt(w.tokensOut)} out), ${w.errors} err, ${w.avgLatencyMs}ms avg`);
+  }
+
+  // Per-provider USAGE PERCENTAGE — the focus of this view
+  const showAll = !filter;
+  const focusWindow = showAll ? null : (
+    filter.startsWith('5') ? 'fiveHour' :
+    filter.startsWith('we') ? 'weekly' : 'monthly'
+  );
+
+  console.log('\n┌─ USAGE PERCENTAGE BY WINDOW ──────────────────────────────────────┐');
+
+  for (const p of data.providers) {
+    const fh = p.quota.fiveHour;
+    const wk = p.quota.weekly;
+    const mo = p.quota.monthly;
+
+    const fhBar = bar(fh.usedPctRequests, 16);
+    const fhReqStr = fh.limitRequests === null ? '∞' : `${fh.usedRequests}/${fh.limitRequests}`;
+    const fhTokStr = fh.limitTokens === null ? '∞' : `${fmt(fh.usedTokens)}/${fmt(fh.limitTokens!)}`;
+
+    const wkBar = bar(wk.usedPctRequests, 16);
+    const wkReqStr = wk.limitRequests === null ? '∞' : `${wk.usedRequests}/${wk.limitRequests}`;
+
+    const moBar = bar(mo.usedPctRequests, 16);
+    const moReqStr = mo.limitRequests === null ? '∞' : `${mo.usedRequests}/${mo.limitRequests}`;
+
+    const name = p.provider.padEnd(15);
+    console.log(`\n  ${name}  ${p.fiveHour.requests} req in 5h, ${fmt(p.fiveHour.totalTokens)} tokens`);
+
+    if (focusWindow === null || focusWindow === 'fiveHour') {
+      const color = pctBadge(fh.usedPctRequests);
+      const label = fh.limitRequests === null ? '(unlimited)' : `${fhReqStr} req | ${fhTokStr} tok`;
+      console.log(`    5h:     [${fhBar}] ${color}  ${label}`);
+    }
+    if (focusWindow === null || focusWindow === 'weekly') {
+      const color = pctBadge(wk.usedPctRequests);
+      const label = wk.limitRequests === null ? '(unlimited)' : `${wkReqStr} req`;
+      console.log(`    weekly: [${wkBar}] ${color}  ${label}`);
+    }
+    if (focusWindow === null || focusWindow === 'monthly') {
+      const color = pctBadge(mo.usedPctRequests);
+      const label = mo.limitRequests === null ? '(unlimited)' : `${moReqStr} req`;
+      console.log(`    monthly:[${moBar}] ${color}  ${label}`);
+    }
+  }
+  console.log('\n└────────────────────────────────────────────────────────────────────┘');
+  console.log('  Legend: 0-50% LOW 🟢   50-80% MED 🟡   80-100% HIGH 🔴');
+
+  console.log('\n┌─ QUOTA RESET SCHEDULE ─────────────────────────────────────────────┐');
+  for (const p of data.providers) {
+    const fh = p.quota.fiveHour;
+    const wk = p.quota.weekly;
+    const mo = p.quota.monthly;
+    const fhReset = fh.limitRequests === null ? '∞ never resets' : `↻ ${fh.resetAt} (${fh.resetType})`;
+    const wkReset = wk.limitRequests === null ? '∞ never resets' : `↻ ${wk.resetAt} (${wk.resetType})`;
+    const moReset = mo.limitRequests === null ? '∞ never resets' : `↻ ${mo.resetAt} (${mo.resetType})`;
+    console.log(`  ${p.provider.padEnd(15)} 5h: ${fhReset.padEnd(28)}  wk: ${wkReset.padEnd(28)}  mo: ${moReset}`);
+  }
+  console.log('└────────────────────────────────────────────────────────────────────┘');
+
+  console.log('\n┌─ WINDOW TOTALS (all providers combined) ───────────────────────────┐');
+  for (const [label, key] of windows) {
+    const w = data[key];
+    console.log(`  ${label.toUpperCase().padEnd(8)} ${String(w.requests).padStart(3)} req   ${fmt(w.totalTokens).padStart(8)} tok   ${String(w.errors).padStart(2)} err   ${String(w.avgLatencyMs).padStart(5)}ms avg`);
+  }
+  console.log('└────────────────────────────────────────────────────────────────────┘');
+}
+
+function pctBadge(pct: number | null): string {
+  if (pct === null) return '  ∞  ';
+  const p = pct.toFixed(1).padStart(5) + '%';
+  if (pct >= 80) return `🔴 ${p}`;
+  if (pct >= 50) return `🟡 ${p}`;
+  return `🟢 ${p}`;
+}
+
+async function cmdQuota() {
+  const data = await gatewayFetch('/v05/intel/quota');
+  console.log('📊 Provider Quota (v0.5.4)\n');
+  console.log('PROVIDER         HEALTH  RPM         RPD              TOKENS         THROTTLED');
+  console.log('─────────────────────────────────────────────────────────────────────────────');
+  for (const q of data.quotas) {
+    const healthBar = bar(q.health, 10);
+    const throttle = q.throttled ? '🚫 YES' : 'no';
+    console.log(
+      `${q.provider.padEnd(16)} ${healthBar} ${q.health.toString().padStart(3)}%  ${q.rpm.padEnd(11)} ${q.rpd.padEnd(16)} ${q.tokens.padEnd(13)} ${throttle}`,
+    );
+  }
+}
+
+async function cmdRediscover() {
+  console.log('🔄 Forcing model rediscovery…');
+  const result = await gatewayFetch('/v05/intel/rediscover', 'POST');
+  console.log(`✅ Rediscovery complete: ${result.modelsIndexed || '?'} models indexed`);
+}
+
+async function cmdTui(args: string[]) {
+  // Launch the v0.5.4 GateSwarm Bar TUI client.
+  // In a TTY: full interactive UI. In non-TTY (piped): snapshot mode.
+  const cliPath = '/root/.openclaw/workspace/gateswarm-moma-router/cli/dist/cli.js';
+  const { spawn } = await import('child_process');
+  const child = spawn('node', [cliPath, ...args], { stdio: 'inherit' });
+  child.on('exit', (code) => process.exit(code ?? 0));
+}
+
 async function main() {
   if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
     printUsage();
@@ -506,6 +702,23 @@ async function main() {
         process.exit(1);
       }
       await cmdModeDetect(args.slice(1).join(' '));
+      break;
+
+    // ─── v0.5.4 Consumption Intelligence Commands ─────────
+    case 'intel':
+      await cmdIntel();
+      break;
+    case 'consumption':
+      await cmdConsumption(args[1]);
+      break;
+    case 'quota':
+      await cmdQuota();
+      break;
+    case 'rediscover':
+      await cmdRediscover();
+      break;
+    case 'tui':
+      await cmdTui(args.slice(1));
       break;
 
     default:
