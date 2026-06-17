@@ -59,8 +59,8 @@
   },
   "tier_models": {
     "trivial": {
-      "model": "glm-4.5-air",
-      "provider": "zai",
+      "model": "qwen2.5:0.5b",
+      "provider": "ollama",
       "max_tokens": 256,
       "enable_thinking": false,
       "plan_model": "glm-4.5-air",
@@ -79,6 +79,10 @@
         {
           "model": "deepseek-v4-flash",
           "provider": "opencodego"
+        },
+        {
+          "provider": "zai",
+          "model": "glm-4.5-air"
         }
       ]
     },

@@ -1,10 +1,10 @@
 {
   "version": "0.1.0",
-  "updatedAt": "2026-06-17T01:25:06.151515+00:00Z",
+  "updatedAt": "2026-06-17T01:40:11.283002+00:00Z",
   "snapshots": {
     "codex-cli": {
       "provider": "codex-cli",
-      "syncedAt": "2026-06-17T01:25:06.150642+00:00Z",
+      "syncedAt": "2026-06-17T01:40:11.282395+00:00Z",
       "source": "codex-cli-sessions",
       "windows": {
         "5h": {
@@ -35,7 +35,7 @@
     },
     "claude-cli": {
       "provider": "claude-cli",
-      "syncedAt": "2026-06-17T01:25:06.150992+00:00Z",
+      "syncedAt": "2026-06-17T01:40:11.282679+00:00Z",
       "source": "claude-cli-sessions",
       "windows": {
         "5h": {
@@ -60,7 +60,7 @@
     },
     "opencodego": {
       "provider": "opencodego",
-      "syncedAt": "2026-06-17T01:25:06.151199+00:00Z",
+      "syncedAt": "2026-06-17T01:40:11.282820+00:00Z",
       "source": "consumption-history",
       "windows": {
         "5h": {
@@ -97,27 +97,30 @@
     },
     "zai": {
       "provider": "zai",
-      "syncedAt": "2026-06-17T00:00:00Z",
-      "source": "simulated-dashboard",
+      "syncedAt": "2026-06-17T01:40:11.282906+00:00Z",
+      "source": "consumption-history",
       "windows": {
         "5h": {
-          "usedPct": 0,
+          "usedPct": 0.0,
           "usedTokens": 0,
           "limitTokens": 30000,
+          "usedRequests": 0,
           "resetAt": "rolling",
           "resetType": "rolling"
         },
         "7d": {
-          "usedPct": 0,
-          "usedTokens": 0,
+          "usedPct": 1.0,
+          "usedTokens": 1919,
           "limitTokens": 200000,
+          "usedRequests": 8,
           "resetAt": "Monday 00:00 UTC",
           "resetType": "fixed"
         },
         "30d": {
           "usedPct": 0,
-          "usedTokens": 0,
-          "limitTokens": 200000,
+          "usedTokens": 1919,
+          "limitTokens": null,
+          "usedRequests": 8,
           "resetAt": "never",
           "resetType": "rolling"
         }
@@ -125,7 +128,7 @@
     },
     "ollama-cloud": {
       "provider": "ollama-cloud",
-      "syncedAt": "2026-06-17T01:25:06.151500+00:00Z",
+      "syncedAt": "2026-06-17T01:40:11.282994+00:00Z",
       "source": "consumption-history",
       "windows": {
         "5h": {
