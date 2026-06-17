@@ -1835,7 +1835,7 @@ async function init() {
   scheduleDailyReset();
 
   const agents = agentRegistry.getAgents();
-  console.log(`🚀 GateSwarm MoMA Router v0.5.2 (Plan/Act + CLI Providers) starting on :${PORT}`);
+  console.log(`🚀 GateSwarm MoMA Router v0.5.5 (Quota-Aware Routing) starting on :${PORT}`);
   console.log(`📊 Providers: ${agentRegistry.getProviders().map(p => p.id).join(', ')}`);
   console.log(`🤖 Registered agents: ${agents.map(a => a.name).join(', ')}`);
 
@@ -1866,7 +1866,7 @@ async function init() {
         const agents = agentRegistry.getAgents();
         return jsonResponse(res, 200, {
           status: 'healthy',
-          router: 'GateSwarm MoMA Router v0.5.2 (Plan/Act + CLI Providers)',
+          router: 'GateSwarm MoMA Router v0.5.5 (Quota-Aware Routing)',
           turboquant: 'v3.6',
           ensemble: 'enabled',
           feedback: 'enabled',
@@ -2346,7 +2346,7 @@ async function init() {
   });
 
   server.listen(PORT, () => {
-    console.log(`✅ GateSwarm MoMA Router v0.5.2 (Plan/Act + CLI Providers) listening on http://localhost:${PORT}`);
+    console.log(`✅ GateSwarm MoMA Router v0.5.5 (Quota-Aware Routing) listening on http://localhost:${PORT}`);
     console.log(`📡 Endpoint: http://localhost:${PORT}/v1/chat/completions`);
     console.log(`📊 Metrics: http://localhost:${PORT}/metrics`);
     console.log(`🤖 Agents: http://localhost:${PORT}/v1/agents`);
