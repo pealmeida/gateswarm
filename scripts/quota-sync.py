@@ -103,12 +103,10 @@ def scrape_codex():
     windows = {}
     for w in ["5h", "7d", "30d"]:
         windows[w] = {
+            "usedPct": buckets[w] / LIMITS[w]["tokens"] * 100 if LIMITS[w]["tokens"] else 0,
             "usedTokens": buckets[w],
-            "usedRequests": req_counts[w],
             "limitTokens": LIMITS[w]["tokens"],
-            "limitRequests": LIMITS[w]["requests"],
-            "usedPctTokens": None,
-            "usedPctRequests": None,
+            "usedRequests": req_counts[w],
             "resetAt": "rolling" if w == "5h" else ("rolling" if w == "7d" else "fixed"),
             "resetType": "rolling" if w != "30d" else "fixed",
         }
@@ -174,12 +172,8 @@ def scrape_claude():
     windows = {}
     for w in ["5h", "7d", "30d"]:
         windows[w] = {
+            "usedPct": 0,
             "usedTokens": buckets[w],
-            "usedRequests": req_counts[w],
-            "limitTokens": None,
-            "limitRequests": None,
-            "usedPctTokens": None,
-            "usedPctRequests": None,
             "resetAt": "rolling",
             "resetType": "rolling",
         }
@@ -283,13 +277,12 @@ def scrape_zai():
                 total_requests += bucket.get("requests", 0)
 
         limit = limits[name]
+        used_pct = (total_tokens / limit * 100) if limit else 0
         windows_data[name] = {
+            "usedPct": round(used_pct, 1) if limit else 0,
             "usedTokens": total_tokens,
-            "usedRequests": total_requests,
             "limitTokens": limit,
-            "limitRequests": None,
-            "usedPctTokens": round(total_tokens / limit * 100, 1) if limit else None,
-            "usedPctRequests": None,
+            "usedRequests": total_requests,
             "resetAt": "rolling" if name == "5h" else ("Monday 00:00 UTC" if name == "7d" else "never"),
             "resetType": "rolling" if name == "5h" else ("fixed" if name == "7d" else "rolling"),
         }
@@ -338,13 +331,14 @@ def scrape_ollama_cloud():
 
         lt = limits_tokens[name]
         lr = limits_req[name]
+        used_pct_tok = (total_tokens / lt * 100) if lt else 0
+        used_pct_req = (total_requests / lr * 100) if lr else 0
         windows_data[name] = {
+            "usedPct": round(max(used_pct_tok, used_pct_req), 1),
             "usedTokens": total_tokens,
-            "usedRequests": total_requests,
             "limitTokens": lt,
+            "usedRequests": total_requests,
             "limitRequests": lr,
-            "usedPctTokens": round(total_tokens / lt * 100, 1) if lt else None,
-            "usedPctRequests": round(total_requests / lr * 100, 1) if lr else None,
             "resetAt": "01:00 UTC (session)" if name == "5h" else ("Monday 01:00 UTC" if name == "7d" else "never"),
             "resetType": "rolling" if name == "5h" else ("fixed" if name == "7d" else "rolling"),
         }
