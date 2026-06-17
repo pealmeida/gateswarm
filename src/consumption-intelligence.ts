@@ -27,6 +27,11 @@ export interface ConsumptionDecision {
   estimatedCost: number;
   confidence: number;
   alternatives: Array<{ provider: string; model: string; reason: string }>;
+  // v0.5.6: flag to distinguish real request decisions from health/balance checks.
+  // Health checks pollute the ActivityPanel and confuse operators about what
+  // tier was actually used for user traffic.
+  source: 'request' | 'health-check' | 'balance-check' | 'recovery-check';
+  timestamp: number;
 }
 
 export type DecisionReason =
@@ -105,6 +110,7 @@ class ConsumptionIntelligence {
     preferProvider?: string;
     excludeProviders?: string[];
     estimatedPromptTokens?: number;
+    source?: 'request' | 'health-check' | 'balance-check' | 'recovery-check';
   }): ConsumptionDecision {
     const reqs = TIER_REQUIREMENTS[tier];
     const allModels = modelMatrix.getAvailableModels();
@@ -156,6 +162,8 @@ class ConsumptionIntelligence {
           estimatedCost: 0,
           confidence: 0.3,
           alternatives: [],
+          source: options?.source || 'request',
+          timestamp: Date.now(),
         };
       }
       throw new Error(`No models available for tier: ${tier}`);
@@ -186,6 +194,8 @@ class ConsumptionIntelligence {
       estimatedCost: (best.costPer1kInput + best.costPer1kOutput) * (options?.estimatedPromptTokens || 500) / 2000,
       confidence: Math.min(0.95, scored[0].score / 100),
       alternatives,
+      source: options?.source || 'request',
+      timestamp: Date.now(),
     };
 
     // Record decision
@@ -210,19 +220,19 @@ class ConsumptionIntelligence {
   /**
    * Get the best alternative when a model fails.
    */
-  getFallback(tier: EffortLevel, failedProvider: string, failedModel: string): ConsumptionDecision | null {
+  getFallback(tier: EffortLevel, failedProvider: string, failedModel: string, source: 'request' | 'health-check' | 'balance-check' | 'recovery-check' = 'request'): ConsumptionDecision | null {
     const excludeProviders = new Set([failedProvider]);
 
     // Try same tier excluding failed provider
     try {
-      return this.selectModel(tier, { excludeProviders: [...excludeProviders] });
+      return this.selectModel(tier, { excludeProviders: [...excludeProviders], source });
     } catch {
       // Fall back to next tier up
       const tiers: EffortLevel[] = ['trivial', 'light', 'moderate', 'heavy', 'intensive', 'extreme'];
       const idx = tiers.indexOf(tier);
       for (let i = idx + 1; i < tiers.length; i++) {
         try {
-          return this.selectModel(tiers[i], { excludeProviders: [...excludeProviders] });
+          return this.selectModel(tiers[i], { excludeProviders: [...excludeProviders], source });
         } catch { /* continue */ }
       }
     }
@@ -362,7 +372,8 @@ class ConsumptionIntelligence {
     const tiers: EffortLevel[] = ['trivial', 'light', 'moderate', 'heavy', 'intensive', 'extreme'];
     for (const tier of tiers) {
       try {
-        recs[tier] = this.selectModel(tier);
+        // v0.5.6: mark as health-check so it doesn't pollute the ActivityPanel
+        recs[tier] = this.selectModel(tier, { source: 'health-check' });
       } catch { /* skip */ }
     }
     return recs as Record<EffortLevel, ConsumptionDecision>;
@@ -424,6 +435,7 @@ class ConsumptionIntelligence {
       newDecision = this.selectModel(tier, {
         excludeProviders: [failedProvider],
         estimatedPromptTokens: 500,
+        source: 'recovery-check',
       });
     } catch {
       // No candidates at all — try one tier below
@@ -431,7 +443,7 @@ class ConsumptionIntelligence {
       const idx = tiers.indexOf(tier);
       for (let i = idx - 1; i >= 0; i--) {
         try {
-          newDecision = this.selectModel(tiers[i], { estimatedPromptTokens: 500 });
+          newDecision = this.selectModel(tiers[i], { estimatedPromptTokens: 500, source: 'recovery-check' });
           console.log(`🔄 [Intel] ${tier}: no candidates — using ${tiers[i]}-tier model: ${newDecision.provider}/${newDecision.model}`);
           break;
         } catch { continue; }

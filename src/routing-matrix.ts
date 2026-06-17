@@ -250,14 +250,9 @@ export function classifyDevice(
  * Convert complexity score (0-1) to effort level.
  * v3.6: UNIFIED boundaries matching v04_config.json tier_boundaries.
  */
-export function scoreToEffort(score: number): EffortLevel {
-  if (score < 0.1557) return 'trivial';
-  if (score < 0.1842) return 'light';
-  if (score < 0.2788) return 'moderate';
-  if (score < 0.3488) return 'heavy';
-  if (score < 0.4611) return 'intensive';
-  return 'extreme';
-}
+// scoreToEffort is now imported from intent-engine.js (canonical, config-driven).
+// Re-export for backward compatibility with any consumer that imported it from here.
+export { scoreToEffort } from './intent-engine.js';
 
 /**
  * Look up the matrix cell for a given effort × device combination.
