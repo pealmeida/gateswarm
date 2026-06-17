@@ -948,6 +948,9 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
           }
           if (resp.status === 429 || resp.status === 1305 || resp.status === 1308) {
             providerQuota.record429(trivialCfg.provider);
+            // v0.5.5: Feed the greeting-fast-path failure to the intelligence layer
+            // so the trivial tier gets rebalanced if ZAI is persistently exhausted
+            consumptionIntelligence.recordFallbackOutcome('trivial', trivialCfg.provider, trivialCfg.model, false, '429');
             console.log(`⚡ [${agent.name}] Greeting fast-path failed (429) — falling through to normal routing`);
             // Fall through to normal routing below
           } else {
@@ -1396,6 +1399,8 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
           break;
         } catch (err: any) {
           console.log(`⚠️  [${agent.name}] CLI ${target.label} failed: ${err.message}`);
+          // v0.5.5: Feed CLI failure to intelligence layer
+          consumptionIntelligence.recordFallbackOutcome(effort, target.providerId, target.model, false, 'cli_error');
           continue;
         }
       }
@@ -1425,6 +1430,8 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
           modelMatrix.recordError(target.providerId, target.model, `rate-limited (${resp.status})`);
           providerQuota.record429(target.providerId);
           consumptionTracker.recordUsage(target.providerId, { tokensIn: 0, tokensOut: 0, latencyMs: 0, error: true });
+          // v0.5.5: Feed the failure to the intelligence layer for self-healing
+          consumptionIntelligence.recordFallbackOutcome(effort, target.providerId, target.model, false, '429');
           continue;
         }
 
@@ -1834,6 +1841,15 @@ async function init() {
   };
   scheduleDailyReset();
 
+  // v0.5.5: Tier recovery check every 5 minutes
+  // Checks if any swapped providers have recovered and restores original defaults
+  setInterval(() => {
+    consumptionIntelligence.checkRecovery().catch(err =>
+      console.error('❌ [Intel] Recovery check failed:', err.message)
+    );
+  }, 300000);
+  console.log('🔄 [Intel] Tier recovery check: every 5min');
+
   const agents = agentRegistry.getAgents();
   console.log(`🚀 GateSwarm MoMA Router v0.5.5 (Quota-Aware Routing) starting on :${PORT}`);
   console.log(`📊 Providers: ${agentRegistry.getProviders().map(p => p.id).join(', ')}`);
@@ -1947,14 +1963,33 @@ async function init() {
       if (url.pathname === '/v05/intel/balance' && method === 'GET') {
         // Provider ranking for each tier
         const tiers: EffortLevel[] = ['trivial', 'light', 'moderate', 'heavy', 'intensive', 'extreme'];
-        const rankings: Record<string, LoadBalanceDecision[]> = {};
+        const rankings: Record<string, any> = {};
         for (const tier of tiers) {
-          rankings[tier] = providerQuota.rankProvidersForTier(tier);
+          try {
+            const allModels = modelMatrix.getAvailableModels();
+            const decision = consumptionIntelligence.selectModel(tier);
+            rankings[tier] = {
+              current: `${decision.provider}/${decision.model}`,
+              reason: decision.reason,
+              confidence: decision.confidence,
+            };
+          } catch {
+            rankings[tier] = { current: 'unavailable', reason: 'no_candidates' };
+          }
         }
-        return jsonResponse(res, 200, {
-          rankings,
-          summary: providerQuota.getUsageSummary(),
-        });
+        const swaps = consumptionIntelligence.getTierSwaps();
+        return jsonResponse(res, 200, { rankings, swaps });
+      }
+
+      // v0.5.5: Tier swap observability
+      if (url.pathname === '/v05/intel/swaps' && method === 'GET') {
+        const swaps = consumptionIntelligence.getTierSwaps();
+        const cfg = getConfig();
+        const currentTiers: Record<string, string> = {};
+        for (const [tier, tcfg] of Object.entries(cfg.tier_models)) {
+          currentTiers[tier] = `${tcfg.provider}/${tcfg.model}`;
+        }
+        return jsonResponse(res, 200, { swaps, currentTiers });
       }
 
       if (url.pathname === '/v05/intel/sync' && method === 'GET') {

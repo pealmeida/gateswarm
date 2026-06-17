@@ -13,7 +13,7 @@
 
 import { modelMatrix, ModelEntry, EffortLevel, ProviderSummary } from './model-matrix.js';
 import { agentRegistry } from './agent-registry.js';
-import { getConfig } from './v04-config.js';
+import { getConfig, saveConfig } from './v04-config.js';
 import { providerQuota, getMultiWindowQuota } from './provider-quota.js';
 
 // ─── Types ───────────────────────────────────────────────
@@ -366,6 +366,171 @@ class ConsumptionIntelligence {
       } catch { /* skip */ }
     }
     return recs as Record<EffortLevel, ConsumptionDecision>;
+  }
+
+  // ─── v0.5.5: Self-Healing Tier Rebalancing ─────────────────
+  // When the default provider/model for a tier becomes unavailable (exhausted,
+  // throttled, or returning 429s), swap to the next best available option.
+  // The swap is persisted to v04_config.json so it survives restarts.
+  // When the original provider recovers, restore the preferred default.
+
+  private tierSwaps: Map<EffortLevel, {
+    originalProvider: string;
+    originalModel: string;
+    swapProvider: string;
+    swapModel: string;
+    swappedAt: number;
+    reason: string;
+  }> = new Map();
+
+  /**
+   * Check if a tier's default provider is exhausted and needs rebalancing.
+   * Called after every request that hit a 429 or quota exhaustion.
+   */
+  recordFallbackOutcome(tier: EffortLevel, triedProvider: string, triedModel: string, success: boolean, errorType?: string): void {
+    if (success) return; // Successes don't trigger rebalancing
+
+    // If the tried provider is the tier's default AND it failed with a quota error,
+    // trigger a rebalance.
+    const cfg = getConfig();
+    const tierCfg = cfg.tier_models[tier];
+    if (!tierCfg) return;
+
+    const isDefault = tierCfg.provider === triedProvider && tierCfg.model === triedModel;
+    const isQuotaError = errorType === 'rate-limited' || errorType === '429' || errorType === 'quota_exhausted';
+
+    if (isDefault && isQuotaError) {
+      console.log(`🔄 [Intel] ${tier} default ${triedProvider}/${triedModel} failed (${errorType}) — rebalancing...`);
+      this.rebalanceTier(tier, triedProvider, triedModel, errorType || 'unknown');
+    }
+  }
+
+  /**
+   * Swap a tier's default provider/model to the next best available option.
+   * Persists the change to v04_config.json.
+   */
+  private async rebalanceTier(tier: EffortLevel, failedProvider: string, failedModel: string, reason: string): Promise<void> {
+    const cfg = getConfig();
+    const tierCfg = cfg.tier_models[tier];
+    if (!tierCfg) return;
+
+    // Don't rebalance if already swapped (avoid loops)
+    const existingSwap = this.tierSwaps.get(tier);
+    if (existingSwap && existingSwap.swapProvider === failedProvider) return;
+
+    // Find the best available model for this tier (excluding the failed one)
+    let newDecision: ConsumptionDecision;
+    try {
+      newDecision = this.selectModel(tier, {
+        excludeProviders: [failedProvider],
+        estimatedPromptTokens: 500,
+      });
+    } catch {
+      // No candidates at all — try one tier below
+      const tiers: EffortLevel[] = ['trivial', 'light', 'moderate', 'heavy', 'intensive', 'extreme'];
+      const idx = tiers.indexOf(tier);
+      for (let i = idx - 1; i >= 0; i--) {
+        try {
+          newDecision = this.selectModel(tiers[i], { estimatedPromptTokens: 500 });
+          console.log(`🔄 [Intel] ${tier}: no candidates — using ${tiers[i]}-tier model: ${newDecision.provider}/${newDecision.model}`);
+          break;
+        } catch { continue; }
+      }
+      return; // If we get here, nothing worked
+    }
+
+    // Record the swap
+    if (!existingSwap) {
+      this.tierSwaps.set(tier, {
+        originalProvider: tierCfg.provider,
+        originalModel: tierCfg.model,
+        swapProvider: newDecision.provider,
+        swapModel: newDecision.model,
+        swappedAt: Date.now(),
+        reason,
+      });
+    } else {
+      existingSwap.swapProvider = newDecision.provider;
+      existingSwap.swapModel = newDecision.model;
+      existingSwap.swappedAt = Date.now();
+      existingSwap.reason = reason;
+    }
+
+    // Persist to v04_config.json
+    tierCfg.provider = newDecision.provider;
+    tierCfg.model = newDecision.model;
+
+    // Also update fallbacks — put the failed provider at the end
+    if (tierCfg.fallback_models) {
+      tierCfg.fallback_models = tierCfg.fallback_models.filter(
+        f => !(f.provider === failedProvider && f.model === failedModel)
+      );
+      tierCfg.fallback_models.push({ provider: failedProvider, model: failedModel });
+    }
+
+    try {
+      await saveConfig(cfg);
+      console.log(`✅ [Intel] ${tier} rebalanced: ${failedProvider}/${failedModel} → ${newDecision.provider}/${newDecision.model}`);
+    } catch (err) {
+      console.error(`❌ [Intel] Failed to persist tier rebalance:`, (err as Error).message);
+    }
+  }
+
+  /**
+   * Check if any swapped providers have recovered and should be restored.
+   * Called periodically (e.g., every 5 minutes).
+   */
+  async checkRecovery(): Promise<void> {
+    for (const [tier, swap] of this.tierSwaps) {
+      // Only check recovery if the swap is at least 5 minutes old
+      if (Date.now() - swap.swappedAt < 300000) continue;
+
+      const pq = providerQuota.getQuota(swap.originalProvider);
+      if (!pq) continue;
+
+      // Recover if: not throttled AND health > 80
+      if ((!pq.throttled || pq.throttledUntil <= Date.now()) && pq.healthScore > 80) {
+        console.log(`🔄 [Intel] ${tier}: ${swap.originalProvider} recovered (health=${pq.healthScore}) — restoring default`);
+        const cfg = getConfig();
+        const tierCfg = cfg.tier_models[tier];
+        if (tierCfg) {
+          tierCfg.provider = swap.originalProvider;
+          tierCfg.model = swap.originalModel;
+          // Remove the swapped provider from fallbacks, put original back as default
+          if (tierCfg.fallback_models) {
+            tierCfg.fallback_models = tierCfg.fallback_models.filter(
+              f => !(f.provider === swap.swapProvider && f.model === swap.swapModel)
+            );
+            // Put the swap target in fallbacks (in case it fails again)
+            tierCfg.fallback_models.unshift({ provider: swap.swapProvider, model: swap.swapModel });
+          }
+          try {
+            await saveConfig(cfg);
+            this.tierSwaps.delete(tier);
+            console.log(`✅ [Intel] ${tier} restored to ${swap.originalProvider}/${swap.originalModel}`);
+          } catch (err) {
+            console.error(`❌ [Intel] Failed to persist recovery:`, (err as Error).message);
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * Get current tier swap state (for observability).
+   */
+  getTierSwaps(): Array<{ tier: EffortLevel; original: string; current: string; swappedAt: string; reason: string }> {
+    const result: Array<{ tier: EffortLevel; original: string; current: string; swappedAt: string; reason: string }> = [];
+    for (const [tier, swap] of this.tierSwaps) {
+      result.push({
+        tier,
+        original: `${swap.originalProvider}/${swap.originalModel}`,
+        current: `${swap.swapProvider}/${swap.swapModel}`,
+        swappedAt: new Date(swap.swappedAt).toISOString(),
+        reason: swap.reason,
+      });
+    }
+    return result;
   }
 }
 
