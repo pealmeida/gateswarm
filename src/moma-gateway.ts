@@ -60,6 +60,13 @@ import { getConfig, getTierModel, getAllTierModels, getReasoningStatus, saveConf
 import type { EffortLevel, IntentMode } from './types.js';
 import { agentRegistry, AgentConfig } from './agent-registry.js';
 import { estimateTokens } from './token-estimator.js';
+import { modelMatrix } from './model-matrix.js';
+import { modelDiscovery } from './model-discovery.js';
+import { consumptionIntelligence, ConsumptionDecision } from './consumption-intelligence.js';
+import { providerQuota, getMultiWindowQuota } from './provider-quota.js';
+import type { LoadBalanceDecision } from './provider-quota.js';
+import { consumptionTracker } from './consumption-tracker.js';
+import { quotaSync } from './quota-sync.js';
 import { getCliProvidersEnabled } from './v04-config.js';
 import { turboQuantCompress, MODEL_CONTEXT_WINDOWS } from './turboquant-compressor.js';
 import { ragIndex, queryRag } from './rag-index.js';
@@ -87,6 +94,169 @@ const PORT = parseInt(process.argv.find(a => a === '--port') ? process.argv[proc
 // ─── State ─────────────────────────────────────────────
 
 const benchmarkLogger = new BenchmarkLogger();
+
+type StreamFinishReason = 'stop' | 'length' | 'tool_calls' | 'content_filter' | 'function_call';
+
+
+function messageContentToText(content: any): string {
+  if (content === null || content === undefined) return '';
+  if (typeof content === 'string') return content;
+  if (typeof content === 'number' || typeof content === 'boolean') return String(content);
+
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => messageContentToText(part))
+      .filter((text) => text.trim().length > 0)
+      .join('\n');
+  }
+
+  if (typeof content === 'object') {
+    const record = content as Record<string, any>;
+    if (typeof record.text === 'string') return record.text;
+    if (typeof record.input_text === 'string') return record.input_text;
+    if (typeof record.output_text === 'string') return record.output_text;
+    if (record.content !== undefined) return messageContentToText(record.content);
+    if (record.message !== undefined) return messageContentToText(record.message);
+    if (record.prompt !== undefined) return messageContentToText(record.prompt);
+    if (record.value !== undefined) return messageContentToText(record.value);
+    return JSON.stringify(record);
+  }
+
+  return String(content);
+}
+
+function normalizeMessageContent(message: any): any {
+  if (!message || typeof message !== 'object' || !('content' in message)) return message;
+  return { ...message, content: messageContentToText(message.content) };
+}
+
+function createTerminalStreamChunk(model: string, finishReason: StreamFinishReason): string {
+  return JSON.stringify({
+    id: `chatcmpl-terminal-${Date.now()}`,
+    object: 'chat.completion.chunk',
+    created: Math.floor(Date.now() / 1000),
+    model,
+    choices: [{ index: 0, delta: {}, finish_reason: finishReason }],
+  });
+}
+
+function writeTerminalStream(
+  res: ServerResponse,
+  model: string,
+  finishReason: StreamFinishReason,
+  state: { sawFinishReason: boolean; sawDone: boolean },
+) {
+  if (!state.sawFinishReason) {
+    res.write(`data: ${createTerminalStreamChunk(model, finishReason)}\n\n`);
+    state.sawFinishReason = true;
+  }
+
+  if (!state.sawDone) {
+    res.write('data: [DONE]\n\n');
+    state.sawDone = true;
+  }
+}
+
+function parseSseEventData(event: string): string | null {
+  const dataLines = event
+    .split(/\r?\n/)
+    .filter(line => line.startsWith('data:'))
+    .map(line => line.slice('data:'.length).trimStart());
+
+  return dataLines.length > 0 ? dataLines.join('\n') : null;
+}
+
+function streamEventHasFinishReason(data: string): boolean {
+  if (!data || data === '[DONE]') return false;
+
+  try {
+    const parsed = JSON.parse(data);
+    return Array.isArray(parsed?.choices)
+      && parsed.choices.some((choice: any) => choice?.finish_reason != null);
+  } catch {
+    return false;
+  }
+}
+
+function writeProviderSseEvent(
+  res: ServerResponse,
+  event: string,
+  model: string,
+  state: { sawFinishReason: boolean; sawDone: boolean },
+) {
+  const data = parseSseEventData(event);
+
+  if (data === '[DONE]') {
+    writeTerminalStream(res, model, 'stop', state);
+    return;
+  }
+
+  if (data && streamEventHasFinishReason(data)) {
+    state.sawFinishReason = true;
+  }
+
+  res.write(`${event}\n\n`);
+}
+
+interface CliStreamState {
+  id: string;
+  created: number;
+  model: string;
+  heartbeat: ReturnType<typeof setInterval>;
+}
+
+function startCliStream(res: ServerResponse, model: string, prefix = 'chatcmpl-cli'): CliStreamState {
+  const state: CliStreamState = {
+    id: `${prefix}-${Date.now()}`,
+    created: Math.floor(Date.now() / 1000),
+    model,
+    heartbeat: setInterval(() => {
+      if (!res.writableEnded) res.write(`: keepalive ${Date.now()}\n\n`);
+    }, 10_000),
+  };
+
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'Access-Control-Allow-Origin': '*',
+  });
+
+  res.write(`data: ${JSON.stringify({
+    id: state.id,
+    object: 'chat.completion.chunk',
+    created: state.created,
+    model: state.model,
+    choices: [{ index: 0, delta: {}, finish_reason: null }],
+  })}\n\n`);
+
+  return state;
+}
+
+function finishCliStream(
+  res: ServerResponse,
+  state: CliStreamState,
+  content: string,
+  finishReason: StreamFinishReason = 'stop',
+) {
+  clearInterval(state.heartbeat);
+
+  if (content && !res.writableEnded) {
+    res.write(`data: ${JSON.stringify({
+      id: state.id,
+      object: 'chat.completion.chunk',
+      created: state.created,
+      model: state.model,
+      choices: [{ index: 0, delta: { content }, finish_reason: null }],
+    })}\n\n`);
+  }
+
+  if (!res.writableEnded) {
+    res.write(`data: ${createTerminalStreamChunk(state.model, finishReason)}\n\n`);
+    res.write('data: [DONE]\n\n');
+    res.end();
+  }
+}
 
 // ─── Direct Routing (v0.5.1) ───────────────────────────
 // Bypasses complexity scoring, routes directly to specified provider/model
@@ -120,7 +290,9 @@ function resolveDirectRoute(req: IncomingMessage, body: any, agent: AgentConfig)
     // Check if prefix matches a known provider
     const providerId = resolveProviderId(prefix);
     if (providerId) {
-      return { providerId, model: body.model };
+      // Return bare model name (strip prefix) so downstream cleanModel logic
+      // doesn't double-strip and produce a malformed model id.
+      return { providerId, model: rest };
     }
   }
 
@@ -140,6 +312,7 @@ function resolveProviderId(prefix: string): string | null {
     'cc': 'claude-cli', 'cx': 'codex-cli',
     'pi': 'pi-agent', 'hm': 'hermes-agent', 'oc': 'openclaw-agent',
     'bailian': 'bailian', 'zai': 'zai', 'openrouter': 'openrouter',
+    'ollama': 'ollama', 'ollama-cloud': 'ollama-cloud', 'opencodego': 'opencodego',
     'claude-cli': 'claude-cli', 'codex-cli': 'codex-cli',
     'pi-agent': 'pi-agent', 'hermes-agent': 'hermes-agent',
     'openclaw-agent': 'openclaw-agent',
@@ -217,7 +390,18 @@ async function handleDirectRoute(
   const cleanModel = model.includes('/') ? model.split('/').slice(1).join('/') : model;
 
   const startTime = Date.now();
-  const payload = { messages: sanitizedMessages, model: cleanModel, stream: false };
+  // v0.5.4: Respect the client's stream flag — don't force stream:false.
+  // Pi (and other clients) expect a true SSE stream when they ask for it.
+  // Forcing stream:false broke streaming clients and caused
+  // "Stream ended without finish_reason" errors.
+  const clientWantsStream = body.stream === true;
+  const payload: any = { messages: sanitizedMessages, model: cleanModel };
+  if (clientWantsStream) {
+    payload.stream = true;
+    payload.stream_options = { include_usage: true };
+  } else {
+    payload.stream = false;
+  }
 
   try {
     const response = await fetch(`${baseUrl}/chat/completions`, {
@@ -226,14 +410,101 @@ async function handleDirectRoute(
       body: JSON.stringify(payload),
     });
 
-    const data = await response.json();
-    const latency = Date.now() - startTime;
-
     if (!response.ok) {
+      // v0.5.5: Record rate-limit errors so provider health degrades
+      if (response.status === 429 || response.status === 1305 || response.status === 1308) {
+        providerQuota.record429(providerId);
+        modelMatrix.recordError(providerId, cleanModel, `rate-limited (${response.status})`);
+        console.log(`⚠️  [${agent.name}] Direct route ${providerId}/${cleanModel} rate-limited (${response.status})`);
+      }
+      const data = await response.json().catch(() => ({}));
       return jsonResponse(res, response.status, {
         error: data.error || { message: `Provider error: ${response.status}`, type: 'provider_error' },
       });
     }
+
+    // v0.5.4: Forward the upstream stream as-is when client wants streaming.
+    // This is the only way to make streaming clients (Pi, etc.) happy —
+    // they need a real SSE stream with [DONE] markers and finish_reason.
+    if (clientWantsStream && response.body) {
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+      });
+      const reader = response.body.getReader();
+      const streamState = { sawFinishReason: false, sawDone: false };
+      const decoder = new TextDecoder();
+      let buffer = '';
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          // Forward each complete SSE event as it arrives
+          let idx;
+          while ((idx = buffer.indexOf('\n\n')) !== -1) {
+            const evt = buffer.slice(0, idx);
+            buffer = buffer.slice(idx + 2);
+            if (!evt.trim()) continue;
+            // Check if this event has finish_reason
+            const dataLines = evt.split('\n').filter(l => l.startsWith('data:')).map(l => l.slice(5).trim());
+            for (const d of dataLines) {
+              if (d === '[DONE]') {
+                streamState.sawDone = true;
+              } else if (d) {
+                try {
+                  const parsed = JSON.parse(d);
+                  if (Array.isArray(parsed?.choices)) {
+                    for (const c of parsed.choices) {
+                      if (c?.finish_reason != null) streamState.sawFinishReason = true;
+                    }
+                  }
+                } catch {}
+              }
+            }
+            res.write(evt + '\n\n');
+          }
+        }
+        // Flush remaining buffer
+        if (buffer.trim()) {
+          res.write(buffer + '\n\n');
+        }
+        // If upstream didn't send [DONE] or finish_reason, send a terminal stop
+        if (!streamState.sawFinishReason || !streamState.sawDone) {
+          if (!streamState.sawFinishReason) {
+            res.write(`data: {"id":"chatcmpl-done","object":"chat.completion.chunk","created":${Math.floor(Date.now()/1000)},"model":"${cleanModel}","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n`);
+          }
+          if (!streamState.sawDone) {
+            res.write('data: [DONE]\n\n');
+          }
+        }
+        res.end();
+      } catch (streamErr: any) {
+        console.error(`❌ Direct stream forwarding error: ${streamErr.message}`);
+        try {
+          if (!streamState.sawDone) res.write('data: [DONE]\n\n');
+          res.end();
+        } catch {}
+      }
+      const latency = Date.now() - startTime;
+      benchmarkLogger.log({
+        prompt: '(direct route)',
+        prompt_length: 0,
+        tier: 'direct',
+        routed_model: `${providerId}/${model}`,
+        tokens_in: 0, // not available mid-stream
+        tokens_out: 0,
+        latency_ms: latency,
+        provider: providerId,
+        status: 'success',
+      });
+      return;
+    }
+
+    // Non-streaming: parse JSON and return
+    const data = await response.json();
+    const latency = Date.now() - startTime;
 
     benchmarkLogger.log({
       prompt: '(direct route)',
@@ -246,6 +517,18 @@ async function handleDirectRoute(
       provider: providerId,
       status: 'success',
     });
+
+    // Track consumption for direct route too
+    const directTokensIn = (data.usage as any)?.prompt_tokens || 0;
+    const directTokensOut = (data.usage as any)?.completion_tokens || 0;
+    consumptionTracker.recordUsage(providerId, {
+      tokensIn: directTokensIn,
+      tokensOut: directTokensOut,
+      latencyMs: latency,
+      error: false,
+    });
+    providerQuota.recordRequest(providerId, directTokensIn + directTokensOut);
+    providerQuota.recordSuccess(providerId);
 
     emitModeHeaders(req, res, promptText);
     return jsonResponse(res, 200, data);
@@ -291,8 +574,13 @@ async function handleCliProviderDirect(
 
   const startTime = Date.now();
   const cliMessages = sanitizeForCli(messages);
+  const streamResponse = Boolean(req && (req as any)._body?.stream);
+  let cliStream: CliStreamState | null = null;
 
   try {
+    if (streamResponse) {
+      cliStream = startCliStream(res, providerId + '/' + model, 'chatcmpl-cli-direct');
+    }
     const result = await adapter.chatCompletion(cliMessages, model);
     const latency = Date.now() - startTime;
 
@@ -319,9 +607,19 @@ async function handleCliProviderDirect(
       usage: result.usage || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
     };
     if (req) emitModeHeaders(req, res, promptText || '');
+
+    if (streamResponse && cliStream) {
+      finishCliStream(res, cliStream, result.content, (result.finishReason ?? 'stop') as StreamFinishReason);
+      return;
+    }
+
     return jsonResponse(res, 200, openaiResponse);
   } catch (err: any) {
     console.error(`❌ CLI provider error (direct, ${providerId}): ${err.message}`);
+    if (streamResponse && cliStream) {
+      finishCliStream(res, cliStream, `CLI provider error: ${err.message}`, 'length');
+      return;
+    }
     return jsonResponse(res, 502, {
       error: { message: `CLI provider error: ${err.message}`, type: 'cli_error' },
     });
@@ -331,12 +629,29 @@ async function handleCliProviderDirect(
 /** Sanitize messages for OpenAI-compatible providers (remove tool messages, merge same-role). */
 function sanitizeMessages(msgs: any[]): any[] {
   if (msgs.length <= 1) return [...msgs];
-  const systemMsgs = msgs.filter(m => m.role === 'system');
-  const nonSystemMsgs = msgs.filter(m => m.role !== 'system');
+  // v0.5.2: Strip all tool-related messages — the Gateway is a routing proxy,
+  // not a tool-execution engine. Provider-side tool_calls cause errors with
+  // strict APIs (DeepSeek, etc.) when tool_call_ids are unmatched.
+  const stripped = msgs.filter(m => m.role !== 'tool').map(m => {
+    if (m.role === 'assistant' && m.tool_calls) {
+      // Keep the message but drop tool_calls array so providers don't
+      // expect matching tool responses. If content is null/empty after
+      // stripping, replace with a placeholder so strict APIs don't reject.
+      const { tool_calls, ...rest } = m;
+      if (rest.content === null || rest.content === undefined || (typeof rest.content === 'string' && rest.content.trim() === '')) {
+        rest.content = '[tool use]';
+      }
+      return rest;
+    }
+    return m;
+  });
+  if (stripped.length === 0) return [{ role: 'user', content: '(continuation)' }];
+  const systemMsgs = stripped.filter(m => m.role === 'system');
+  const nonSystemMsgs = stripped.filter(m => m.role !== 'system');
   const merged: any[] = [];
   for (const msg of nonSystemMsgs) {
     const prev = merged.length > 0 ? merged[merged.length - 1] : null;
-    if (prev && prev.role === msg.role && msg.role !== 'tool') {
+    if (prev && prev.role === msg.role) {
       const prevContent = typeof prev.content === 'string' ? prev.content : JSON.stringify(prev.content);
       const currContent = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
       prev.content = prevContent + '\n---\n' + currContent;
@@ -487,26 +802,67 @@ async function forwardToProvider(
       });
 
       const reader = response.body?.getReader();
+      const streamState = { sawFinishReason: false, sawDone: false };
+      let streamClosed = false;
+
       if (!reader) {
+        writeTerminalStream(res, model, 'length', streamState);
         res.end();
         return;
       }
 
       const decoder = new TextDecoder();
-      // v0.4.3: 30s idle timeout between SSE chunks
+      let sseBuffer = '';
+      const flushSseBuffer = (final = false) => {
+        while (true) {
+          const separatorIndex = sseBuffer.indexOf('\n\n');
+          if (separatorIndex === -1) break;
+          const event = sseBuffer.slice(0, separatorIndex).trimEnd();
+          sseBuffer = sseBuffer.slice(separatorIndex + 2);
+          if (event) writeProviderSseEvent(res, event, model, streamState);
+        }
+
+        if (final && sseBuffer.trim()) {
+          writeProviderSseEvent(res, sseBuffer.trimEnd(), model, streamState);
+          sseBuffer = '';
+        }
+      };
+
+      // v0.5.3: 90s idle timeout — GLM models can have long gaps during thinking
       const idleTimer = setTimeout(() => {
-        console.log(`⏱️  Streaming idle timeout (30s), closing`);
+        if (streamClosed) return;
+        streamClosed = true;
+        console.log(`⏱️  Streaming idle timeout (90s), sending truncation event`);
         try { reader.cancel(); } catch {}
+        writeTerminalStream(res, model, 'length', streamState);
         res.end();
-      }, 30000);
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        idleTimer.refresh(); // reset idle timer on each chunk
-        res.write(decoder.decode(value));
+      }, 90_000);
+
+      try {
+        while (!streamClosed) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          idleTimer.refresh(); // reset idle timer on each chunk
+          sseBuffer += decoder.decode(value, { stream: true });
+          flushSseBuffer();
+        }
+
+        if (!streamClosed) {
+          sseBuffer += decoder.decode();
+          flushSseBuffer(true);
+          writeTerminalStream(res, model, 'stop', streamState);
+          res.end();
+        }
+      } catch (streamErr: any) {
+        if (!streamClosed) {
+          console.error(`❌ Stream forwarding error: ${streamErr.message}`);
+          writeTerminalStream(res, model, 'length', streamState);
+          res.end();
+        }
+      } finally {
+        streamClosed = true;
+        clearTimeout(idleTimer);
       }
-      clearTimeout(idleTimer);
-      res.end();
     } else {
       const data = await response.json();
       jsonResponse(res, 200, data);
@@ -527,19 +883,13 @@ async function forwardToProvider(
 
 async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, agent: AgentConfig): Promise<void> {
   const body = await parseBody(req);
-  const messages = body.messages || [];
+  (req as any)._body = body;
+  const rawMessages = Array.isArray(body.messages) ? body.messages : [];
+  const messages = rawMessages.map(normalizeMessageContent);
 
   // Extract prompt text for complexity scoring
   const lastUserMessage = messages.filter((m: any) => m.role === 'user').pop();
-  let promptText = lastUserMessage?.content || JSON.stringify(messages);
-  // Handle content that could be an array of blocks (e.g. [{type:"text",text:"..."}])
-  if (typeof promptText !== 'string') {
-    if (Array.isArray(promptText)) {
-      promptText = promptText.filter((b: any) => b.type === 'text').map((b: any) => b.text).join(' ');
-    } else {
-      promptText = String(promptText);
-    }
-  }
+  const promptText = messageContentToText(lastUserMessage?.content) || JSON.stringify(messages);
 
 
 
@@ -561,6 +911,59 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
   if (directRoute) {
     return handleDirectRoute(req, res, agent, messages, promptText, directRoute.providerId, directRoute.model);
   }
+
+  // ─── v0.5.4: Greeting/Ultra-Short Fast-Path ──────────────
+  // For extremely short prompts (greetings, "hi", "ok", single-word Q&A),
+  // skip the entire classification cascade and RAG injection — just route
+  // straight to the local trivial model. Saves 50-200ms of classification
+  // + 1-3s of context processing.
+  const GREETING_RE = /^\s*(hi|hello|hey|yo|sup|good\s+(morning|afternoon|evening)|thanks?|thank\s+you|ok(?:ay)?|bye|cya|gm|gn)\s*[.!]?\s*$/i;
+  if (promptText && GREETING_RE.test(promptText) && promptText.length < 30) {
+    const trivialCfg = getConfig().tier_models.trivial;
+    // v0.5.5: Check provider health before fast-path routing.
+    // If the trivial provider is throttled/rate-limited, fall through to
+    // normal routing which has the full fallback chain.
+    const trivialHealth = providerQuota.shouldSwitch(trivialCfg.provider);
+    if (!trivialHealth.shouldSwitch && (trivialCfg?.provider === 'ollama' || trivialCfg?.provider === 'zai' || trivialCfg?.provider === 'ollama-cloud' || trivialCfg?.provider === 'opencodego')) {
+      console.log(`⚡ [${agent.name}] Greeting fast-path: '${promptText.slice(0,20)}' → ${trivialCfg.provider}/${trivialCfg.model}`);
+      // Strip system messages, send only the user message
+      const greetingMessages = [messages.filter((m: any) => m.role === 'user').pop()].filter(Boolean);
+      // v0.5.5: Try fast-path, but if it fails with 429, fall through to normal routing
+      // which has the full fallback chain. We do this by checking the result inline.
+      try {
+        const baseUrl = agentRegistry.getProviderBaseUrl(trivialCfg.provider);
+        const apiKey = agentRegistry.getProviderApiKey(trivialCfg.provider);
+        if (baseUrl && apiKey) {
+          const cleanModel = trivialCfg.model.includes('/') ? trivialCfg.model.split('/').slice(1).join('/') : trivialCfg.model;
+          const resp = await fetch(`${baseUrl}/chat/completions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+            body: JSON.stringify({ messages: greetingMessages, model: cleanModel, stream: false }),
+            signal: AbortSignal.timeout(10000),
+          });
+          if (resp.ok) {
+            const data = await resp.json();
+            emitModeHeaders(req, res, promptText);
+            return jsonResponse(res, 200, data);
+          }
+          if (resp.status === 429 || resp.status === 1305 || resp.status === 1308) {
+            providerQuota.record429(trivialCfg.provider);
+            console.log(`⚡ [${agent.name}] Greeting fast-path failed (429) — falling through to normal routing`);
+            // Fall through to normal routing below
+          } else {
+            const errData = await resp.json().catch(() => ({}));
+            return jsonResponse(res, resp.status, { error: errData.error || { message: `Provider error: ${resp.status}`, type: 'provider_error' } });
+          }
+        }
+      } catch {
+        console.log(`⚡ [${agent.name}] Greeting fast-path error — falling through to normal routing`);
+        // Fall through
+      }
+    }
+    if (trivialHealth.shouldSwitch) {
+      console.log(`⚡ [${agent.name}] Greeting fast-path blocked: ${trivialCfg.provider} ${trivialHealth.reason} — using normal routing`);
+    }
+  }
   // ────────────────────────────────────────────────────────────
 
 
@@ -580,33 +983,79 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
 
   const modeDetection = detectIntentMode(promptText);
   const activeMode: IntentMode = modeOverride ?? modeDetection.mode;
-  const tierModelConfig = getTierModelForMode(effort, activeMode);
+
+  // ─── v0.5.3: Token Consumption Intelligence Routing ──────
+  let decision: ConsumptionDecision;
+  try {
+    decision = consumptionIntelligence.selectModel(effort, {
+      estimatedPromptTokens: estimateTokens(messages),
+    });
+  } catch {
+    console.log(`🧠 [${agent.name}] Intelligence engine failed — using static config`);
+    const staticCfg = getTierModel(effort);
+    decision = {
+      provider: staticCfg?.provider || 'zai',
+      model: staticCfg?.model || 'glm-4.5-air',
+      tier: effort,
+      reason: 'static_fallback',
+      estimatedTokens: estimateTokens(messages),
+      estimatedCost: 0,
+      confidence: 0.1,
+      alternatives: [],
+    };
+  }
+
+  let providerId = decision.provider;
+  let model = decision.model;
 
   const continuity = getContinuity(sessionId);
-  if (continuity && continuity.lastModel !== (tierModelConfig?.model ?? '')) {
-    // Model switch detected — inject continuity summary
-    console.log(`🔄 [${agent.name}] Model switch: ${continuity.lastModel} → ${tierModelConfig?.model}`);
+  if (continuity && continuity.lastModel !== model) {
+    console.log(`🔄 [${agent.name}] Model switch: ${continuity.lastModel} → ${model}`);
   }
 
-  const resolved = agentRegistry.resolveModel(agent, effort);
-  let providerId = resolved.providerId;
-  let model = resolved.model;
-  // v0.5.2 fix: in plan mode, actually dispatch to the tier's configured plan
-  // model/provider. Previously tierModelConfig was computed but never used as the
-  // primary target — plan mode only flipped X-Mode headers while still routing to
-  // the act model. The act/auto path keeps per-agent resolveModel routing.
+  // v0.5.3: plan mode override
   const rawTier = getTierModel(effort);
-  if (activeMode === 'plan' && rawTier?.plan_model && tierModelConfig) {
-    providerId = tierModelConfig.provider;
-    model = tierModelConfig.model;
+  if (activeMode === 'plan' && rawTier?.plan_model) {
+    providerId = rawTier.plan_provider || decision.provider;
+    model = rawTier.plan_model;
+    console.log(`📋 [${agent.name}] Plan mode override: ${providerId}/${model}`);
   }
-  console.log(`🧠 [${agent.name}] Score: ${score.toFixed(3)} → ${effort} (${activeMode}) → ${providerId}/${model}`);
+
+  console.log(`🧠 [${agent.name}] Score: ${score.toFixed(3)} → ${effort} (${activeMode}) → ${providerId}/${model} [${decision.reason}, conf=${decision.confidence.toFixed(2)}]`);
   const interactionId = `${agent.id}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+  // ─── v0.5.4: Trivial Fast-Path ──────────────────────
+  // For TRIVIAL-tier requests targeting a TINY local model (qwen2.5:0.5b,
+  // qwen2.5:1.5b, gemma2:2b etc), strip the system prompt and RAG context
+  // when the user prompt is short. A 0.5B model on CPU takes ~20s to process
+  // a 4K-token system prompt for a "hi" — the prompt overhead dwarfs the
+  // generation. Stripping it makes trivial responses 5–10× faster.
+  //
+  // Heuristic: if effort is trivial AND model size < 2B AND user prompt
+  // is < 50 chars, send only the last user message — no system, no history.
+  const modelSizeB = (() => {
+    const m = String(model).match(/(\d+\.?\d*)b(?:[-_]|\b|$)/i);
+    return m ? parseFloat(m[1]) : 999;
+  })();
+  const lastUserMsg = messages.filter((m: any) => m.role === 'user').pop();
+  const userPromptLen = messageContentToText(lastUserMsg?.content).length;
+  const isTrivialFastPath =
+    effort === 'trivial' &&
+    modelSizeB <= 2.0 &&
+    userPromptLen > 0 &&
+    userPromptLen < 60 &&
+    providerId === 'ollama';
+
+  let workingMessages = messages;
+  if (isTrivialFastPath) {
+    workingMessages = [lastUserMsg];
+    console.log(`⚡ [${agent.name}] Trivial fast-path: stripped system+RAG (user prompt: ${userPromptLen} chars, model: ${modelSizeB}B)`);
+  }
 
   // ─── TurboQuant Context Compression v3.5 ──────────────────
   // Auto-compact with dynamic thresholds per model context window
   const compressionResult = turboQuantCompress({
-    messages,
+    messages: workingMessages,
     targetModel: model,
     // reservedTokens omitted — compressor computes dynamically per model
   });
@@ -743,8 +1192,13 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
       // Skip orphaned tool messages (no parent assistant)
       if (msg.role === 'tool') {
         if (msg.tool_call_id && !hasToolCallParent.has(msg.tool_call_id)) continue;
-        // Tool must follow an assistant message
-        if (valid.length === 0 || valid[valid.length - 1].role !== 'assistant') continue;
+        // v0.5.2 fix: Tool must follow an assistant or another tool message.
+        // Multi-tool returns (tc1, tc2, tc3) are consecutive tool messages —
+        // only the first follows an assistant directly; subsequent ones follow
+        // the previous tool message. DeepSeek and other strict providers reject
+        // tool_calls where any tool_call_id is unmatched.
+        const prevRole = valid.length > 0 ? valid[valid.length - 1].role : null;
+        if (prevRole !== 'assistant' && prevRole !== 'tool') continue;
       }
       valid.push(msg);
     }
@@ -760,6 +1214,30 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
       const sysEnd = valid.findIndex(m => m.role !== 'system');
       const insertIdx = sysEnd < 0 ? valid.length : sysEnd;
       valid.splice(insertIdx, 0, { role: 'user', content: '[Continuing conversation — please respond]' });
+    }
+
+    // Phase 8 (v0.5.2): Safety net — strip orphaned tool_calls from assistants.
+    // TurboQuant compression and message dropping can leave assistant messages
+    // with tool_calls whose corresponding tool responses were removed. Providers
+    // like DeepSeek reject these with "insufficient tool messages following
+    // tool_calls message". Rather than fail, drop the tool_calls metadata.
+    const validToolIds = new Set<string>();
+    for (const msg of valid) {
+      if (msg.role === 'tool' && msg.tool_call_id) validToolIds.add(msg.tool_call_id);
+    }
+    for (const msg of valid) {
+      if (msg.role === 'assistant' && msg.tool_calls?.length > 0) {
+        const covered = msg.tool_calls.every((tc: any) => validToolIds.has(tc.id));
+        if (!covered) {
+          delete msg.tool_calls;
+          // After stripping tool_calls, content may be null — replace
+          // with placeholder to satisfy strict APIs (DeepSeek rejects
+          // assistant messages with null content and no tool_calls)
+          if (msg.content === null || msg.content === undefined || (typeof msg.content === 'string' && msg.content.trim() === '')) {
+            msg.content = '[tool use]';
+          }
+        }
+      }
     }
 
     return valid;
@@ -782,7 +1260,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
 
     return handleCliProvider(
       providerId, model, agent, messages, effort,
-      compressionResult, promptText, res, score,
+      compressionResult, promptText, res, score, body.stream === true,
     );
   }
   if (isCli && agent.id === providerId) {
@@ -803,7 +1281,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
     }
 
     const url = `${baseUrl}/chat/completions`;
-    const tierModel = tierModelConfig ?? getTierModel(effort);
+    const tierModel = getTierModel(effort);
     const payload: any = { ...body, model, messages: compressedMessages };
     // v3.6: Only send enable_thinking to ZAI when TRUE — ZAI rejects enable_thinking=false
     if (tierModel?.enable_thinking === true && providerId === 'zai') {
@@ -837,20 +1315,25 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
       return jsonResponse(res, 503, { error: { message: `Provider ${providerId} not configured`, type: 'provider_unavailable' } });
     }
 
-    // Build retry chain: primary → fallback_models from v04 config
+    // ─── v0.5.3: Consumption Intelligence Fallback Chain ───
+    // Build retry targets using consumption intelligence for smart fallback
     const retryTargets: RetryTarget[] = [initial];
-    const tierCfg = tierModelConfig ?? getTierModel(effort);
+
+    // Get intelligent fallbacks from consumption engine
+    const intelFallback = consumptionIntelligence.getFallback(effort, providerId, model);
+    if (intelFallback) {
+      const ifb = buildTarget(intelFallback.provider, intelFallback.model);
+      if (ifb) retryTargets.push(ifb);
+    }
+
+    // Supplement with static config fallbacks as backup
+    const tierCfg = getTierModel(effort);
     if (tierCfg) {
       const fbModels = (tierCfg as any).fallback_models as Array<{model: string; provider: string}> | undefined;
       if (fbModels) {
         for (const fb of fbModels) {
-          // Skip if same as primary
           if (fb.provider === providerId && fb.model === model) continue;
-          // Loop guard: skip if fallback is the same agent (infinite loop prevention)
-          if (fb.provider === agent.id) {
-            console.log(`🔒 [${agent.name}] Loop guard: skipping fallback to ${fb.provider} (self-reference)`);
-            continue;
-          }
+          if (retryTargets.some(t => t.providerId === fb.provider && t.model === fb.model)) continue;
           const t = buildTarget(fb.provider, fb.model);
           if (t) retryTargets.push(t);
         }
@@ -861,8 +1344,31 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
     let latency = 0;
     let actualTarget = initial;
 
+    // v0.5.5: Global retry budget — don't spend more than 60s on fallbacks.
+    // If all providers are rate-limited, failing fast is better than a
+    // 5-minute cascade of guaranteed 429s.
+    const retryDeadline = Date.now() + 60000;
+
     try {
     for (const target of retryTargets) {
+      // ─── v0.5.5: Global budget check ───
+      if (Date.now() > retryDeadline) {
+        console.log(`⏱️  [${agent.name}] Retry budget exhausted (60s) — giving up`);
+        break;
+      }
+
+      // ─── v0.5.5: Pre-flight quota check ───
+      // Skip providers that are throttled or have critically low health.
+      // This prevents the cascade failure where we try 5+ providers that are
+      // all rate-limited, wasting 30+ seconds on guaranteed failures.
+      if (!target.isCli) {
+        const switchCheck = providerQuota.shouldSwitch(target.providerId);
+        if (switchCheck.shouldSwitch) {
+          console.log(`⏭️  [${agent.name}] Skipping ${target.label}: ${switchCheck.reason}`);
+          continue;
+        }
+      }
+
       // ─── CLI provider fallback ───
       if (target.isCli) {
         console.log(`🔄 [${agent.name}] Trying CLI fallback: ${target.label}`);
@@ -916,11 +1422,16 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
 
         if (resp.status === 429 || resp.status === 1305 || resp.status === 1308) {
           console.log(`⚠️  [${agent.name}] ${target.label} rate-limited (${resp.status}), trying fallback...`);
+          modelMatrix.recordError(target.providerId, target.model, `rate-limited (${resp.status})`);
+          providerQuota.record429(target.providerId);
+          consumptionTracker.recordUsage(target.providerId, { tokensIn: 0, tokensOut: 0, latencyMs: 0, error: true });
           continue;
         }
 
         if (resp.status >= 500 && resp.status < 600) {
           console.log(`⚠️  [${agent.name}] ${target.label} server error (${resp.status}), trying fallback...`);
+          modelMatrix.recordError(target.providerId, target.model, `server error (${resp.status})`);
+          consumptionTracker.recordUsage(target.providerId, { tokensIn: 0, tokensOut: 0, latencyMs: 0, error: true });
           continue;
         }
 
@@ -939,8 +1450,11 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
         clearTimeout(reqTimeoutId);
         if (err.name === 'AbortError') {
           console.error(`⏱️  ${target.label} timed out after 120s, trying fallback...`);
+          modelMatrix.recordError(target.providerId, target.model, 'timeout after 120s');
+          consumptionTracker.recordUsage(target.providerId, { tokensIn: 0, tokensOut: 0, latencyMs: 120000, error: true });
         } else {
           console.error(`❌ Forward error to ${target.label}: ${err.message}`);
+          consumptionTracker.recordUsage(target.providerId, { tokensIn: 0, tokensOut: 0, latencyMs: 0, error: true });
         }
         continue;
       }
@@ -961,6 +1475,27 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
 
       // Update agent usage
       await agentRegistry.updateUsage(agent.id, tokensIn, tokensOut);
+
+      // ─── v0.5.3: Record to Model Matrix ────────────
+      modelMatrix.recordUsage(actualTarget.providerId, actualTarget.model, tokensIn, tokensOut);
+      const responseLatency = latency || (Date.now() - startTime);
+      if (responseLatency > 0) {
+        modelMatrix.recordLatency(actualTarget.providerId, actualTarget.model, responseLatency);
+      }
+
+      // ─── v0.5.3: Provider Quota tracking ───────────
+      providerQuota.recordRequest(actualTarget.providerId, tokensIn + tokensOut);
+      providerQuota.recordSuccess(actualTarget.providerId);
+
+      // ─── v0.5.3: Consumption Tracker (5h/weekly/monthly) ───
+      const responseLatency2 = latency || (Date.now() - startTime);
+      consumptionTracker.recordUsage(actualTarget.providerId, {
+        tokensIn,
+        tokensOut,
+        cost: 0, // Cost calc could go here if pricing model was active
+        latencyMs: responseLatency2,
+        error: false,
+      });
 
       const responseText = data.choices?.[0]?.message?.content || '';
       const feedbackId = `${agent.id}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -1052,7 +1587,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
       console.log(`📝 [${agent.name}] Streaming disabled for CLI provider ${providerId}, using sync dispatch`);
       return handleCliProvider(
         providerId, model, agent, messages, effort,
-        compressionResult, promptText, res, score,
+        compressionResult, promptText, res, score, true,
       );
     }
     if (agentRegistry.isCliProvider(providerId) && agent.id === providerId) {
@@ -1082,6 +1617,7 @@ async function handleCliProvider(
   promptText: string,
   res: ServerResponse,
   score: number = 0,
+  streamResponse = false,
 ): Promise<void> {
   const cliConfig = agentRegistry.getCliProviderConfig(providerId);
   if (!cliConfig) {
@@ -1098,6 +1634,7 @@ async function handleCliProvider(
   }
 
   const startTime = Date.now();
+  let cliStream: CliStreamState | null = null;
 
   try {
     // Check availability (quota + command)
@@ -1107,6 +1644,10 @@ async function handleCliProvider(
       return jsonResponse(res, 503, {
         error: { message: `CLI provider ${providerId} unavailable: ${avail.reason}`, type: 'provider_unavailable' },
       });
+    }
+
+    if (streamResponse) {
+      cliStream = startCliStream(res, providerId + '/' + model);
     }
 
     // Execute CLI
@@ -1204,9 +1745,19 @@ async function handleCliProvider(
     }
 
     console.log(`🖥️  [${agent.name}] CLI ${providerId}/${result.model}: ${tokensIn}→${tokensOut}tok, ${latency}ms`);
+
+    if (streamResponse && cliStream) {
+      finishCliStream(res, cliStream, result.content, (result.finishReason ?? 'stop') as StreamFinishReason);
+      return;
+    }
+
     return jsonResponse(res, 200, openaiResponse);
   } catch (err: any) {
     console.error(`❌ CLI provider error (${providerId}): ${err.message}`);
+    if (streamResponse && cliStream) {
+      finishCliStream(res, cliStream, `CLI provider error: ${err.message}`, 'length');
+      return;
+    }
     return jsonResponse(res, 502, {
       error: { message: `CLI provider error: ${err.message}`, type: 'cli_error' },
     });
@@ -1237,6 +1788,17 @@ function sanitizeForCli(msgs: any[]): any[] {
 async function init() {
   await benchmarkLogger.initialize();
   await agentRegistry.initialize();
+  await modelMatrix.initialize();
+  await providerQuota.initialize();
+  await consumptionTracker.initialize();
+  await quotaSync.initialize();
+
+  // v0.5.5: Feed real dashboard quota data into provider health scoring on startup
+  const realQuotaData = quotaSync.getRealQuotaData();
+  if (Object.keys(realQuotaData).length > 0) {
+    providerQuota.applyRealQuotaData(realQuotaData);
+    console.log('📊 [Quota] Applied real dashboard data to health scores');
+  }
 
   // ─── v0.5: Register CLI Providers ─────────────────────
   if (getCliProvidersEnabled()) {
@@ -1253,6 +1815,24 @@ async function init() {
   startFeedbackAutoFlush();
   startRagAutoFlush();
   console.log('📦 Persistence: feedback + RAG stores initialized');
+
+  // ─── v0.5.3: Token Consumption Intelligence ──────────
+  modelDiscovery.start().catch(err =>
+    console.error('❌ Model Discovery start failed:', err.message)
+  );
+
+  // ─── Provider Quota: Daily reset at midnight ────
+  const scheduleDailyReset = () => {
+    const now = new Date();
+    const midnight = new Date(now);
+    midnight.setHours(24, 0, 0, 0);
+    const msUntilMidnight = midnight.getTime() - now.getTime();
+    setTimeout(() => {
+      providerQuota.dailyReset();
+      scheduleDailyReset();
+    }, msUntilMidnight);
+  };
+  scheduleDailyReset();
 
   const agents = agentRegistry.getAgents();
   console.log(`🚀 GateSwarm MoMA Router v0.5.2 (Plan/Act + CLI Providers) starting on :${PORT}`);
@@ -1307,8 +1887,117 @@ async function init() {
         });
       }
 
+      // ─── v0.5.3: Token Consumption Intelligence Endpoints ───
 
+      if (url.pathname === '/v05/intel' && method === 'GET') {
+        return jsonResponse(res, 200, {
+          version: '0.5.4',
+          stats: consumptionIntelligence.getStats(),
+          recommendations: consumptionIntelligence.getTierRecommendations(),
+          recentDecisions: consumptionIntelligence.getRecentDecisions(10),
+        });
+      }
 
+      if (url.pathname === '/v05/intel/models' && method === 'GET') {
+        const models = modelMatrix.getAllModels();
+        return jsonResponse(res, 200, {
+          total: models.length,
+          available: models.filter(m => m.available).length,
+          models: models.sort((a, b) => b.totalTokensIn - a.totalTokensIn),
+        });
+      }
+
+      if (url.pathname === '/v05/intel/providers' && method === 'GET') {
+        return jsonResponse(res, 200, {
+          providers: modelMatrix.getAllProviderSummaries(),
+        });
+      }
+
+      if (url.pathname === '/v05/intel/rediscover' && method === 'POST') {
+        modelDiscovery.forceRediscover().catch(err =>
+          console.error('Force rediscover failed:', err.message)
+        );
+        return jsonResponse(res, 202, { status: 'rediscovery triggered' });
+      }
+
+      // ─── v0.5.3: Provider Quota & Load Balancing Endpoints ───
+
+      if (url.pathname === '/v05/intel/consumption' && method === 'GET') {
+        // Per-provider consumption across 5h/weekly/monthly/all-time windows
+        // with per-window quota remaining (requests + tokens).
+        const windowQuotas: Record<string, any> = {};
+        for (const provider of new Set([
+          ...Object.keys(providerQuota.getAllQuotas().map(q => q.provider)),
+          ...Object.keys(consumptionTracker.getHistory().providers),
+        ])) {
+          const cfg = getMultiWindowQuota(provider);
+          if (cfg) windowQuotas[provider] = cfg;
+        }
+        const report = consumptionTracker.buildReport({ windowQuotas });
+        return jsonResponse(res, 200, report);
+      }
+
+      if (url.pathname === '/v05/intel/usage' && method === 'GET') {
+        return jsonResponse(res, 200, {
+          ...providerQuota.getUsageSummary(),
+          timestamp: new Date().toISOString(),
+        });
+      }
+
+      if (url.pathname === '/v05/intel/balance' && method === 'GET') {
+        // Provider ranking for each tier
+        const tiers: EffortLevel[] = ['trivial', 'light', 'moderate', 'heavy', 'intensive', 'extreme'];
+        const rankings: Record<string, LoadBalanceDecision[]> = {};
+        for (const tier of tiers) {
+          rankings[tier] = providerQuota.rankProvidersForTier(tier);
+        }
+        return jsonResponse(res, 200, {
+          rankings,
+          summary: providerQuota.getUsageSummary(),
+        });
+      }
+
+      if (url.pathname === '/v05/intel/sync' && method === 'GET') {
+        // Real quota data scraped from provider dashboards/CLIs
+        try {
+          const syncFile = await import('fs/promises').then(fs => fs.readFile(
+            join(__dirname, '../data/quota-sync.json'), 'utf-8'
+          ).catch(() => null));
+          if (syncFile) {
+            const syncData = JSON.parse(syncFile);
+            return jsonResponse(res, 200, syncData);
+          }
+        } catch {}
+        return jsonResponse(res, 200, { version: '0.1.0', updatedAt: '', snapshots: {} });
+      }
+
+      if (url.pathname === '/v05/intel/quota' && method === 'GET') {
+        // v0.5.5: Merge real dashboard data from quota-sync with internal tracking
+        const realQuota = quotaSync.getRealQuotaData();
+        const quotas = providerQuota.getAllQuotas().map(q => {
+          const real = realQuota[q.provider];
+          return {
+          provider: q.provider,
+          name: q.name,
+          health: q.healthScore,
+          rpm: `${q.rpmRemaining}/${q.rpm}${q.rpm === Infinity ? '' : ' RPM'}`,
+          rpd: `${q.rpdRemaining}/${q.rpd}${q.rpd === Infinity ? '' : ' RPD'}`,
+          tokens: q.tokensDailyLimit === Infinity ? '∞' : `${Math.round(q.tokensRemaining / 1000)}K/${Math.round(q.tokensDailyLimit / 1000)}K`,
+          requestsToday: q.requestsToday,
+          tokensToday: q.tokensToday,
+          throttled: q.throttled,
+          throttledUntil: q.throttledUntil > 0 ? new Date(q.throttledUntil).toISOString() : null,
+          totalAllTime: q.totalTokens,
+          // v0.5.5: Real dashboard data (from quota-sync scraper)
+          realQuota: real ? {
+            fiveHourUsedPct: real.fiveHourUsedPct,
+            weeklyUsedPct: real.weeklyUsedPct,
+            monthlyUsedPct: real.monthlyUsedPct,
+            syncedAt: real.syncedAt,
+          } : null,
+        }; });
+        return jsonResponse(res, 200, { quotas });
+      }
       // ─── Global Metrics ───
       if (url.pathname === '/metrics' && method === 'GET') {
         const summary = await benchmarkLogger.getTodaySummary();
@@ -1384,6 +2073,7 @@ async function init() {
       // ─── v0.5.1: Direct Chat (alternative endpoint) ───
       if (url.pathname === '/v1/direct/chat' && method === 'POST') {
         const body = await parseBody(req);
+  (req as any)._body = body;
         let agent: AgentConfig | null = null;
         const apiKey = extractApiKey(req);
         if (apiKey) {
@@ -1429,6 +2119,7 @@ async function init() {
       // ─── Register Agent ───
       if (url.pathname === '/v1/agents/register' && method === 'POST') {
         const body = await parseBody(req);
+  (req as any)._body = body;
         if (!body.name) {
           return jsonResponse(res, 400, { error: { message: 'name is required', type: 'bad_request' } });
         }
@@ -1474,6 +2165,7 @@ async function init() {
           return jsonResponse(res, 404, { error: { message: `Agent ${agentId} not found`, type: 'not_found' } });
         }
         const body = await parseBody(req);
+  (req as any)._body = body;
         if (body.tierProfile && body.tierProfile in (await import('./agent-registry.js')).DEFAULT_TIER_CONFIGS) {
           const configs = (await import('./agent-registry.js')).DEFAULT_TIER_CONFIGS;
           agent.tierConfig = configs[body.tierProfile];
@@ -1577,6 +2269,7 @@ async function init() {
       // POST /v04/training/enable — Enable/disable training mode
       if (url.pathname === '/v04/training/enable' && method === 'POST') {
         const body = await parseBody(req);
+  (req as any)._body = body;
         if (!body.agentId) {
           return jsonResponse(res, 400, { error: { message: 'agentId is required', type: 'bad_request' } });
         }
@@ -1591,6 +2284,7 @@ async function init() {
       // POST /v04/training/vote — Record a vote reply
       if (url.pathname === '/v04/training/vote' && method === 'POST') {
         const body = await parseBody(req);
+  (req as any)._body = body;
         if (!body.voteId || !body.agentId || !body.reply) {
           return jsonResponse(res, 400, { error: { message: 'voteId, agentId, and reply are required', type: 'bad_request' } });
         }
@@ -1604,6 +2298,7 @@ async function init() {
       // POST /v04/training/vote/reply — Check if a message is a vote reply
       if (url.pathname === '/v04/training/vote/reply' && method === 'POST') {
         const body = await parseBody(req);
+  (req as any)._body = body;
         if (!body.agentId || !body.message) {
           return jsonResponse(res, 400, { error: { message: 'agentId and message are required', type: 'bad_request' } });
         }
@@ -1656,6 +2351,10 @@ async function init() {
     console.log(`📊 Metrics: http://localhost:${PORT}/metrics`);
     console.log(`🤖 Agents: http://localhost:${PORT}/v1/agents`);
     console.log(`🎯 Training: http://localhost:${PORT}/v04/training`);
+    console.log(`🧠 Intelligence: http://localhost:${PORT}/v05/intel`);
+    console.log(`📊 Quota: http://localhost:${PORT}/v05/intel/quota`);
+    console.log(`📈 Consumption: http://localhost:${PORT}/v05/intel/consumption`);
+    console.log(`⚖️  Load Balancer: http://localhost:${PORT}/v05/intel/balance`);
 
     console.log(`\n🔗 Connection template for any agent:`);
     console.log(`   base_url: http://<host>:${PORT}/v1`);

@@ -27,6 +27,7 @@
 
 import type { RagEntry } from './rag-index.js';
 import { storeToRag, ragIndex } from './rag-index.js';
+import { modelMatrix } from './model-matrix.js';
 
 // ─── Model Context Windows (tokens) ───────────────────────────
 
@@ -46,6 +47,51 @@ export const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
   'glm-5-turbo': 200_000,
   'glm-5.1': 204_800,
   'glm-5v-turbo': 200_000,
+
+  // Ollama Local (CPU)
+  'qwen2.5:0.5b': 32_768,
+  'qwen2.5:1.5b': 128_000,
+
+  // Ollama Cloud (Hosted)
+  'kimi-k2.5': 262_144,
+  'kimi-k2.6': 262_144,
+  'kimi-k2.7-code': 262_144,
+  'kimi-k2:1t': 1_048_576,
+  'kimi-k2-thinking': 262_144,
+  'glm-4.6': 200_000,
+  'minimax-m2': 128_000,
+  'minimax-m2.1': 204_800,
+  'minimax-m2.5': 204_800,
+  'minimax-m2.7': 204_800,
+  'minimax-m3': 1_000_000,
+  'gemma3:4b': 128_000,
+  'gemma3:12b': 128_000,
+  'gemma3:27b': 128_000,
+  'gemma4:31b': 131_072,
+  'deepseek-v3.1:671b': 1_000_000,
+  'deepseek-v3.2': 1_000_000,
+  'deepseek-v4-flash': 1_048_576,
+  'deepseek-v4-pro': 1_048_576,
+  'qwen3-coder-next': 1_000_000,
+  'qwen3-coder:480b': 1_000_000,
+  'qwen3-vl:235b': 1_000_000,
+  'qwen3-vl:235b-instruct': 1_000_000,
+  'qwen3-next:80b': 1_000_000,
+  'qwen3.5:397b': 1_000_000,
+  'gpt-oss:20b': 131_072,
+  'gpt-oss:120b': 200_000,
+  'nemotron-3-nano:30b': 128_000,
+  'nemotron-3-super': 1_000_000,
+  'nemotron-3-ultra': 1_000_000,
+  'cogito-2.1:671b': 200_000,
+  'gemini-3-flash-preview': 1_048_576,
+  'devstral-2:123b': 200_000,
+  'devstral-small-2:24b': 128_000,
+  'mistral-large-3:675b': 1_048_576,
+  'ministral-3:14b': 131_072,
+  'ministral-3:3b': 131_072,
+  'ministral-3:8b': 131_072,
+  'rnj-1:8b': 128_000,
 
   // OpenRouter
   'openrouter/owl-alpha': 1_048_756,
@@ -449,7 +495,14 @@ export function turboQuantCompress(
   const { messages, targetModel, reservedTokens: reservedTokensOverride } = options;
 
   // Get target model's context window
-  const contextWindow = MODEL_CONTEXT_WINDOWS[targetModel] || 200_000;
+  // v0.5.4: Check model matrix first for up-to-date CW, fall back to hardcoded table
+  let contextWindow = MODEL_CONTEXT_WINDOWS[targetModel];
+  if (!contextWindow) {
+    // Try dynamic lookup from model matrix (any provider)
+    const matrixModels = modelMatrix.getAllModels();
+    const found = matrixModels.find(m => m.id === targetModel);
+    contextWindow = found?.contextWindow || 200_000;
+  }
 
   // Dynamic reservedTokens (min 4096, max 16384, scaled to 10% of context window)
   const defaultReserved = Math.max(4096, Math.min(16384, Math.floor(contextWindow * 0.10)));

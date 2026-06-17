@@ -48,6 +48,34 @@ export interface CliProviderResult {
   latencyMs: number;
 }
 
+
+function cliContentToText(content: any): string {
+  if (content === null || content === undefined) return '';
+  if (typeof content === 'string') return content;
+  if (typeof content === 'number' || typeof content === 'boolean') return String(content);
+
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => cliContentToText(part))
+      .filter((text) => text.trim().length > 0)
+      .join('\n');
+  }
+
+  if (typeof content === 'object') {
+    const record = content as Record<string, any>;
+    if (typeof record.text === 'string') return record.text;
+    if (typeof record.input_text === 'string') return record.input_text;
+    if (typeof record.output_text === 'string') return record.output_text;
+    if (record.content !== undefined) return cliContentToText(record.content);
+    if (record.message !== undefined) return cliContentToText(record.message);
+    if (record.prompt !== undefined) return cliContentToText(record.prompt);
+    if (record.value !== undefined) return cliContentToText(record.value);
+    return JSON.stringify(record);
+  }
+
+  return String(content);
+}
+
 // ─── Concurrency Limiter ────────────────────────────────
 
 class ConcurrencyLimiter {
@@ -116,7 +144,7 @@ export class CliProviderAdapter {
 
   /** Execute chat completion through CLI subprocess. */
   async chatCompletion(
-    messages: Array<{ role: string; content: string }>,
+    messages: Array<{ role: string; content: any }>,
     model: string,
     options?: { temperature?: number; maxTokens?: number },
   ): Promise<CliProviderResult> {
@@ -173,14 +201,14 @@ export class CliProviderAdapter {
 
   // ─── Private ────────────────────────────────────────────
 
-  private buildPrompt(messages: Array<{ role: string; content: string }>): string {
+  private buildPrompt(messages: Array<{ role: string; content: any }>): string {
     let prompt = '';
     for (const msg of messages) {
       const roleLabel = msg.role === 'system' ? 'System'
         : msg.role === 'user' ? 'User'
         : msg.role === 'assistant' ? 'Assistant'
         : msg.role;
-      prompt += `[${roleLabel}]\n${msg.content}\n\n`;
+      prompt += `[${roleLabel}]\n${cliContentToText(msg.content)}\n\n`;
     }
     return prompt.trim();
   }
