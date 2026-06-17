@@ -1,6 +1,6 @@
 {
-  "version": "v0.5.4",
-  "trained": "2026-05-27T23:59:52.685Z",
+  "version": "v0.5.5",
+  "trained": "2026-06-16T22:00:00Z",
   "method": "ensemble-voter-with-feedback-loop",
   "ensemble": {
     "weights": {

@@ -1,10 +1,10 @@
 {
   "version": "0.1.0",
-  "updatedAt": "2026-06-17T01:05:02.072116+00:00Z",
+  "updatedAt": "2026-06-17T01:10:01.384729+00:00Z",
   "snapshots": {
     "codex-cli": {
       "provider": "codex-cli",
-      "syncedAt": "2026-06-17T01:05:02.070789+00:00Z",
+      "syncedAt": "2026-06-17T01:10:01.383444+00:00Z",
       "source": "codex-cli-sessions",
       "windows": {
         "5h": {
@@ -35,7 +35,7 @@
     },
     "claude-cli": {
       "provider": "claude-cli",
-      "syncedAt": "2026-06-17T01:05:02.071274+00:00Z",
+      "syncedAt": "2026-06-17T01:10:01.383834+00:00Z",
       "source": "claude-cli-sessions",
       "windows": {
         "5h": {
@@ -60,7 +60,7 @@
     },
     "opencodego": {
       "provider": "opencodego",
-      "syncedAt": "2026-06-17T01:05:02.071795+00:00Z",
+      "syncedAt": "2026-06-17T01:10:01.384365+00:00Z",
       "source": "consumption-history",
       "windows": {
         "5h": {
@@ -97,7 +97,7 @@
     },
     "zai": {
       "provider": "zai",
-      "syncedAt": "2026-06-17T01:05:02.071952+00:00Z",
+      "syncedAt": "2026-06-17T01:10:01.384560+00:00Z",
       "source": "consumption-history",
       "windows": {
         "5h": {
@@ -128,7 +128,7 @@
     },
     "ollama-cloud": {
       "provider": "ollama-cloud",
-      "syncedAt": "2026-06-17T01:05:02.072103+00:00Z",
+      "syncedAt": "2026-06-17T01:10:01.384713+00:00Z",
       "source": "consumption-history",
       "windows": {
         "5h": {
