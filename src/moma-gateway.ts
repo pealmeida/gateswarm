@@ -928,8 +928,10 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
       console.log(`⚡ [${agent.name}] Greeting fast-path: '${promptText.slice(0,20)}' → ${trivialCfg.provider}/${trivialCfg.model}`);
       // Strip system messages, send only the user message
       const greetingMessages = [messages.filter((m: any) => m.role === 'user').pop()].filter(Boolean);
-      // v0.5.5: Try fast-path, but if it fails with 429, fall through to normal routing
-      // which has the full fallback chain. We do this by checking the result inline.
+      // v0.5.5: Respect client's stream flag. If client wants streaming, forward
+      // the stream as-is (Pi's OpenAI client needs SSE with [DONE] markers).
+      // If client wants non-streaming, collect and return JSON.
+      const clientWantsStream = body.stream === true;
       try {
         const baseUrl = agentRegistry.getProviderBaseUrl(trivialCfg.provider);
         const apiKey = agentRegistry.getProviderApiKey(trivialCfg.provider);
@@ -938,13 +940,71 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
           const resp = await fetch(`${baseUrl}/chat/completions`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-            body: JSON.stringify({ messages: greetingMessages, model: cleanModel, stream: false }),
+            body: JSON.stringify({ messages: greetingMessages, model: cleanModel, stream: clientWantsStream }),
             signal: AbortSignal.timeout(10000),
           });
           if (resp.ok) {
-            const data = await resp.json();
             emitModeHeaders(req, res, promptText);
-            return jsonResponse(res, 200, data);
+            if (clientWantsStream) {
+              // Forward the upstream SSE stream as-is
+              res.writeHead(200, {
+                'Content-Type': 'text/event-stream',
+                'Cache-Control': 'no-cache',
+                'Connection': 'keep-alive',
+              });
+              const reader = resp.body?.getReader();
+              if (reader) {
+                const streamState = { sawFinishReason: false, sawDone: false };
+                const decoder = new TextDecoder();
+                let buffer = '';
+                try {
+                  while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    buffer += decoder.decode(value, { stream: true });
+                    let idx;
+                    while ((idx = buffer.indexOf('\n\n')) !== -1) {
+                      const evt = buffer.slice(0, idx);
+                      buffer = buffer.slice(idx + 2);
+                      if (!evt.trim()) continue;
+                      for (const line of evt.split('\n')) {
+                        if (!line.startsWith('data:')) continue;
+                        const d = line.slice(5).trim();
+                        if (d === '[DONE]') streamState.sawDone = true;
+                        else if (d) {
+                          try {
+                            const parsed = JSON.parse(d);
+                            if (Array.isArray(parsed?.choices)) {
+                              for (const c of parsed.choices) {
+                                if (c?.finish_reason != null) streamState.sawFinishReason = true;
+                              }
+                            }
+                          } catch {}
+                        }
+                      }
+                      res.write(evt + '\n\n');
+                    }
+                  }
+                  if (buffer.trim()) res.write(buffer + '\n\n');
+                  // Ensure terminal markers
+                  if (!streamState.sawFinishReason) {
+                    res.write(`data: {"id":"chatcmpl-done","object":"chat.completion.chunk","created":${Math.floor(Date.now()/1000)},"model":"${cleanModel}","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n`);
+                  }
+                  if (!streamState.sawDone) {
+                    res.write('data: [DONE]\n\n');
+                  }
+                  res.end();
+                } catch (streamErr) {
+                  if (!res.writableEnded) res.end();
+                }
+              } else {
+                res.end();
+              }
+            } else {
+              const data = await resp.json();
+              return jsonResponse(res, 200, data);
+            }
+            return;
           }
           if (resp.status === 429 || resp.status === 1305 || resp.status === 1308) {
             providerQuota.record429(trivialCfg.provider);
