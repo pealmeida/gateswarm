@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.6] - 2026-06-17
+
+### Fixed
+- **Version banner drift**: gateway startup banner, `/health` `router` field, and listening log line all still reported `v0.5.5` even though `package.json` and the source code were on `v0.5.6` (routing transparency fixes). Now consistent at v0.5.6 across banner, `/health`, and file-header. Service banner now reads "Routing Transparency" instead of "Quota-Aware Routing".
+
+## [0.5.5] - 2026-06-14
+
+### Fixed
+- **Greeting fast-path respects client stream flag** — previously forced `stream:false` regardless of client intent, breaking SSE clients (Pi, Open WebUI).
+- **Latency thresholds** and **quota-sync format alignment** with downstream consumers.
+
+### Added
+- **Self-healing tier rebalancing with feedback loop** — automatic tier adjustments based on real-world performance signals.
+- **Quota-aware routing** — pre-flight health checks, greeting fallback, real dashboard sync.
+
 ## [0.5.2] - 2026-06-06
 
 ### Fixed

@@ -2,7 +2,21 @@
 import * as dotenv from 'dotenv';
 dotenv.config({ path: new URL('../.env', import.meta.url).pathname });
 /**
- * GateSwarm MoMA Router v0.5.2 — Multi-Agent API Gateway
+ * GateSwarm MoMA Router v0.5.6 — Multi-Agent API Gateway
+ *
+ * v0.5.6: Routing Transparency
+ *   - Unify scoreToEffort (canonical, config-driven)
+ *   - ConsumptionDecision.source field — distinguish real requests from
+ *     health/balance/recovery checks
+ *   - ActivityPanel TUI filters health checks (shows 'N hidden')
+ *   - Response headers: X-Tier, X-Score, X-Routed-Model, X-Routed-Tier,
+ *     X-Routing-Method, X-Routing-Reason on /v1/chat/completions
+ *
+ * v0.5.5: Quota-Aware Routing
+ *   - Pre-flight provider health checks
+ *   - Greeting fast-path respects client stream flag
+ *   - Self-healing tier rebalancing via feedback loop
+ *   - Latency thresholds + quota-sync format alignment
  *
  * v0.5.1: Direct Routing Bypass
  *   - Skip complexity scoring and route directly to user-specified provider/model
@@ -1922,7 +1936,7 @@ async function init() {
   console.log('🔄 [Intel] Tier recovery check: every 5min');
 
   const agents = agentRegistry.getAgents();
-  console.log(`🚀 GateSwarm MoMA Router v0.5.5 (Quota-Aware Routing) starting on :${PORT}`);
+  console.log(`🚀 GateSwarm MoMA Router v0.5.6 (Routing Transparency) starting on :${PORT}`);
   console.log(`📊 Providers: ${agentRegistry.getProviders().map(p => p.id).join(', ')}`);
   console.log(`🤖 Registered agents: ${agents.map(a => a.name).join(', ')}`);
 
@@ -1953,7 +1967,7 @@ async function init() {
         const agents = agentRegistry.getAgents();
         return jsonResponse(res, 200, {
           status: 'healthy',
-          router: 'GateSwarm MoMA Router v0.5.5 (Quota-Aware Routing)',
+          router: 'GateSwarm MoMA Router v0.5.6 (Routing Transparency)',
           turboquant: 'v3.6',
           ensemble: 'enabled',
           feedback: 'enabled',
@@ -2452,7 +2466,7 @@ async function init() {
   });
 
   server.listen(PORT, () => {
-    console.log(`✅ GateSwarm MoMA Router v0.5.5 (Quota-Aware Routing) listening on http://localhost:${PORT}`);
+    console.log(`✅ GateSwarm MoMA Router v0.5.6 (Routing Transparency) listening on http://localhost:${PORT}`);
     console.log(`📡 Endpoint: http://localhost:${PORT}/v1/chat/completions`);
     console.log(`📊 Metrics: http://localhost:${PORT}/metrics`);
     console.log(`🤖 Agents: http://localhost:${PORT}/v1/agents`);
