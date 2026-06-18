@@ -1992,7 +1992,7 @@ async function init() {
 
       if (url.pathname === '/v05/intel' && method === 'GET') {
         return jsonResponse(res, 200, {
-          version: '0.5.4',
+          version: '0.5.6',
           stats: consumptionIntelligence.getStats(),
           recommendations: consumptionIntelligence.getTierRecommendations(),
           recentDecisions: consumptionIntelligence.getRecentDecisions(10),

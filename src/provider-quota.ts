@@ -214,7 +214,7 @@ class ProviderQuotaManager {
   private dirty = false;
 
   constructor() {
-    this.state = { version: '0.5.4', updatedAt: Date.now(), quotas: {} };
+    this.state = { version: '0.5.6', updatedAt: Date.now(), quotas: {} };
   }
 
   async initialize(): Promise<void> {

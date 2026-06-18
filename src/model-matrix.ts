@@ -488,7 +488,7 @@ class ModelMatrix {
 
   constructor() {
     this.state = {
-      version: '0.5.4',
+      version: '0.5.6',
       updatedAt: Date.now(),
       models: {},
       providers: {},

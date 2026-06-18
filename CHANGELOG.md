@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **Version banner drift**: gateway startup banner, `/health` `router` field, and listening log line all still reported `v0.5.5` even though `package.json` and the source code were on `v0.5.6` (routing transparency fixes). Now consistent at v0.5.6 across banner, `/health`, and file-header. Service banner now reads "Routing Transparency" instead of "Quota-Aware Routing".
+- **Intel/persistence schema versions stuck at 0.5.4**: `/v05/intel` reported `version: "0.5.4"`, and `consumption-history.json`, `provider-quota.json`, `model-matrix.json` all initialized `version: "0.5.4"`. Bumped all to `0.5.6` to match the running gateway. (These track the gateway schema, so they should match.)
+- **Pi statusline showed v0.5.1** (compiled bundle had v0.5.5 cached): the extension read its own hardcoded `config.version`, which drifted from the gateway. Now fetches `/health` at startup and uses the live gateway version; hardcoded fallback only if gateway is unreachable. Also updated `gateswarm-command` slash-command menu labels (removed stale `(v0.5.1)` / `(v0.5.3)` / `(v0.5.4)` annotations).
+
+### Added
+- `liveGatewayVersion()` helper in `pi-v33-statusline/index.ts` — fetches `http://localhost:8900/health`, parses `router` field for `vX.Y.Z`, caches result. Used by both statusline code paths (footer + update notification).
 
 ## [0.5.5] - 2026-06-14
 
