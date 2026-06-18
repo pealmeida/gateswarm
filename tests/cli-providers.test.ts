@@ -17,14 +17,18 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { CliProviderAdapter } from '../src/adapters/cli-provider.js';
 import type { CliProviderConfig } from '../src/adapters/cli-provider.js';
 import { agentRegistry } from '../src/agent-registry.js';
-import { getCliProvidersEnabled } from '../src/v04-config.js';
+import { getCliProvidersEnabled, loadConfig } from '../src/v04-config.js';
 import { estimateTokens } from '../src/token-estimator.js';
+
+const echoArgScript = 'process.stdout.write(process.argv.slice(1).join(" "))';
+const passthroughScript = 'process.stdout.write(process.argv[1] ?? "")';
+const nodeHealthCheck = `"${process.execPath}" --version`;
 
 // ─── Test Fixtures ───────────────────────────────────────────
 
 const mockCliConfig = (overrides: Partial<CliProviderConfig> = {}): CliProviderConfig => ({
-  command: 'echo',
-  argsTemplate: ['{prompt}'],
+  command: process.execPath,
+  argsTemplate: ['-e', echoArgScript, '--', '{prompt}'],
   modelFlag: '--model',
   inputFormat: 'arg',
   outputFormat: 'stdout-text',
@@ -37,6 +41,7 @@ const mockCliConfig = (overrides: Partial<CliProviderConfig> = {}): CliProviderC
 // ─── Global Setup ────────────────────────────────────────────
 
 beforeAll(async () => {
+  await loadConfig();
   // Initialize registry (loads HTTP providers + persisted state from agent-registry.json)
   await agentRegistry.initialize();
   // Register all default CLI providers so adapters are available
@@ -49,7 +54,7 @@ describe('🔌 CliProviderAdapter', () => {
   describe('Subprocess execution', () => {
     it('executes a simple CLI command and captures stdout', async () => {
       const adapter = new CliProviderAdapter(
-        mockCliConfig({ command: 'echo', argsTemplate: ['hello world'] })
+        mockCliConfig({ argsTemplate: ['-e', echoArgScript, '--', 'hello world'] })
       );
       const result = await adapter.chatCompletion(
         [{ role: 'user', content: 'hello' }],
@@ -63,8 +68,7 @@ describe('🔌 CliProviderAdapter', () => {
     it('resolves model aliases correctly', async () => {
       const adapter = new CliProviderAdapter(
         mockCliConfig({
-          command: 'echo',
-          argsTemplate: ['--model', '{model}', '-p', '{prompt}'],
+          argsTemplate: ['-e', echoArgScript, '--', '--model', '{model}', '-p', '{prompt}'],
           modelAlias: { 'cc/sonnet': 'claude-sonnet-4-6-20250514' },
         })
       );
@@ -78,7 +82,7 @@ describe('🔌 CliProviderAdapter', () => {
 
     it('builds role-labeled prompts from messages', async () => {
       const adapter = new CliProviderAdapter(
-        mockCliConfig({ command: 'echo', argsTemplate: ['{prompt}'] })
+        mockCliConfig({ argsTemplate: ['-e', echoArgScript, '--', '{prompt}'] })
       );
       const result = await adapter.chatCompletion([
         { role: 'system', content: 'You are helpful.' },
@@ -90,7 +94,7 @@ describe('🔌 CliProviderAdapter', () => {
 
     it('estimates tokens for prompt and response', async () => {
       const adapter = new CliProviderAdapter(
-        mockCliConfig({ command: 'echo', argsTemplate: ['{prompt}'] })
+        mockCliConfig({ argsTemplate: ['-e', echoArgScript, '--', '{prompt}'] })
       );
       const result = await adapter.chatCompletion(
         [{ role: 'user', content: 'Explain quantum computing in 50 words' }],
@@ -107,8 +111,7 @@ describe('🔌 CliProviderAdapter', () => {
     it('handles CLI errors gracefully', async () => {
       const adapter = new CliProviderAdapter(
         mockCliConfig({
-          command: 'bash',
-          argsTemplate: ['-c', 'echo "error output" >&2; exit 1'],
+          argsTemplate: ['-e', 'process.stderr.write("error output"); process.exit(1)'],
         })
       );
       await expect(
@@ -121,8 +124,7 @@ describe('🔌 CliProviderAdapter', () => {
     it('parses stdout-json output', async () => {
       const adapter = new CliProviderAdapter(
         mockCliConfig({
-          command: 'echo',
-          argsTemplate: ['{"content": "parsed json response", "meta": "ignored"}'],
+          argsTemplate: ['-e', passthroughScript, '--', '{"content": "parsed json response", "meta": "ignored"}'],
           outputFormat: 'stdout-json',
         })
       );
@@ -136,8 +138,7 @@ describe('🔌 CliProviderAdapter', () => {
     it('falls back to raw text for invalid JSON', async () => {
       const adapter = new CliProviderAdapter(
         mockCliConfig({
-          command: 'echo',
-          argsTemplate: ['not valid json'],
+          argsTemplate: ['-e', passthroughScript, '--', 'not valid json'],
           outputFormat: 'stdout-json',
         })
       );
@@ -151,8 +152,7 @@ describe('🔌 CliProviderAdapter', () => {
     it('strips ANSI codes from stdout-text', async () => {
       const adapter = new CliProviderAdapter(
         mockCliConfig({
-          command: 'printf',
-          argsTemplate: ['\\x1B[31mcolored text\\x1B[0m'],
+          argsTemplate: ['-e', 'process.stdout.write("\\x1B[31mcolored text\\x1B[0m")'],
           outputFormat: 'stdout-text',
         })
       );
@@ -168,8 +168,7 @@ describe('🔌 CliProviderAdapter', () => {
     it('serializes requests when maxConcurrent=1', async () => {
       const adapter = new CliProviderAdapter(
         mockCliConfig({
-          command: 'sleep',
-          argsTemplate: ['0.05'],
+          argsTemplate: ['-e', 'setTimeout(() => {}, 50)'],
           maxConcurrent: 1,
         })
       );
@@ -191,8 +190,7 @@ describe('🔌 CliProviderAdapter', () => {
     it('allows parallel requests when maxConcurrent=0 (unlimited)', async () => {
       const adapter = new CliProviderAdapter(
         mockCliConfig({
-          command: 'sleep',
-          argsTemplate: ['0.05'],
+          argsTemplate: ['-e', 'setTimeout(() => {}, 50)'],
           maxConcurrent: 0,
         })
       );
@@ -217,8 +215,7 @@ describe('🔌 CliProviderAdapter', () => {
 describe('📊 Quota Tracking', () => {
   it('tracks subscription usage across windows', async () => {
     const config = mockCliConfig({
-      command: 'echo',
-      argsTemplate: ['ok'],
+      argsTemplate: ['-e', echoArgScript, '--', 'ok'],
       quota: {
         type: 'subscription',
         windows: [
@@ -240,8 +237,7 @@ describe('📊 Quota Tracking', () => {
 
   it('unlimited quota does not track', async () => {
     const config = mockCliConfig({
-      command: 'echo',
-      argsTemplate: ['ok'],
+      argsTemplate: ['-e', echoArgScript, '--', 'ok'],
       quota: { type: 'unlimited' },
     });
     const adapter = new CliProviderAdapter(config);
@@ -254,8 +250,7 @@ describe('📊 Quota Tracking', () => {
 
   it('enforces quota when limit is reached', async () => {
     const config = mockCliConfig({
-      command: 'echo',
-      argsTemplate: ['ok'],
+      argsTemplate: ['-e', echoArgScript, '--', 'ok'],
       quota: {
         type: 'subscription',
         windows: [
@@ -272,8 +267,7 @@ describe('📊 Quota Tracking', () => {
 
   it('resets quota when window expires', async () => {
     const config = mockCliConfig({
-      command: 'echo',
-      argsTemplate: ['ok'],
+      argsTemplate: ['-e', echoArgScript, '--', 'ok'],
       quota: {
         type: 'subscription',
         windows: [
@@ -418,9 +412,9 @@ describe('🏥 CLI Health Checks', () => {
   it('passes health check for available commands', async () => {
     const adapter = new CliProviderAdapter(
       mockCliConfig({
-        command: 'echo',
+        command: process.execPath,
         argsTemplate: ['{prompt}'],
-        healthCheck: { command: 'echo --version', expectedExitCode: 0 },
+        healthCheck: { command: nodeHealthCheck, expectedExitCode: 0 },
       })
     );
     const avail = await adapter.isAvailable();
@@ -430,9 +424,9 @@ describe('🏥 CLI Health Checks', () => {
   it('caches health check results', async () => {
     const adapter = new CliProviderAdapter(
       mockCliConfig({
-        command: 'echo',
+        command: process.execPath,
         argsTemplate: ['{prompt}'],
-        healthCheck: { command: 'echo --version', expectedExitCode: 0 },
+        healthCheck: { command: nodeHealthCheck, expectedExitCode: 0 },
       })
     );
     // First call checks
@@ -559,8 +553,9 @@ describe('🌐 Multi-Provider Routing Integration', () => {
     const { getTierModel } = await import('../src/v04-config.js');
     const heavy = getTierModel('heavy');
 
-    // Primary should be an HTTP provider
-    expect(heavy!.provider).toBe('bailian');
+    // Primary should use the configured OpenCodeGo deep reasoning model.
+    expect(heavy!.provider).toBe('opencodego');
+    expect(heavy!.model).toBe('deepseek-v4-pro');
 
     // Fallback chain should include both HTTP and CLI providers
     const hasHttp = heavy!.fallback_models!.some((fm: any) =>
@@ -577,14 +572,14 @@ describe('🌐 Multi-Provider Routing Integration', () => {
     const { getTierModel } = await import('../src/v04-config.js');
     const extreme = getTierModel('extreme');
 
-    expect(extreme!.provider).toBe('bailian');
-    expect(extreme!.model).toBe('qwen3.6-plus');
+    expect(extreme!.provider).toBe('opencodego');
+    expect(extreme!.model).toBe('deepseek-v4-pro');
 
-    // Should have Claude Opus as a CLI fallback
-    const opusFallback = extreme!.fallback_models!.find((fm: any) =>
-      fm.model?.startsWith('cc/claude-opus')
+    // Should retain a premium CLI fallback for provider diversity.
+    const cliFallback = extreme!.fallback_models!.find((fm: any) =>
+      fm.model?.startsWith('cc/') || fm.model?.startsWith('cx/')
     );
-    expect(opusFallback).toBeDefined();
+    expect(cliFallback).toBeDefined();
   });
 
   it('resolveModel routes CLI prefix models to correct providers', () => {
