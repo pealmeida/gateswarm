@@ -238,7 +238,7 @@ class ConsumptionTracker {
   private retentionGcInterval: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
-    this.history = { version: '0.5.4', updatedAt: Date.now(), providers: {} };
+    this.history = { version: '0.5.6', updatedAt: Date.now(), providers: {} };
   }
 
   async initialize(): Promise<void> {
