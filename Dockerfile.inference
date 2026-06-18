@@ -1,0 +1,13 @@
+FROM python:3.12-slim
+
+WORKDIR /workspace
+
+RUN pip install --no-cache-dir numpy
+
+COPY router.py .
+COPY v32_cascade_weights.json .
+
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+  CMD python -c "import json; d=json.load(open('v32_cascade_weights.json')); print(f'OK: {len(d.get(\"classifiers\",{}))} classifiers')" || exit 1
+
+CMD ["python", "-u", "router.py"]

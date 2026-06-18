@@ -1,0 +1,18 @@
+__pycache__
+*.pyc
+*.pyo
+.git
+.gitignore
+.env
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+.flash
+*.egg-info
+dist
+build
+llmfit/datasets/*.jsonl
+llmfit/datasets/general-purpose/*.jsonl
+*.md !README.md
+docs

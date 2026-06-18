@@ -69,7 +69,7 @@ stays on fast/cheap HTTP models:
 | **moderate** | deepseek-v4-flash | opencodego | cx/gpt-5.4-codex | codex-cli |
 | **heavy** | deepseek-v4-pro | opencodego | cx/gpt-5.5-codex | codex-cli |
 | **intensive** | glm-5.1 | opencodego | cc/claude-sonnet-4-6 | claude-cli |
-| **extreme** | deepseek-v4-pro | opencodego | cc/claude-opus-4-8 | claude-cli |
+| **extreme** | deepseek-v4-pro | opencodego | deepseek-v4-pro | opencodego |
 
 > Plan mode dispatches the *primary* request to the plan model (not just a header) — in
 > `act`/`auto` mode each agent keeps its own per-tier model. Values above are the live

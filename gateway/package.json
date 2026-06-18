@@ -1,14 +1,14 @@
 {
-  "name": "gateswarm-router",
-  "version": "0.5.6",
-  "description": "GateSwarm MoMA Gateway v0.5.2 — Plan/Act Routing + CLI Providers.",
+  "name": "gateswarm-gateway",
+  "version": "0.4.4",
+  "description": "GateSwarm MoA Gateway — OpenAI-compatible HTTP proxy that scores prompt complexity and routes to the cheapest capable model. CLI + terminal.",
   "type": "module",
-  "main": "dist/moma-gateway.js",
-  "types": "dist/moma-gateway.d.ts",
+  "main": "src/moa-gateway.ts",
+  "types": "src/moa-gateway.ts",
   "exports": {
     ".": {
-      "import": "./src/moma-gateway.ts",
-      "types": "./src/moma-gateway.ts"
+      "import": "./src/moa-gateway.ts",
+      "types": "./src/moa-gateway.ts"
     },
     "./intent-engine": {
       "import": "./src/intent-engine-v04.ts",
@@ -34,42 +34,32 @@
   ],
   "bin": {
     "gateswarm": "./src/gateswarm-cli.ts",
-    "gateswarm-gateway": "./src/moma-gateway.ts"
+    "gateswarm-gateway": "./src/moa-gateway.ts"
   },
   "scripts": {
-    "build": "tsc --outDir dist --declaration",
-    "prepublishOnly": "npm run build && npm test",
-    "start": "tsx src/moma-gateway.ts --port 8900",
-    "dev": "tsx watch src/moma-gateway.ts --port 8900",
+    "start": "tsx src/moa-gateway.ts --port 8900",
+    "dev": "tsx watch src/moa-gateway.ts --port 8900",
     "cli": "tsx src/gateswarm-cli.ts",
     "benchmark": "tsx src/benchmark-logger.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "eval:split": "tsx eval/split.ts",
-    "eval:cv": "tsx eval/cv.ts",
-    "eval:leaderboard": "tsx eval/leaderboard.ts",
-    "eval:features": "tsx eval/feature-report.ts",
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit"
   },
   "dependencies": {
-    "dotenv": "^17.4.2",
-    "idb-keyval": "^6.2.1",
-    "tiktoken": "^1.0.22"
-  },
-  "optionalDependencies": {
     "@huggingface/transformers": "^3.4.0",
-    "onnxruntime-web": "^1.21.0"
+    "onnxruntime-web": "^1.21.0",
+    "idb-keyval": "^6.2.1"
   },
   "devDependencies": {
-    "@types/node": "^22.0.0",
-    "tsx": "^4.19.0",
     "typescript": "^5.7.0",
-    "vitest": "^3.1.0"
+    "tsx": "^4.19.0",
+    "vitest": "^3.1.0",
+    "@types/node": "^22.0.0"
   },
   "keywords": [
     "mixture-of-agents",
-    "moma",
+    "moa",
     "llm-router",
     "model-routing",
     "intent-engine",
@@ -82,11 +72,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/pealmeida/gateswarm-router.git"
+    "url": "git+https://github.com/pealmeida/gateswarm-moa-router.git"
   },
-  "homepage": "https://github.com/pealmeida/gateswarm-router#readme",
+  "homepage": "https://github.com/pealmeida/gateswarm-moa-router#readme",
   "bugs": {
-    "url": "https://github.com/pealmeida/gateswarm-router/issues"
+    "url": "https://github.com/pealmeida/gateswarm-moa-router/issues"
   },
   "engines": {
     "node": ">=18.0.0"
