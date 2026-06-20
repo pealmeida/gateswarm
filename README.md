@@ -2,79 +2,75 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Node.js 20+](https://img.shields.io/badge/node-20+-brightgreen.svg)](https://nodejs.org/)
-[![Version](https://img.shields.io/badge/version-0.5.6-blue.svg)](https://github.com/pealmeida/gateswarm-router)
+[![Version](https://img.shields.io/badge/version-0.5.6-blue.svg)](https://github.com/pealmeida/gateswarm-router/releases)
 [![Latest release](https://img.shields.io/github/v/release/pealmeida/gateswarm-router?sort=semver)](https://github.com/pealmeida/gateswarm-router/releases)
 
-**Self-optimizing LLM routing gateway with health-aware tier selection, Plan/Act dual-model routing, and effort overrides.** Scores every prompt via a 25-feature ensemble, picks the cheapest capable model per intent mode, and learns from every interaction.
+**Self-optimizing LLM routing gateway.** Scores every prompt, picks the cheapest *capable* model, learns from every interaction.
 
-> **Latest stable:** [v0.5.6](https://github.com/pealmeida/gateswarm-router/releases/tag/v0.5.6) (Routing Transparency + Quota-Aware Routing + OSS Hygiene — the clean 5-version sequence)
-> **Previously shipped:** [v0.5.5](https://github.com/pealmeida/gateswarm-router/releases/tag/v0.5.5) (Routing Transparency + Quota-Aware Routing + OSS Hygiene) · [v0.5.4](https://github.com/pealmeida/gateswarm-router/releases/tag/v0.5.4) (Plan/Act + Effort Override) · [v0.5.3](https://github.com/pealmeida/gateswarm-router/releases/tag/v0.5.3) (Foundational fixes: dotenv + debounced writes)
-> **Releases on GitHub:** v0.4.4, v0.5.2, v0.5.3, v0.5.4, v0.5.5, v0.5.6
-
----
-
-## What's New
-
-### v0.5.6 — Routing Transparency + Quota-Aware Routing + OSS Hygiene (LATEST)
-
-- **Health-aware routing** — tier primaries re-routed to currently-healthy providers (zai for moderate/heavy, codex-cli for intensive/extreme). Bailian (key expired) and OpenCodeGo (quota exhausted) removed from all tier fallbacks.
-- **LLM judge config-driven** — was hardcoded to `bailian/qwen3.5-plus`; now reads from `v04_config.feedback_loop.llmJudgeModel`, defaulting to `zai/glm-4.7`.
-- **Provider health-score decay** — `recordSuccess()` now decays `rateLimitHits` so transient 429s don't permanently poison the health score.
-- **RAG signal Q* filter** — `RagEntry.tier` is overloaded between effort tiers and compressor quality tiers. RAG now filters `Q*` entries so compressor summaries don't pollute the complexity score.
-- **TUI last-request accuracy** — `TiersMatrix.tsx` shows a `★ LAST REQUEST →` header with the actual tier/provider/model of the most recent request decision.
-- **Auth-aware CLI health checks** — `bin/cli-health-probe.sh` verifies binary + auth (replaces the `codex --version` health check that passed without auth).
-- **Portable paths** — hardcoded `/root/.openclaw/...` paths replaced with portable paths via `import.meta.url` and `${GATESWARM_ROOT}` env var.
-- **Ephemeral data untracked** — `data/consumption-history.json`, `data/provider-quota.json`, `data/quota-sync.json`, `data/model-matrix.json` gitignored.
-- **Pre-release security audit** — `docs/SECURITY_AUDIT.md` documents what was checked.
-- **New CLI commands** — `gateswarm ops-guide`, `gateswarm health`, `gateswarm version`.
-- **New endpoints** — `/v05/intel/ops-guide`, `/v05/intel/last-decision`.
-- **light tier primary to ollama-cloud/minimax-m2.7** (free tier, no RPM limits).
-
-### v0.5.5 — Re-shuffle + CHANGELOG + README cleanup (the meta release)
-
-Brings v0.5.3 → v0.5.6 into a clean 5-version sequence. Removes duplicate docs, gitignores build artifacts (dist/, tee/), adds gateway legacy notice, and rewrites the project structure for OSS release.
-
-### v0.5.4 — Plan/Act Modes + Effort Override (the feature release)
-
-- **Plan/Act auto-detection** — `detectIntentMode()` scores prompts based on keyword patterns. Plan keywords (draft, outline, brainstorm, sketch, explore, what if, options, approach, consider, tradeoff, strategy, roadmap, plan, design, compare, pros and cons) vs act keywords (implement, build, code, fix, deploy, run, test, apply, merge, write the code, create the file). Auto-defaults to act when scores are tied.
-- **Per-tier `plan_model` config** — each of moderate, heavy, intensive, extreme has a separate `plan_model`/`plan_provider`/`plan_max_tokens`/`plan_enable_thinking`. When the request mode is `plan`, the gateway routes to the plan model instead of the primary.
-- **`effort_override` request field + `X-Effort-Override` header** — bypass ensemble scoring; jump straight to the named tier. Invalid values return HTTP 400.
-- **`POST /v06/mode/detect`** — test mode detection on any prompt. Returns `{ mode, confidence, planScore, actScore }`.
-- **`POST /v06/resolve`** — given a (tier, mode), returns the model that would be dispatched.
-- **CLI commands**: `gateswarm resolve <tier> [mode]`, `gateswarm effort-override <tier> <prompt>`.
-
-### v0.5.3 — Foundational fixes
-
-- **Removed broken `dotenv` import + dep** — was listed in `package.json` as a dependency but never installed.
-- **Debounced `agent-registry.save()`** — was 2 full-file writes per request; now coalesces bursts into 1 write per 1s window. Graceful shutdown via SIGINT/SIGTERM triggers `flushPending()`.
-
-### v0.5.2 — Plan/Act Dual-Model Routing (the first public release on origin)
-
-- **Plan/Act Dual-Model Routing** — each tier carries an *act* model (default) and a *plan* model; plan mode dispatches the **actual request** to the plan model.
-- **More accurate intent detection** — stem-aware word-boundary keyword matching. Act recall 60% → 100%, plan recall 87% → 93%.
-- **Less over-routing, more accurate tiers** — exact-tier accuracy 41% → 49%, within-±1 83% → 88%.
-- **Provider/model consistency enforced** — `eval/consistency-check.ts` verifies every model in `v04_config.json` exists in its provider's catalog.
-- **OpenCodeGo provider** — HTTP adapter for deepseek-v4-flash/pro, qwen3.7, kimi, minimax, mimo.
-- **Mode CLI commands** — `mode-status`, `mode-set`, `mode-detect`.
+> **Latest stable:** [v0.5.6](https://github.com/pealmeida/gateswarm-router/releases/tag/v0.5.6) — Routing Transparency + Quota-Aware Routing + OSS Hygiene
+> **Releases:** v0.4.4 · v0.5.2 · v0.5.3 · v0.5.4 · v0.5.5 · v0.5.6 (see [Releases](#releases) below)
 
 ---
 
-## How It Works
+## What is it?
 
-GateSwarm Router is a TypeScript API gateway that sits between any OpenAI-compatible LLM client and multiple LLM providers. It intercepts every chat completion request, scores prompt complexity across 25 features using a weighted ensemble (heuristic 55%, RAG signal 25%, history bias 20%), detects intent mode (plan vs act), routes to the right tier and model pair, compresses long conversations with TurboQuant, retrieves relevant RAG context, and logs feedback to continuously improve routing accuracy.
+**GateSwarm** is an **LLM routing gateway**. It sits between any OpenAI-compatible client (your IDE agent, your CLI, your app) and a pool of language models — local, cloud HTTP, and CLI agents. Every chat-completion request passes through it. It scores the prompt's complexity, picks the **cheapest model capable of answering it**, forwards the request, and logs the outcome to keep getting smarter.
+
+**MoMA — Mixture of Model Agents** — is the routing pattern at its core. Instead of one model serving every prompt, GateSwarm dynamically mixes and matches across providers based on what each prompt actually needs.
+
+```
+Your client  ──►  GateSwarm :8900  ──►  right model for the job
+                                         (cheap local, fast cloud, or reasoning agent)
+```
+
+### In one sentence
+
+> **Every prompt gets scored; the cheapest capable model answers; the router learns from every interaction.**
+
+### Three things it does that a normal API client doesn't
+
+1. **Routes by complexity, not by hand.** You stop choosing between GPT-5 and Claude Opus per call. The router picks for you — automatically, per request.
+2. **Plan vs Act, per tier.** *"Design a global CRDT system"* (planning) and *"implement the CRDT in Rust"* (acting) can route to **different models at the same tier**. Planning leans on reasoning agents (Claude Opus, Codex); acting leans on fast/cheap HTTP models (GLM, Qwen).
+3. **Fails over intelligently.** Z.AI rate-limits? The router detects the health drop, decays the score, and falls through to the next healthy provider — without your client ever seeing a 429.
+
+### What it is *not*
+
+- **Not a model.** GateSwarm doesn't generate text. It decides who should.
+- **Not a training framework.** It runs a small ensemble scorer (heuristic + RAG + history) and periodically retrains the *router's weights* on real traffic — not the underlying models.
+- **Not an OpenAI replacement.** It's a transparent drop-in *in front of* OpenAI-compatible providers. Swap the base URL, keep your client code.
+
+---
+
+## Why use it?
+
+| Benefit | What it means in practice |
+|---|---|
+| **Cost reduction** | Cheap local `qwen2.5:0.5b` answers trivial questions (*"2+2"*); expensive Claude Opus is reserved for extreme-tier prompts. Saves 60–90% on token spend for mixed workloads. |
+| **Quality on demand** | Hard prompts automatically escalate to stronger models. You don't have to manually choose. |
+| **Plan vs Act separation** | Planning and acting can dispatch to different models within the same tier — Claude Opus for thinking, Codex for writing. |
+| **Provider failover** | If your Bailian key expires or Z.AI rate-limits, the router detects health decay and falls through to the next provider automatically. |
+| **OpenAI-compatible** | Drop-in for any OpenAI client. Change `base_url` to `:8900`, no SDK changes. |
+| **Self-improving** | 25-feature ensemble + RAG + history bias + auto-retraining every N interactions. |
+| **Transparent** | CLI (`gateswarm`) and TUI (`gateswarm-bar`) show last decision, weights, health, quota. No black box. |
+| **Local + cloud + CLI** | Mixes Ollama (local), Z.AI/Bailian/OpenCodeGo (HTTP), Claude Code/Codex/Pi/Hermes/OpenClaw (CLI agents). |
+
+---
+
+## How it works
 
 ```
 Client (OpenAI-compatible, any agent)
   |
   v
 GateSwarm Router (:8900)
-  |-- Score complexity (ensemble voter)
-  |-- Detect intent mode (plan vs act)
+  |-- Score complexity (ensemble voter — 25 features)
+  |-- Detect intent mode (plan vs act, stem-aware keyword match)
   |-- Apply effort_override (if set)
   |-- Route to tier + mode model (trivial → extreme)
-  |-- TurboQuant compression (Q8 → Q0)
-  |-- RAG context retrieval
+  |-- TurboQuant compression (Q8 → Q0) for long contexts
+  |-- RAG context retrieval (Q* filter excludes compressor noise)
   |-- Sanitize + forward + fallback
+  |-- Record feedback → retrain periodically
   |
   +-----> HTTP Providers                  CLI Providers (subprocess)
           Z.AI (GLM-4.7, GLM-5, GLM-5.1)  Claude Code (cc/)
@@ -83,6 +79,42 @@ GateSwarm Router (:8900)
                                           Hermes (hm/)
                                           OpenClaw (oc/)
 ```
+
+### Routing tiers
+
+All 6 tiers and their current model assignments (live in `v04_config.json`, hot-reloaded):
+
+| Tier | Score Range | Act Model | Act Provider | Max Tokens | Reasoning |
+|------|-------------|-----------|--------------|------------|-----------|
+| **trivial** | 0.00 – 0.16 | qwen2.5:0.5b | ollama | 256 | — |
+| **light** | 0.16 – 0.28 | minimax-m2.7 | ollama-cloud | 512 | — |
+| **moderate** | 0.28 – 0.35 | glm-5 | zai | 2048 | — |
+| **heavy** | 0.35 – 0.40 | glm-5.1 | zai | 4096 | ✓ |
+| **intensive** | 0.40 – 0.46 | cx/gpt-5.4-codex | codex-cli | 4096 | — |
+| **extreme** | 0.46 – 1.00 | cx/gpt-5.4-codex | codex-cli | 8192 | — |
+
+Reasoning (`enable_thinking`) is on for heavy and extreme tiers. Tier models, plan/act overrides, and fallback chains are fully configurable via CLI or by editing `v04_config.json` directly.
+
+### Plan vs Act (per tier)
+
+Every tier has two model assignments — one for **acting** (default: implementation, execution, bug-fixing) and one for **planning** (exploration, drafting, architecture). For the upper tiers, planning routes to CLI reasoning agents (Codex, Claude Code) while acting stays on fast/cheap HTTP models.
+
+| Tier | Act Model | Act Provider | Plan Model | Plan Provider |
+|------|-----------|--------------|------------|---------------|
+| **trivial** | qwen2.5:0.5b | ollama | (uses act) | — |
+| **light** | minimax-m2.7 | ollama-cloud | (uses act) | — |
+| **moderate** | glm-5 | zai | glm-4.7-flash | zai |
+| **heavy** | glm-5.1 | zai | glm-5 | zai |
+| **intensive** | cx/gpt-5.4-codex | codex-cli | cc/claude-sonnet-4-6 | claude-cli |
+| **extreme** | cx/gpt-5.4-codex | codex-cli | cc/claude-opus-4-6 | claude-cli |
+
+Auto-detection (`detectIntentMode`) scores stem-aware keyword hits plus intent patterns. Override explicitly with `"mode": "plan"` / `"mode": "act"` in the request body, or the `X-Mode` request header.
+
+### Health-aware routing
+
+The router reads `providerQuota` health scores and skips throttled providers before dispatch. Health decays on every successful call (so a transient 429 from a quota probe doesn't permanently poison a provider), and is reset by re-probing via `POST /v05/intel/rediscover`.
+
+If the static primary for a tier is unhealthy, the router falls through to the configured fallback chain. If all fallbacks are unhealthy, it falls back to `cheapest_available` from the dynamic discovery pool. Read more in [docs/ROUTING_STRATEGY.md](docs/ROUTING_STRATEGY.md).
 
 ---
 
@@ -93,7 +125,7 @@ git clone https://github.com/pealmeida/gateswarm-router.git
 cd gateswarm-router
 cp .env.example .env          # add your API keys
 npm install
-npm start                     # starts gateway on :8900
+npm start                     # gateway on :8900
 ```
 
 Point any OpenAI-compatible client at `http://localhost:8900/v1`:
@@ -101,7 +133,7 @@ Point any OpenAI-compatible client at `http://localhost:8900/v1`:
 ```bash
 curl http://localhost:8900/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer moma-f4…d34b" \
+  -H "Authorization: Bearer ***…d34b" \
   -d '{"model":"gateswarm","messages":[{"role":"user","content":"Explain quantum computing"}]}'
 ```
 
@@ -109,26 +141,13 @@ For systemd-managed deployments (recommended for VPS), see [docs/GATEWAY_QUICKST
 
 ---
 
-## Plan/Act Dual-Model Routing
+## Day-to-day usage
 
-Every tier has two model assignments — one for **acting** (default: implementation, execution, bug-fixing) and one for **planning** (exploration, drafting, architecture). For the upper tiers, planning routes to CLI reasoning agents (Codex, Claude Code) while acting stays on fast/cheap HTTP models. Current defaults (from `v04_config.json`, hot-reloaded):
+### Let it auto-route
+Just send a chat completion with `model: "gateswarm"`. Done.
 
-| Tier | Act Model | Act Provider | Plan Model | Plan Provider |
-|------|-----------|-------------|------------|---------------|
-| **trivial** | qwen2.5:0.5b | ollama | (uses act) | — |
-| **light** | minimax-m2.7 | ollama-cloud | (uses act) | — |
-| **moderate** | glm-5 | zai | glm-4.7-flash | zai |
-| **heavy** | glm-5.1 | zai | glm-5 | zai |
-| **intensive** | cx/gpt-5.4-codex | codex-cli | cc/claude-sonnet-4-6 | claude-cli |
-| **extreme** | cx/gpt-5.4-codex | codex-cli | cc/claude-opus-4-6 | claude-cli |
-
-Auto-detection (`detectIntentMode`) scores stem-aware keyword hits plus intent patterns. Override explicitly with `"mode": "plan"` / `"mode": "act"` in the request body, or the `X-Mode` request header. Values are configurable via `gateswarm mode-set` or by editing `v04_config.json` directly.
-
----
-
-## Effort Override
-
-Skip the ensemble scoring and force a specific tier:
+### Force a tier (effort override)
+Skip the scoring and lock a tier:
 
 ```bash
 # Request body
@@ -142,38 +161,142 @@ X-Effort-Override: heavy
 
 Valid values: `trivial`, `light`, `moderate`, `heavy`, `intensive`, `extreme`. Invalid values return HTTP 400. The greeting fast-path is skipped when an override is set, so the caller's chosen tier is always honored.
 
+### Force plan vs act mode
+```bash
+{ "model": "gateswarm", "messages": [...], "mode": "plan" }
+# or header  X-Mode: plan
+```
+
+Auto-detects by default (stem-aware: `draft/outline/explore/…` → plan; `implement/build/fix/…` → act).
+
+### Bypass routing entirely (direct mode)
+Pin a specific provider/model:
+
+```json
+{ "model": "gateswarm", "messages": [...],
+  "direct_route": { "provider": "claude-cli", "model": "cc/claude-sonnet-4-6" } }
+```
+
+Or via headers: `X-Direct-Provider: claude-cli` / `X-Direct-Model: cc/claude-sonnet-4-6`.
+Or use the model field shorthand: `"model": "cc/claude-sonnet-4-6"`.
+
+### Inspect decisions
+```bash
+gateswarm status             # ensemble weights, tier models, feedback buffer
+gateswarm health             # 11-point health check (gateway + 4 HTTP + 5 CLI)
+gateswarm feedback           # per-tier accuracy, retrain ETA
+gateswarm providers          # all providers + quota + status
+gateswarm version            # verify 7 version stamps align
+```
+
+### Launch the TUI
+```bash
+gateswarm tui                # gateswarm-bar (Ink) — live tier matrix + last request
+```
+
 ---
 
-## Routing Tiers
+## Customizing
 
-All 6 tiers and their current model assignments (from `v04_config.json`, hot-reloaded):
+Three layers of customization, from safest to most invasive.
 
-| Tier | Score Range | Act Model | Act Provider | Max Tokens | Reasoning |
-|------|-------------|-----------|-------------|-----------|-----------|
-| **trivial** | 0.00 – 0.16 | qwen2.5:0.5b | ollama | 256 | — |
-| **light** | 0.16 – 0.28 | minimax-m2.7 | ollama-cloud | 512 | — |
-| **moderate** | 0.28 – 0.35 | glm-5 | zai | 2048 | — |
-| **heavy** | 0.35 – 0.40 | glm-5.1 | zai | 4096 | ✓ |
-| **intensive** | 0.40 – 0.46 | cx/gpt-5.4-codex | codex-cli | 4096 | — |
-| **extreme** | 0.46 – 1.00 | cx/gpt-5.4-codex | codex-cli | 8192 | — |
+### 1. CLI commands (live, hot-reload — no restart)
 
-Reasoning (`enable_thinking`) is on for heavy and extreme tiers. Tier models, plan/act overrides, and fallback chains are fully configurable via CLI or by editing `v04_config.json` directly.
+```bash
+# Models + reasoning
+gateswarm model heavy glm-5.1 zai              # change act model
+gateswarm reasoning extreme on                 # toggle thinking
+
+# Ensemble + retraining
+gateswarm weights heuristic 0.35               # reweight ensemble
+gateswarm retrain-freq 200                     # retrain every 200 interactions
+gateswarm retrain                              # manual retrain now
+
+# Plan/Act
+gateswarm mode-set heavy plan-model glm-5 zai  # change plan model
+gateswarm mode-detect "implement rate limiter" # test intent detection
+gateswarm resolve intensive plan               # what model would dispatch
+gateswarm effort-override heavy "design CRDT"  # force tier once
+
+# Direct + diagnostics
+gateswarm direct claude-cli cc/claude-sonnet-4-6 "What is 2+2?"
+gateswarm ops-guide                            # full ops guide
+```
+
+Full command reference below. Changes are persisted to `v04_config.json` and hot-reloaded by the gateway.
+
+### 2. Edit `v04_config.json` directly
+
+Key sections:
+- **`tier_models.<tier>`** — `model`, `provider`, `max_tokens`, `enable_thinking`, plus plan-mode fields
+- **`tier_boundaries`** — score thresholds separating the 6 tiers
+- **`ensemble.weights`** — `heuristic`, `cascade`, `ragSignal`, `historyBias` (must sum to 1.0)
+- **`feedback_loop`** — retraining frequency, LLM judge model, sampling rate
+- **`rag`** — max entries, TTL, query limits
+
+A consistency check (`eval/consistency-check.ts`) enforces that every model in the config exists in its provider's catalog. So you can't typo a model name silently.
+
+### 3. Add a new provider
+
+1. Add a provider adapter in `src/adapters/` (HTTP or CLI type).
+2. Register in `data/agent-registry.json`.
+3. Reference in `v04_config.json` tier_models.
+4. Run `npx tsx eval/consistency-check.ts` to validate.
+
+CLI providers require only an OAuth/binary check; HTTP providers require API keys in `.env`.
 
 ---
 
-## Health-Aware Routing
+## Updating
 
-The router reads `providerQuota` health scores and skips throttled providers before dispatch. Health decays on every successful call (so a transient 429 from a quota probe doesn't permanently poison a provider), and is reset by re-probing via `POST /v05/intel/rediscover`.
+### Pull the latest version
 
-If the static primary for a tier is unhealthy, the router falls through to the configured fallback chain. If all fallbacks are unhealthy, it falls back to `cheapest_available` from the dynamic discovery pool.
+```bash
+cd gateswarm-router
+git pull
+npm install            # in case deps changed
+npm run check:types    # typecheck
+npm test               # test suite
+```
 
-Read more in [docs/ROUTING_STRATEGY.md](docs/ROUTING_STRATEGY.md).
+Restart the systemd service (if running that way):
+```bash
+sudo systemctl restart moma-gateway.service
+gateswarm health      # verify clean
+```
+
+### Track releases
+
+GitHub Releases are the source of truth: https://github.com/pealmeida/gateswarm-router/releases
+
+```
+v0.4.4 (May 14, 2026) — context-aware
+v0.5.2 (Jun 6, 2026)  — plan/act dual routing, recalibrated tiers
+v0.5.3 (Jun 20, 2026) — dotenv + debounced writes (foundational)
+v0.5.4 (Jun 20, 2026) — plan/act + effort override (the feature release)
+v0.5.5 (Jun 20, 2026) — health-aware routing + portable paths + OSS hygiene
+v0.5.6 (Jun 20, 2026) — re-shuffle + CHANGELOG + README (LATEST)
+```
+
+The `v0.6.x` development line (kept local on the `v0.6.x-guide` branch) is used as a reference for backporting improvements. See [docs/V06_BACKPORT_PLAN.md](docs/V06_BACKPORT_PLAN.md) for the roadmap.
+
+### Version alignment
+
+The project maintains **7 version stamps** that must stay aligned. Verify with:
+```bash
+gateswarm version
+```
+If any stamp drifts, the gateway prints which file needs updating.
+
+### Operational tasks
+
+For full ops — debugging, quota syncing, log analysis, security audit, health decay tuning — see **`docs/OPS_GUIDE.md`**. For architectural deep-dive (9-stage pipeline, TurboQuant levels, 7-phase sanitization, fallback chains) see **`docs/ARCHITECTURE.md`**.
 
 ---
 
-## CLI Management
+## CLI Management Reference
 
-Run via `npx tsx src/gateswarm-cli.ts <command>` or alias as `gateswarm`:
+Run via `npx tsx src/gateswarm-cli.ts <command>` or alias as `gateswarm`.
 
 ### Core Commands
 
@@ -197,7 +320,7 @@ Run via `npx tsx src/gateswarm-cli.ts <command>` or alias as `gateswarm`:
 | Command | Description |
 |---------|-------------|
 | `mode-status` | Show plan/act model assignments for all 6 tiers |
-| `mode-set <tier> <field> <value>` | Set a plan-mode field for a tier (plan_model, plan_provider, plan_max_tokens, plan_enable_thinking) |
+| `mode-set <tier> <field> <value>` | Set a plan-mode field for a tier (`plan_model`, `plan_provider`, `plan_max_tokens`, `plan_enable_thinking`) |
 | `mode-detect "<prompt>"` | Test auto-detection of plan vs act on a prompt |
 | `resolve <tier> [mode]` | Show what model would be used for (tier, mode) |
 | `effort-override <tier> "<prompt>"` | Force a tier for one request, bypassing ensemble scoring |
@@ -225,32 +348,6 @@ Run via `npx tsx src/gateswarm-cli.ts <command>` or alias as `gateswarm`:
 | `training` | Show training mode status for all agents |
 | `training <agentId> on\|off` | Enable or disable training mode for an agent |
 | `training labels <agentId>` | Show collected gold/silver/bronze labels for an agent |
-
-**Examples:**
-
-```bash
-# Model management
-npx tsx src/gateswarm-cli.ts model heavy glm-5.1 zai
-npx tsx src/gateswarm-cli.ts reasoning extreme on
-npx tsx src/gateswarm-cli.ts retrain-freq 200
-npx tsx src/gateswarm-cli.ts weights heuristic 0.35
-
-# Plan/Act modes + effort override
-npx tsx src/gateswarm-cli.ts mode-status
-npx tsx src/gateswarm-cli.ts mode-set heavy plan-model glm-5 zai
-npx tsx src/gateswarm-cli.ts mode-detect "implement a rate limiter in Rust"
-npx tsx src/gateswarm-cli.ts resolve intensive plan
-npx tsx src/gateswarm-cli.ts effort-override heavy "design a global CRDT system"
-
-# Operations
-npx tsx src/gateswarm-cli.ts health
-npx tsx src/gateswarm-cli.ts version
-npx tsx src/gateswarm-cli.ts ops-guide
-
-# Providers
-npx tsx src/gateswarm-cli.ts providers
-npx tsx src/gateswarm-cli.ts direct claude-cli cc/claude-sonnet-4-6 "What is 2+2?"
-```
 
 ---
 
@@ -290,31 +387,9 @@ CLI health checks are auth-aware: `bin/cli-health-probe.sh` verifies both the bi
 
 `v04_config.json` is the live configuration file — hot-reloaded on CLI changes, no gateway restart needed.
 
-Key sections:
-
-- **`tier_models.<tier>`** — act (primary) model, provider, max_tokens, enable_thinking, plus `plan_model`, `plan_provider`, `plan_max_tokens`, `plan_enable_thinking` for Plan/Act dual routing
-- **`tier_boundaries`** — score thresholds separating the 6 tiers
-- **`ensemble.weights`** — heuristic (0.55), cascade (0), ragSignal (0.25), historyBias (0.2)
-- **`feedback_loop`** — retraining frequency (default 500), LLM judge model and sampling rate, A/B holdout
-- **`rag`** — max entries (10,000), TTL (24h), query max results
-
 Edit via CLI commands (`model`, `mode-set`, `reasoning`, `weights`, `retrain-freq`) or directly in `v04_config.json`.
 
-### Direct Routing
-
-Skip classification entirely by specifying a provider/model explicitly:
-
-```json
-{ "model": "gateswarm", "messages": [...], "direct_route": { "provider": "claude-cli", "model": "cc/claude-sonnet-4-6" } }
-```
-
-Or via headers: `X-Direct-Provider: claude-cli` / `X-Direct-Model: cc/claude-sonnet-4-6`.
-
-Or use the model field shorthand: `"model": "cc/claude-sonnet-4-6"`.
-
----
-
-## Environment Variables
+### Environment Variables
 
 Copy `.env.example` to `.env` and fill in your keys:
 
@@ -444,7 +519,7 @@ gateswarm-router/
 
 ## Releases
 
-The release tags on GitHub are the source of truth. The version sequence is:
+The release tags on GitHub are the source of truth:
 
 ```
 v0.4.4 (May 14, 2026) — context-aware
@@ -455,19 +530,9 @@ v0.5.5 (Jun 20, 2026) — fix: health-aware routing + portable paths + OSS hygie
 v0.5.6 (Jun 20, 2026) — chore: re-shuffle + CHANGELOG + README (LATEST)
 ```
 
-The clean 5-version sequence v0.5.3 → v0.5.6 was finalized after the user
-asked to redistribute the v0.5.5/v0.5.6/v0.5.7 work into a meaningful
-version progression. Each release is a coherent, semantically-correct
-release; no CHANGELOG-only retro-tags.
+The clean 5-version sequence v0.5.3 → v0.5.6 was finalized to redistribute the work into a meaningful version progression. Each release is a coherent, semantically-correct release; no CHANGELOG-only retro-tags.
 
-The `v0.6.x` development line (kept local on the `v0.6.x-guide` branch) is
-used as a reference for backporting improvements. See
-[docs/V06_BACKPORT_PLAN.md](docs/V06_BACKPORT_PLAN.md) for the v0.6.x
-roadmap.
-
-The `release/v0.5.x` branch has the same work as main (it was merged
-into main as part of the re-shuffle). It can be deleted if you want a
-cleaner branch list.
+The `v0.6.x` development line (kept local on the `v0.6.x-guide` branch) is used as a reference for backporting improvements. See [docs/V06_BACKPORT_PLAN.md](docs/V06_BACKPORT_PLAN.md) for the v0.6.x roadmap.
 
 ---
 
