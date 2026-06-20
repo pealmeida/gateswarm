@@ -24,7 +24,7 @@ for CLIs).
 ## Install
 
 ```bash
-cd /root/.openclaw/workspace/gateswarm-moma-router/cli
+cd $(dirname $(readlink -f "$0"))/../cli
 npm install
 npm run build
 npm link                 # exposes `gateswarm-bar` globally

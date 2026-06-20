@@ -30,7 +30,7 @@ curl -s http://localhost:8900/v05/intel/consumption | python3 -m json.tool | hea
 curl -s http://localhost:8900/v05/intel/quota | python3 -m json.tool | head -10
 
 # TUI JSON dump
-node /root/.openclaw/workspace/gateswarm-moma-router/cli/dist/cli.js --once | python3 -m json.tool | head -20
+node $(dirname $(readlink -f "$0"))/../cli/dist/cli.js --once | python3 -m json.tool | head -20
 ```
 
 ---
@@ -226,14 +226,14 @@ gateswarm tui --once                   # non-TTY fallback
 script -qfc "gateswarm tui" /tmp/out   # wrap in PTY
 
 # Build the CLI if dist/ is missing
-cd /root/.openclaw/workspace/gateswarm-moma-router/cli
+cd $(dirname $(readlink -f "$0"))/../cli
 npm install && npm run build
 
 # Re-link the global `gateswarm` and `gateswarm-tui` binaries
-cd /root/.openclaw/workspace/gateswarm-moma-router/cli
+cd $(dirname $(readlink -f "$0"))/../cli
 npm link
 # Or manually:
-ln -sf /root/.openclaw/workspace/gateswarm-moma-router/cli/dist/cli.js /usr/local/bin/gateswarm-tui
+ln -sf $(dirname $(readlink -f "$0"))/../cli/dist/cli.js /usr/local/bin/gateswarm-tui
 chmod +x /usr/local/bin/gateswarm-tui
 ```
 
