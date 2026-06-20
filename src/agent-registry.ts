@@ -179,7 +179,7 @@ export const DEFAULT_CLI_PROVIDERS: Record<string, CliProviderEntry> = {
         'cc/claude-opus-4-8': 'claude-opus-4-8',
         'cc/claude-haiku-4-5': 'claude-haiku-4-5',
       },
-      healthCheck: { command: 'claude --version', expectedExitCode: 0 },
+      healthCheck: { command: '"${GATESWARM_ROOT:-.}"/bin/cli-health-probe.sh claude-cli', expectedExitCode: 0 },
       quota: {
         type: 'subscription',
         windows: [
@@ -209,7 +209,7 @@ export const DEFAULT_CLI_PROVIDERS: Record<string, CliProviderEntry> = {
         'cx/gpt-5.3-codex': 'gpt-5.5',
         'cx/gpt-4.1': 'gpt-4.1',
       },
-      healthCheck: { command: 'codex --version', expectedExitCode: 0 },
+      healthCheck: { command: '"${GATESWARM_ROOT:-.}"/bin/cli-health-probe.sh codex-cli', expectedExitCode: 0 },
       quota: {
         type: 'subscription',
         windows: [
@@ -237,7 +237,7 @@ export const DEFAULT_CLI_PROVIDERS: Record<string, CliProviderEntry> = {
         'pi/qwen3.5-plus': 'qwen3.5-plus',
         'pi/glm-4.7-flash': 'glm-4.7-flash',
       },
-      healthCheck: { command: 'ls ' + process.env.HOME + '/.pi/agent/src/index.js', expectedExitCode: 0 },
+      healthCheck: { command: '"${GATESWARM_ROOT:-.}"/bin/cli-health-probe.sh pi-agent', expectedExitCode: 0 },
     },
   },
   'hermes-agent': {
@@ -258,7 +258,7 @@ export const DEFAULT_CLI_PROVIDERS: Record<string, CliProviderEntry> = {
         'hm/glm-4.7': 'glm-4.7',
         'hm/glm-4.7-flash': 'glm-4.7-flash',
       },
-      healthCheck: { command: 'ls /usr/local/lib/hermes-agent/src/agent.js', expectedExitCode: 0 },
+      healthCheck: { command: '"${GATESWARM_ROOT:-.}"/bin/cli-health-probe.sh hermes-agent', expectedExitCode: 0 },
     },
   },
   'openclaw-agent': {
@@ -319,14 +319,15 @@ export class AgentRegistry {
       models: HTTP_PROVIDER_MODELS.zai,
     });
 
-    this.registerProvider({
-      id: 'openrouter',
-      name: 'OpenRouter (Benchmark)',
-      type: 'http-api',
-      baseUrl: process.env.OPENROUTER_BASE || 'https://openrouter.ai/api/v1',
-      apiKey: process.env.OPENROUTER_API_KEY || '',
-      models: HTTP_PROVIDER_MODELS.openrouter,
-    });
+    // openrouter removed — user requested exclusion
+    // this.registerProvider({
+    //   id: 'openrouter',
+    //   name: 'OpenRouter (Benchmark)',
+    //   type: 'http-api',
+    //   baseUrl: process.env.OPENROUTER_BASE || 'https://openrouter.ai/api/v1',
+    //   apiKey: process.env.OPENROUTER_API_KEY || '',
+    //   models: HTTP_PROVIDER_MODELS.openrouter,
+    // });
 
     this.registerProvider({
       id: 'opencodego',

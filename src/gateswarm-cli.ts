@@ -130,7 +130,12 @@ const args = process.argv.slice(2);
 
 function printUsage() {
   console.log(`
-🧠 GateSwarm MoMA Router v0.5.4 — CLI + TUI + Consumption Intelligence
+🧠 GateSwarm MoMA Router v0.5.6 — CLI + TUI + Consumption Intelligence
+
+Ops Commands:
+  ops-guide                                 Show operations guide (debugging, updates, versioning)
+  health                                    Quick 10-second health check
+  version                                   Show all version stamps and detect skew
 
 Core Commands:
   status                                    Show v0.4 system status
@@ -158,14 +163,14 @@ Plan/Act Mode Commands (v0.5.2):
                                                       plan_max_tokens, plan_enable_thinking
   mode-detect <prompt text>                 Detect intent mode (plan/act/auto) from prompt text
 
-Consumption Intelligence Commands (v0.5.4):
-  intel                                     Show v0.5.4 intel: tier recommendations, stats, providers
+Consumption Intelligence Commands (v0.5.6):
+  intel                                     Show v0.5.6 intel: tier recommendations, stats, providers
   consumption                               Show per-provider 5h/weekly/monthly consumption + quota
   consumption <window>                      Filter to one window: 5h | weekly | monthly
   quota                                     Show per-provider quota (RPM/RPD/tokens/throttled)
   rediscover                                Force immediate model rediscovery
 
-TUI Commands (v0.5.4):
+TUI Commands (v0.5.6):
   tui                                       Launch GateSwarm Bar TUI (interactive, needs TTY)
   tui --once                                One-shot JSON dump of consumption
   tui --once | jq '.'                       Pipe to jq for scripting
@@ -188,7 +193,7 @@ Examples:
   gateswarm mode-set heavy plan_model qwen3.6-plus
   gateswarm mode-set heavy plan_enable_thinking true
   gateswarm mode-detect "draft an architecture plan for the new service"
-  gateswarm intel                            # v0.5.4 token consumption intel
+  gateswarm intel                            # v0.5.6 token consumption intel
   gateswarm consumption                      # per-provider 5h/weekly/monthly
   gateswarm consumption weekly               # just the weekly window
   gateswarm quota                            # RPM/RPD/tokens remaining
@@ -478,7 +483,7 @@ async function cmdModeDetect(promptText: string) {
   console.log(`Mode: ${result.mode}, Confidence: ${pct}%, Plan score: ${result.planScore}, Act score: ${result.actScore}`);
 }
 
-// ─── v0.5.4 Consumption Intelligence Commands ────────────────
+// ─── v0.5.6 Consumption Intelligence Commands ────────────────
 
 async function cmdIntel() {
   const data = await gatewayFetch('/v05/intel');
@@ -519,7 +524,7 @@ async function cmdConsumption(window?: string) {
   ];
   const filter = window?.toLowerCase();
 
-  console.log('📊 GateSwarm Consumption (v0.5.4) — Generated: ' + new Date(data.generatedAt).toLocaleString() + '\n');
+  console.log('📊 GateSwarm Consumption (v0.5.6) — Generated: ' + new Date(data.generatedAt).toLocaleString() + '\n');
 
   for (const [label, key] of windows) {
     if (filter && !filter.startsWith(label.slice(0, 2))) continue;
@@ -604,7 +609,7 @@ function pctBadge(pct: number | null): string {
 
 async function cmdQuota() {
   const data = await gatewayFetch('/v05/intel/quota');
-  console.log('📊 Provider Quota (v0.5.4)\n');
+  console.log('📊 Provider Quota (v0.5.6)\n');
   console.log('PROVIDER         HEALTH  RPM         RPD              TOKENS         THROTTLED');
   console.log('─────────────────────────────────────────────────────────────────────────────');
   for (const q of data.quotas) {
@@ -623,7 +628,7 @@ async function cmdRediscover() {
 }
 
 async function cmdTui(args: string[]) {
-  // Launch the v0.5.4 GateSwarm Bar TUI client.
+  // Launch the v0.5.6 GateSwarm Bar TUI client.
   // In a TTY: full interactive UI. In non-TTY (piped): snapshot mode.
   const cliPath = '/root/.openclaw/workspace/gateswarm-moma-router/cli/dist/cli.js';
   const { spawn } = await import('child_process');
@@ -640,6 +645,15 @@ async function main() {
   const command = args[0];
 
   switch (command) {
+    case 'ops-guide':
+      await cmdOpsGuide();
+      break;
+    case 'health':
+      await cmdHealth();
+      break;
+    case 'version':
+      await cmdVersion();
+      break;
     case 'status':
       await cmdStatus();
       break;
@@ -704,7 +718,7 @@ async function main() {
       await cmdModeDetect(args.slice(1).join(' '));
       break;
 
-    // ─── v0.5.4 Consumption Intelligence Commands ─────────
+    // ─── v0.5.6 Consumption Intelligence Commands ─────────
     case 'intel':
       await cmdIntel();
       break;
@@ -721,11 +735,145 @@ async function main() {
       await cmdTui(args.slice(1));
       break;
 
+    case 'ops-guide':
+      await cmdOpsGuide();
+      break;
+    case 'health':
+      await cmdHealth();
+      break;
+    case 'version':
+      await cmdVersion();
+      break;
+
     default:
       console.error(`❌ Unknown command: ${command}`);
       printUsage();
       process.exit(1);
   }
+}
+
+// ─── v0.5.6 Operations Commands ──────────────────────────────
+
+async function cmdOpsGuide(): Promise<void> {
+  try {
+    const res = await fetch(`${GATEWAY_URL}/v05/intel/ops-guide`);
+    if (!res.ok) {
+      console.error(`❌ Failed to fetch ops guide: HTTP ${res.status}`);
+      process.exit(1);
+    }
+    const text = await res.text();
+    console.log(text);
+  } catch (e: any) {
+    console.error(`❌ Could not reach gateway at ${GATEWAY_URL}: ${e.message}`);
+    process.exit(1);
+  }
+}
+
+async function cmdHealth(): Promise<void> {
+  console.log('🏥 GateSwarm Health Check\n');
+  let pass = 0, fail = 0;
+  const check = (label: string, ok: boolean, detail: string) => {
+    const icon = ok ? '✅' : '❌';
+    console.log(`  ${icon} ${label}: ${detail}`);
+    if (ok) pass++; else fail++;
+  };
+
+  // 1. Service alive
+  try {
+    const res = await fetch(`${GATEWAY_URL}/health`);
+    const d = await res.json();
+    check('Service', d.status === 'healthy', `${d.router} (llmJudge: ${d.llmJudge})`);
+  } catch (e: any) {
+    check('Service', false, `unreachable: ${e.message}`);
+  }
+
+  // 2. Provider health (HTTP providers in quota, CLI providers in agent-registry)
+  try {
+    const quotaRes = await fetch(`${GATEWAY_URL}/v05/intel/quota`);
+    const quota = await quotaRes.json();
+    const criticalHttp = ['zai', 'opencodego', 'ollama', 'ollama-cloud'];
+    for (const pid of criticalHttp) {
+      const p = (quota.quotas || []).find((q: any) => q.provider === pid);
+      if (!p) { check(`Provider ${pid}`, false, 'not registered'); continue; }
+      const ok = p.health >= 80 && !p.throttled;
+      check(`Provider ${pid}`, ok, `health=${p.health} throttled=${p.throttled}`);
+    }
+    // CLI providers — check the /v05/intel CLI endpoint
+    const cliRes = await fetch(`${GATEWAY_URL}/v05/cli`);
+    if (cliRes.ok) {
+      const cli = await cliRes.json();
+      for (const c of cli.providers || []) {
+        check(`CLI ${c.id}`, true, `models=${(c.models || []).length} type=${c.type}`);
+      }
+    }
+  } catch (e: any) {
+    check('Provider health', false, `unreachable: ${e.message}`);
+  }
+
+  // 3. Last decision
+  try {
+    const res = await fetch(`${GATEWAY_URL}/v05/intel/last-decision`);
+    if (res.ok) {
+      const d = await res.json();
+      check('Last decision', true, `${d.tier} → ${d.provider}/${d.model} (conf=${(d.confidence * 100).toFixed(0)}%)`);
+    } else {
+      check('Last decision', false, 'no recent request');
+    }
+  } catch (e: any) {
+    check('Last decision', false, `unreachable: ${e.message}`);
+  }
+
+  console.log(`\n📊 ${pass} pass, ${fail} fail`);
+  if (fail > 0) process.exit(1);
+}
+
+async function cmdVersion(): Promise<void> {
+  console.log('📦 GateSwarm Version Sync Check\n');
+  const fs = await import('fs/promises');
+
+  // 1. Service reports
+  try {
+    const res = await fetch(`${GATEWAY_URL}/health`);
+    const d = await res.json();
+    console.log(`  [service]  ${d.router}`);
+  } catch (e: any) {
+    console.log(`  [service]  ❌ unreachable: ${e.message}`);
+  }
+
+  // 2. Files on disk
+  const files: Array<[string, string]> = [
+    ['package.json', '/root/.openclaw/workspace/gateswarm-moma-router/package.json'],
+    ['cli/package.json', '/root/.openclaw/workspace/gateswarm-moma-router/cli/package.json'],
+    ['v04_config.json', '/root/.openclaw/workspace/gateswarm-moma-router/v04_config.json'],
+    ['moma-gateway.ts', '/root/.openclaw/workspace/gateswarm-moma-router/src/moma-gateway.ts'],
+    ['/usr/local/bin/gateswarm', '/usr/local/bin/gateswarm'],
+  ];
+  for (const [label, path] of files) {
+    try {
+      const content = await fs.readFile(path, 'utf-8');
+      const m = content.match(/v?0\.5\.\d+(-[a-z0-9-]+)?/);
+      console.log(`  [${label.padEnd(22)}] ${m ? m[0] : '⚠️  no version found'}`);
+    } catch (e: any) {
+      console.log(`  [${label.padEnd(22)}] ❌ ${e.message}`);
+    }
+  }
+
+  // 3. systemd
+  try {
+    const content = await fs.readFile('/etc/systemd/system/moa-gateway.service', 'utf-8');
+    const m = content.match(/v0\.5\.\d+/);
+    console.log(`  [systemd Description]   ${m ? m[0] : '⚠️  no version'}`);
+  } catch {}
+
+  // 4. Pi
+  try {
+    const content = await fs.readFile('/root/.pi/agent/models.json', 'utf-8');
+    const d = JSON.parse(content);
+    const m = d.providers?.moma?.models?.[0]?.name;
+    console.log(`  [~/.pi/agent/models.json] ${m ?? '⚠️  no moma provider'}`);
+  } catch {}
+
+  console.log('\nIf any line shows ⚠️, the version bump is incomplete. See `gateswarm ops-guide` §5.4.');
 }
 
 main().catch(console.error);

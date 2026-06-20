@@ -94,22 +94,29 @@ export async function llmJudge(
     return { adequacy: -1, correctTier: '' }; // not sampled
   }
 
-  // v0.4.4: Anti-circularity — judge uses a different, more capable model
-  // than the one handling the request. Override to qwen3.6-plus (extreme tier).
-  const judgeProvider = 'bailian';
-  const judgeModel = 'qwen3.6-plus';
+  // v0.5.6 routing-fix: bailian key is currently expired (401). Use the
+  // healthy provider from the configured judge model (zai by default).
+  const judgeProvider = llmJudgeModel.startsWith('zai/') ? 'zai'
+    : llmJudgeModel.startsWith('bailian/') ? 'bailian'
+    : llmJudgeModel.startsWith('ollama-cloud/') ? 'ollama-cloud'
+    : 'zai';
+  const judgeModel = llmJudgeModel.split('/').slice(1).join('/');
 
   const baseUrl = judgeProvider === 'bailian'
     ? 'https://coding-intl.dashscope.aliyuncs.com/v1'
     : judgeProvider === 'zai'
       ? 'https://api.z.ai/api/coding/paas/v4'
-      : '';
+      : judgeProvider === 'ollama-cloud'
+        ? 'https://ollama.com/v1'
+        : '';
 
   const apiKey = judgeProvider === 'bailian'
     ? process.env.BAILIAN_KEY || ''
     : judgeProvider === 'zai'
-      ? process.env.GLM_API_KEY || ''
-      : '';
+      ? process.env.GLM_API_KEY || process.env.ZAI_KEY || ''
+      : judgeProvider === 'ollama-cloud'
+        ? process.env.OLLAMA_CLOUD_KEY || ''
+        : '';
 
   if (!baseUrl || !apiKey) {
     return { adequacy: -1, correctTier: '' };

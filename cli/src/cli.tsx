@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * GateSwarm v0.5.4 — CLI entry point
+ * GateSwarm v0.5.6 — CLI entry point
  *
  * Usage:
  *   gateswarm-bar                     # default: http://localhost:8900, refresh 10s

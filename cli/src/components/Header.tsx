@@ -1,5 +1,5 @@
 /**
- * GateSwarm v0.5.4 — Header component
+ * GateSwarm v0.5.6 — Header component
  * Shows status summary at top of TUI
  */
 
@@ -20,7 +20,7 @@ export function Header({ intel, consumption, serverOk, lastUpdate, refreshInterv
   if (!serverOk) {
     return (
       <Box borderStyle="round" borderColor="red" paddingX={1}>
-        <Text color="red" bold>● GateSwarm v0.5.4 — SERVER UNREACHABLE</Text>
+        <Text color="red" bold>● GateSwarm v0.5.6 — SERVER UNREACHABLE</Text>
       </Box>
     );
   }
@@ -28,7 +28,7 @@ export function Header({ intel, consumption, serverOk, lastUpdate, refreshInterv
   if (!intel || !consumption) {
     return (
       <Box borderStyle="round" borderColor="yellow" paddingX={1}>
-        <Text color="yellow">● GateSwarm v0.5.4 — Loading…</Text>
+        <Text color="yellow">● GateSwarm v0.5.6 — Loading…</Text>
       </Box>
     );
   }

@@ -1,5 +1,5 @@
 /**
- * GateSwarm v0.5.4 — CLI Types
+ * GateSwarm v0.5.6 — CLI Types
  * Mirrors the /v05/intel/* endpoint response shapes
  */
 

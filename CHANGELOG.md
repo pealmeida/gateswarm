@@ -5,6 +5,52 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.6-routing-fix] - 2026-06-20
+
+### Fixed
+- **Tier routing primaries purged of dead providers**: Bailian API key expired (HTTP 401) and OpenCodeGo hit `GoUsageLimitError` (14d reset). Re-routed all six tiers to currently-healthy providers only — zai for moderate/heavy, codex-cli for intensive/extreme, ollama for trivial/light. `v04_config.json` rewritten with no bailian or opencodego references in any tier.
+- **LLM judge silently no-oping**: `self-eval.ts` hardcoded the judge provider to `bailian`; with bailian down, the judge was returning `adequacy: -1` for every request. Now config-driven (`config.feedback_loop.llmJudgeModel`), defaulting to `zai/glm-4.7`.
+- **`/health` banner reported stale version**: hardcoded `'bailian/qwen3.5-plus'` for the `llmJudge` field. Now reads `getConfig().feedback_loop.llmJudgeModel` at request time.
+- **Provider health-score poisoning**: `recordSuccess()` never decayed `rateLimitHits`, so a single batch of 429s from quota-sync probes tanked `zai` health to 0 (penalty `20 × 15 = -300`). Now decays by 1 per success.
+- **RAG signal pollution**: `RagEntry.tier` is overloaded between effort tiers (`moderate`/`heavy`/...) and compressor quality tiers (`Q0`/`Q1`/`Q2`). The intent engine treated both the same, so 9 cached "Hello, how can I help" RAG entries biased every score by +0.075. RAG now filters `Q*` entries before computing the signal. Index cleaned: 21 → 12 entries.
+- **TUI showed only static tier recommendations, not the actual last request decision**: `TiersMatrix.tsx` now shows a `★ LAST REQUEST →` header with the tier/provider/model of the most recent `request`-source decision, plus a `►` marker on the active row.
+- **Codex CLI / Claude CLI health checks were lies**: `codex --version` / `claude --version` pass without auth. Replaced with `bin/cli-health-probe.sh` which verifies binary + auth (OPENAI_API_KEY / ChatGPT OAuth via `~/.codex/auth.json` / `~/.claude/.credentials.json`). Both CLIs are correctly authenticated (verified: codex exec gpt-5.4 returns "pong" in 8s; Claude has OAuth credentials).
+- **Hardcoded absolute paths in source**: `src/agent-registry.ts` had `/root/.openclaw/workspace/gateswarm-moma-router/scripts/cli-health-probe.sh` (4 occurrences) — would break for any non-default install. Replaced with portable `"${GATESWARM_ROOT:-.}"/bin/cli-health-probe.sh <agent>`. The systemd unit now exports `GATESWARM_ROOT`; the script auto-resolves its own location for local dev. A new `bin/` directory is shipped alongside `scripts/`.
+- **Pi status bar showed `(moa)` instead of `(moma)`**: `defaultProvider` in `~/.pi/agent/settings.json` was `"moa"`. Renamed to `"moma"` (also in `models.json`). Pi must be restarted to pick up the new label.
+- **Ephemeral runtime state was tracked in git**: `data/consumption-history.json`, `data/provider-quota.json`, `data/quota-sync.json`, `data/model-matrix.json` were all tracked but contain operational state regenerated on every gateway start. Now gitignored + untracked via `git rm --cached`. The gateway regenerates them on first run.
+
+### Added
+- **`bin/cli-health-probe.sh`** — auth-aware health probe for codex-cli, claude-cli, pi-agent, hermes-agent. Auto-locates the router root via `$BASH_SOURCE`; honors `GATESWARM_ROOT` env override; falls back to PATH lookup.
+- **`scripts/cli-health-probe.sh`** — canonical source (the `bin/` copy is identical).
+- **`docs/OPS_GUIDE.md`** — 25KB operations guide covering updates, debugging, analysis, versioning, and emergency procedures.
+- **`docs/SECURITY_AUDIT.md`** — pre-release security audit documenting what was checked and what was fixed.
+- **`gateswarm ops-guide`** CLI command — prints the full ops guide via `GET /v05/intel/ops-guide`.
+- **`gateswarm health`** CLI command — 11-point health check (service, 4 HTTP providers, 5 CLI providers, last request decision).
+- **`gateswarm version`** CLI command — verifies all 7 version stamps are aligned across files.
+- **`GET /v05/intel/ops-guide`** endpoint — serves the ops guide over HTTP.
+- **`GET /v05/intel/last-decision`** endpoint — returns the most recent `request`-source decision (filtered; no health-check noise).
+- **`getRecentDecisions(limit, source?)`** — supports filtering by source for cleaner TUI consumption.
+
+### Changed
+- **`v04_config.json` version**: `v0.5.1-cli-providers` → `v0.5.6-routing-fix` (adds `_note` documenting the provider health situation).
+- **Tier primaries (all tiers)**:
+  - trivial: ollama/qwen2.5:0.5b (unchanged)
+  - light: zai/glm-4.7-flash (unchanged)
+  - **moderate**: zai/glm-5 (was bailian/MiniMax-M2.5)
+  - **heavy**: zai/glm-5.1 (was bailian/qwen3.5-plus)
+  - intensive: codex-cli/cx/gpt-5.4-codex (unchanged, verified working)
+  - extreme: codex-cli/cx/gpt-5.4-codex (unchanged, verified working)
+- **CLI TUI version**: 0.5.4 → 0.5.6 across all `cli/src/*` file headers
+- **`/usr/local/bin/gateswarm` wrapper**: v0.6.1 (lying) → v0.5.6
+- **Pi `~/.pi/agent/models.json`**: gateswarm model name "v0.6.0 Sieve" (lying) → "v0.5.6"
+- **Pi `~/.pi/agent/settings.json`**: `defaultProvider` `"moa"` → `"moma"`; `retry.provider.timeoutMs` 60000 → 240000 (codex-cli needs 100-150s)
+- **systemd unit Description**: v0.5.5 → v0.5.6
+
+### Known issues / user blockers
+- **Rotate Bailian API key**: `BAILIAN_KEY=*** expired (HTTP 401)`. Once rotated, set the new key in `.env` and restart the gateway. Until then, `bailian` is treated as unhealthy and zai is the moderate/heavy primary (works fine).
+- **OpenCodeGo quota resets in 14 days** (from 2026-06-20). After reset, restore opencodego models (qwen3.7-plus, qwen3.7-max, deepseek-v4-pro) as intensive/extreme fallbacks.
+- **`npm audit` not run in this release cycle** — recommend running before next bump.
+
 ## [0.5.6] - 2026-06-17
 
 ### Fixed

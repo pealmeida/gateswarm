@@ -1,5 +1,5 @@
 /**
- * GateSwarm v0.5.4 — Visual primitives
+ * GateSwarm v0.5.6 — Visual primitives
  * Bar renderer, color helpers, formatting
  */
 

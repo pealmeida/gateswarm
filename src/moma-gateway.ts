@@ -1061,10 +1061,10 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
   const modeDetection = detectIntentMode(promptText);
   const activeMode: IntentMode = modeOverride ?? modeDetection.mode;
 
-  // ─── v0.5.3: Token Consumption Intelligence Routing ──────
+  // ─── v0.5.7: Token Consumption Intelligence Routing (async with probing) ──────
   let decision: ConsumptionDecision;
   try {
-    decision = consumptionIntelligence.selectModel(effort, {
+    decision = await consumptionIntelligence.selectModel(effort, {
       estimatedPromptTokens: estimateTokens(messages),
       source: 'request',
     });
@@ -1400,7 +1400,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
     const retryTargets: RetryTarget[] = [initial];
 
     // Get intelligent fallbacks from consumption engine
-    const intelFallback = consumptionIntelligence.getFallback(effort, providerId, model);
+    const intelFallback = await consumptionIntelligence.getFallback(effort, providerId, model);
     if (intelFallback) {
       const ifb = buildTarget(intelFallback.provider, intelFallback.model);
       if (ifb) retryTargets.push(ifb);
@@ -1971,7 +1971,7 @@ async function init() {
           turboquant: 'v3.6',
           ensemble: 'enabled',
           feedback: 'enabled',
-          llmJudge: 'bailian/qwen3.5-plus',
+          llmJudge: getConfig().feedback_loop.llmJudgeModel,
           capabilities: {
             directRouting: true,
             cliProviders: true,
@@ -1992,11 +1992,33 @@ async function init() {
 
       if (url.pathname === '/v05/intel' && method === 'GET') {
         return jsonResponse(res, 200, {
-          version: '0.5.6',
+          version: '0.5.7',
           stats: consumptionIntelligence.getStats(),
-          recommendations: consumptionIntelligence.getTierRecommendations(),
-          recentDecisions: consumptionIntelligence.getRecentDecisions(10),
+          recommendations: await consumptionIntelligence.getTierRecommendations(),
+          recentDecisions: consumptionIntelligence.getRecentDecisions(20, 'request'),
         });
+      }
+
+      if (url.pathname === '/v05/intel/last-decision' && method === 'GET') {
+        const recent = consumptionIntelligence.getRecentDecisions(1, 'request');
+        if (recent.length === 0) {
+          return jsonResponse(res, 404, { error: 'no recent request decisions' });
+        }
+        return jsonResponse(res, 200, recent[0]);
+      }
+
+      if (url.pathname === '/v05/intel/ops-guide' && method === 'GET') {
+        const fs = await import('fs/promises');
+        const path = await import('path');
+        const guidePath = path.join(__dirname, '..', 'docs', 'OPS_GUIDE.md');
+        try {
+          const content = await fs.readFile(guidePath, 'utf-8');
+          res.writeHead(200, { 'Content-Type': 'text/markdown; charset=utf-8', 'Access-Control-Allow-Origin': '*' });
+          res.end(content);
+          return;
+        } catch (e: any) {
+          return jsonResponse(res, 404, { error: `ops guide not found: ${e.message}` });
+        }
       }
 
       if (url.pathname === '/v05/intel/models' && method === 'GET') {
@@ -2052,7 +2074,7 @@ async function init() {
         for (const tier of tiers) {
           try {
             const allModels = modelMatrix.getAvailableModels();
-            const decision = consumptionIntelligence.selectModel(tier, { source: 'balance-check' });
+            const decision = await consumptionIntelligence.selectModel(tier, { source: 'balance-check' });
             rankings[tier] = {
               current: `${decision.provider}/${decision.model}`,
               reason: decision.reason,

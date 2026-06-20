@@ -1,5 +1,5 @@
 /**
- * GateSwarm v0.5.4 — Main TUI App
+ * GateSwarm v0.5.6 — Main TUI App
  * Composes all panels in a 2-column responsive layout
  */
 

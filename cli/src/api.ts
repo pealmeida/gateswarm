@@ -1,5 +1,5 @@
 /**
- * GateSwarm v0.5.4 — HTTP API client
+ * GateSwarm v0.5.6 — HTTP API client
  * Fetches data from the running GateSwarm gateway's /v05/intel/* endpoints
  */
 

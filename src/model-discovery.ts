@@ -266,8 +266,8 @@ class ModelDiscoveryService {
     if (providerId === 'zai') return `${baseUrl}/models`;
     // OpenCode Go
     if (providerId === 'opencodego') return `${baseUrl}/models`;
-    // OpenRouter
-    if (providerId === 'openrouter') return `${baseUrl}/models`;
+    // OpenRouter — removed per user request
+    // if (providerId === 'openrouter') return `${baseUrl}/models`;
     // Bailian doesn't have a list endpoint
     if (providerId === 'bailian') return null;
     // Local ollama

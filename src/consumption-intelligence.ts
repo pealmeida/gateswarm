@@ -1,14 +1,20 @@
 /**
- * Token Consumption Intelligence v0.5.4
+ * Token Consumption Intelligence v0.5.7
  *
  * Decision engine that selects the optimal model/provider for
  * each routing tier based on:
+ *  - Static tier config (v04_config.json) as PRIMARY source
+ *  - Active provider health probing (not just cached scores)
  *  - Model availability and health (from Model Matrix)
  *  - Token consumption history and cost efficiency
  *  - Provider rate limits and latency
  *  - Complexity tier requirements
  *
- * Replaces the static tier config with dynamic, consumption-aware routing.
+ * v0.5.7: Static-first routing with active provider probing.
+ *   - Static tier config is PRIMARY; dynamic discovery is fallback.
+ *   - Providers are actively probed (lightweight /models check) before use.
+ *   - Quota-exhausted providers are excluded from dynamic candidates.
+ *   - Provider health scores factor real quota state, not just cached metadata.
  */
 
 import { modelMatrix, ModelEntry, EffortLevel, ProviderSummary } from './model-matrix.js';
@@ -101,43 +107,301 @@ class ConsumptionIntelligence {
   private decisions: ConsumptionDecision[] = [];
   private readonly maxDecisionHistory = 100;
 
+  // ─── v0.5.7: Active provider probing ──────────────────
+  // Track when each provider was last probed and whether it passed.
+  private providerProbes: Map<string, { probedAt: number; healthy: boolean; error?: string }> = new Map();
+  private readonly PROBE_TTL_MS = 60000; // Re-probe every 60s
+
+  /**
+   * Actively probe a provider's health by calling its /models endpoint.
+   * Returns true if the provider responds successfully.
+   */
+  private async probeProvider(providerId: string): Promise<{ healthy: boolean; error?: string }> {
+    const cached = this.providerProbes.get(providerId);
+    if (cached && (Date.now() - cached.probedAt) < this.PROBE_TTL_MS) {
+      return { healthy: cached.healthy, error: cached.error };
+    }
+
+    const providerConfig = agentRegistry.getProvider(providerId);
+    if (!providerConfig) {
+      const result = { healthy: false, error: 'no provider config' };
+      this.providerProbes.set(providerId, { probedAt: Date.now(), ...result });
+      return result;
+    }
+
+    // CLI providers: check if binary exists
+    if (providerConfig.type === 'cli-agent') {
+      const healthCheck = (providerConfig as any).cliConfig?.healthCheck;
+      if (healthCheck) {
+        try {
+          const { execSync } = await import('child_process');
+          execSync(healthCheck.command, { timeout: 5000 });
+          const result = { healthy: true };
+          this.providerProbes.set(providerId, { probedAt: Date.now(), ...result });
+          return result;
+        } catch (e: any) {
+          const result = { healthy: false, error: e.message };
+          this.providerProbes.set(providerId, { probedAt: Date.now(), ...result });
+          return result;
+        }
+      }
+      // No health check defined — assume healthy
+      const result = { healthy: true };
+      this.providerProbes.set(providerId, { probedAt: Date.now(), ...result });
+      return result;
+    }
+
+    // HTTP API providers: call /models endpoint first, then deep-probe with chat completion
+    const baseUrl = agentRegistry.getProviderBaseUrl(providerId);
+    const apiKey = agentRegistry.getProviderApiKey(providerId);
+    if (!baseUrl) {
+      const result = { healthy: false, error: 'no base URL' };
+      this.providerProbes.set(providerId, { probedAt: Date.now(), ...result });
+      return result;
+    }
+
+    try {
+      // Step 1: Quick /models check
+      const modelsUrl = baseUrl.replace(/\/+$/, '') + '/models';
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
+
+      const resp = await fetch(modelsUrl, {
+        method: 'GET',
+        headers,
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+
+      if (!resp.ok) {
+        const body = await resp.text().catch(() => '');
+        const isQuotaError = body.includes('UsageLimitError') ||
+          body.includes('usage limit') ||
+          body.includes('quota_exhausted') ||
+          body.includes('insufficient_quota') ||
+          resp.status === 429 || resp.status === 402;
+
+        const error = isQuotaError
+          ? `quota_exhausted (HTTP ${resp.status})`
+          : `HTTP ${resp.status}: ${body.slice(0, 100)}`;
+
+        const result = { healthy: false, error };
+        this.providerProbes.set(providerId, { probedAt: Date.now(), ...result });
+
+        if (isQuotaError) {
+          providerQuota.record429(providerId);
+          console.log(`🔴 [Intel Probe] ${providerId}: QUOTA EXHAUSTED — marking throttled`);
+        }
+
+        return result;
+      }
+
+      // Step 2: Deep probe — send a minimal chat completion to catch quota errors
+      // that /models doesn't reveal (e.g., OpenCode Go UsageLimitError, ZAI rate limits).
+      // Use a model from this provider's catalog to get accurate error responses.
+      const chatUrl = baseUrl.replace(/\/+$/, '') + '/chat/completions';
+      const deepController = new AbortController();
+      const deepTimeout = setTimeout(() => deepController.abort(), 8000);
+
+      // Pick a model known to exist on this provider
+      const providerModels = agentRegistry.getProviderModels(providerId);
+      const probeModel = providerModels?.[0] || 'deepseek-v4-pro';
+
+      try {
+        const deepResp = await fetch(chatUrl, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            model: probeModel,
+            messages: [{ role: 'user', content: 'hi' }],
+            max_tokens: 5,  // Request 5 tokens so empty response = real error, not max_tokens=1 artifact
+          }),
+          signal: deepController.signal,
+        });
+        clearTimeout(deepTimeout);
+
+        const deepBody = await deepResp.text().catch(() => '');
+
+        // Check for quota errors in BOTH non-200 status AND 200 body content
+        // ZAI returns 200 OK with error in body when rate-limited
+        const isQuotaError = deepBody.includes('UsageLimitError') ||
+          deepBody.includes('usage limit') ||
+          deepBody.includes('quota_exhausted') ||
+          deepBody.includes('insufficient_quota') ||
+          deepBody.includes('GoUsageLimitError') ||
+          deepBody.includes('Limit Exhausted') ||
+          deepBody.includes('Rate limit reached') ||
+          deepBody.includes('Weekly/Monthly Limit') ||
+          !deepResp.ok && (deepResp.status === 429 || deepResp.status === 402);
+
+        if (isQuotaError) {
+          const result = { healthy: false, error: `quota_exhausted: ${deepBody.slice(0, 120)}` };
+          this.providerProbes.set(providerId, { probedAt: Date.now(), ...result });
+          providerQuota.record429(providerId);
+          console.log(`🔴 [Intel Probe] ${providerId}: DEEP PROBE FAILED — quota exhausted`);
+          return result;
+        }
+
+        // Also check: if HTTP 200 but body contains error object with no choices
+        if (deepResp.ok) {
+          try {
+            const json = JSON.parse(deepBody);
+            if (json.error && !json.choices) {
+              const errMsg = json.error.message || json.error.code || JSON.stringify(json.error);
+              const isRateLimit = errMsg.includes('limit') || errMsg.includes('rate') || errMsg.includes('quota') || errMsg.includes('exhausted');
+              if (isRateLimit) {
+                const result = { healthy: false, error: `rate_limited: ${errMsg.slice(0, 120)}` };
+                this.providerProbes.set(providerId, { probedAt: Date.now(), ...result });
+                providerQuota.record429(providerId);
+                console.log(`🔴 [Intel Probe] ${providerId}: DEEP PROBE FAILED — rate limited (200 OK with error body)`);
+                return result;
+              }
+            }
+            // No choices + no content = likely error
+            if (!json.choices && !json.error) {
+              console.log(`🟡 [Intel Probe] ${providerId}: deep probe returned 200 but no choices — may be degraded`);
+            }
+          } catch { /* not JSON, ignore */ }
+        }
+        // Deep probe passed — provider is fully healthy
+      } catch (deepErr: any) {
+        // Deep probe network error — not necessarily unhealthy, /models passed
+        if (deepErr.name === 'AbortError') {
+          console.log(`🟡 [Intel Probe] ${providerId}: deep probe timed out — using /models result only`);
+        }
+      }
+      clearTimeout(deepTimeout);
+
+      const result = { healthy: true };
+      this.providerProbes.set(providerId, { probedAt: Date.now(), ...result });
+      return result;
+    } catch (err: any) {
+      const result = { healthy: false, error: err.message };
+      this.providerProbes.set(providerId, { probedAt: Date.now(), ...result });
+      return result;
+    }
+  }
+
+  /**
+   * Check if a provider is healthy based on probe + quota state.
+   * Returns false if: probe failed, throttled, or healthScore < 30.
+   * If no probe cache exists, assumes healthy (probe happens in selectModel).
+   */
+  private isProviderHealthy(providerId: string): boolean {
+    // Check probe cache first — negative probe = definitely unhealthy
+    const probe = this.providerProbes.get(providerId);
+    if (probe && !probe.healthy) return false;
+
+    // Check quota state
+    const pq = providerQuota.getQuota(providerId);
+    if (pq) {
+      if (pq.throttled && pq.throttledUntil > Date.now()) return false;
+      if (pq.healthScore < 30) return false;
+    }
+
+    // No negative probe, not throttled, health OK → assume healthy
+    return true;
+  }
+
   /**
    * Select the best model for a given complexity tier.
-   * Uses multi-factor scoring: capability match (40%) + cost efficiency (30%)
-   * + health/availability (20%) + latency (10%).
+   *
+   * v0.5.7: Static-first routing with active provider probing.
+   * 1. Check static tier config from v04_config.json — this is PRIMARY.
+   * 2. Actively probe the static model's provider.
+   * 3. If healthy → use static config (with dynamic alternatives as fallback).
+   * 4. If unhealthy → run dynamic discovery but exclude unhealthy providers.
+   * 5. Dynamic candidates are filtered by active probe results + quota health.
    */
-  selectModel(tier: EffortLevel, options?: {
+  async selectModel(tier: EffortLevel, options?: {
     preferProvider?: string;
     excludeProviders?: string[];
     estimatedPromptTokens?: number;
     source?: 'request' | 'health-check' | 'balance-check' | 'recovery-check';
-  }): ConsumptionDecision {
+  }): Promise<ConsumptionDecision> {
     const reqs = TIER_REQUIREMENTS[tier];
+    const staticCfg = getConfig().tier_models[tier];
+
+    // ── v0.5.7: Static config is PRIMARY ──────────────────
+    // Probe the static config's provider first. If healthy, use it.
+    // Skip static priority only for recovery-check (we're looking for alternatives).
+    if (staticCfg && options?.source !== 'recovery-check') {
+      const probe = await this.probeProvider(staticCfg.provider);
+      if (probe.healthy && this.isProviderHealthy(staticCfg.provider)) {
+        const decision: ConsumptionDecision = {
+          provider: staticCfg.provider,
+          model: staticCfg.model,
+          tier,
+          reason: 'provider_preferred',
+          estimatedTokens: options?.estimatedPromptTokens || 500,
+          estimatedCost: 0,
+          confidence: 0.90,
+          alternatives: (staticCfg.fallback_models || []).map(f => ({
+            provider: f.provider,
+            model: f.model,
+            reason: 'static_fallback',
+          })),
+          source: options?.source || 'request',
+          timestamp: Date.now(),
+        };
+        this.decisions.push(decision);
+        if (this.decisions.length > this.maxDecisionHistory) this.decisions.shift();
+        console.log(`🧠 [Intel] ${tier} → ${decision.provider}/${decision.model} (static_primary, conf=${decision.confidence.toFixed(2)})`);
+        return decision;
+      }
+      console.log(`🟡 [Intel] ${tier}: static provider ${staticCfg.provider} unhealthy (${probe.error || 'healthScore low'}) — falling back to dynamic`);
+    }
+
+    // ── Dynamic discovery (fallback) ──────────────────────
+    // v0.5.7: Before scoring dynamic candidates, probe all candidate providers
+    // that haven't been probed yet. This catches quota-exhausted providers
+    // that aren't in the static config (e.g., opencodego when bailian is static).
     const allModels = modelMatrix.getAvailableModels();
 
-    // Filter by tier capability
-    const candidates = allModels.filter(m => {
-      // Skip providers without API keys (unless explicitly preferred)
-      const providerConfig = agentRegistry.getProvider(m.provider);
-      if (!providerConfig) return false;
-      const isConfigured = agentRegistry.getProviderBaseUrl(m.provider) && agentRegistry.getProviderApiKey(m.provider);
-      if (!isConfigured && m.provider !== options?.preferProvider) {
-        // Allow ollama (local) and ollama-cloud even without key check
-        if (!['ollama', 'ollama-cloud'].includes(m.provider)) return false;
-      }
-      // ── Tier matching: use model-matrix tier classification ──
+    // Collect unique providers from tier-matching candidates
+    const candidateProviders = new Set<string>();
+    for (const m of allModels) {
       const tierIdx = this.tierRank(tier);
       const modelTierIdx = this.tierRank(m.recommendedTier);
+      if (modelTierIdx === tierIdx || modelTierIdx === tierIdx + 1 || modelTierIdx === tierIdx - 1) {
+        if (!(tierIdx <= 1 && modelTierIdx >= 3)) {
+          candidateProviders.add(m.provider);
+        }
+      }
+    }
 
-      // Accept models from target tier, one above, or one below (emergency fallback)
-      // v0.5.5: allow tierIdx-1 so we can use lower-tier models from different
-      // providers when all same-tier providers are rate-limited
+    // Probe unprobed candidate providers (skip already-known unhealthy ones)
+    const probeResults = new Map<string, boolean>();
+    for (const pid of candidateProviders) {
+      if (this.providerProbes.has(pid)) continue; // Already probed
+      if (pid === 'ollama') continue; // Local, always available
+      const probe = await this.probeProvider(pid);
+      probeResults.set(pid, probe.healthy);
+    }
+
+    // Filter by tier capability + active provider health
+    const excludeSet = new Set(options?.excludeProviders || []);
+    const candidates = allModels.filter(m => {
+      // Skip providers without base URL (can't route to them)
+      const providerConfig = agentRegistry.getProvider(m.provider);
+      if (!providerConfig) return false;
+      const baseUrl = agentRegistry.getProviderBaseUrl(m.provider);
+      if (!baseUrl && !['ollama', 'ollama-cloud'].includes(m.provider)) return false;
+      // Note: API key can be empty for free-tier providers (openrouter free models)
+
+      // ── v0.5.7: Exclude unhealthy providers ──
+      if (excludeSet.has(m.provider)) return false;
+      if (!this.isProviderHealthy(m.provider)) return false;
+
+      // ── Tier matching ──
+      const tierIdx = this.tierRank(tier);
+      const modelTierIdx = this.tierRank(m.recommendedTier);
       if (modelTierIdx !== tierIdx && modelTierIdx !== tierIdx + 1 && modelTierIdx !== tierIdx - 1) return false;
-
-      // Reject models that are WAY too large for trivial/light (wasteful)
       if (tierIdx <= 1 && modelTierIdx >= 3) return false;
-      // Filter excluded providers
-      if (options?.excludeProviders?.includes(m.provider)) return false;
+
       // Check capability requirements
       if (m.contextWindow < reqs.minContextWindow) return false;
       if (m.maxTokens < reqs.minMaxTokens) return false;
@@ -149,10 +413,9 @@ class ConsumptionIntelligence {
     });
 
     if (candidates.length === 0) {
-      // Fallback: use static config from v04_config.json
-      const staticCfg = getConfig().tier_models[tier];
+      // Ultimate fallback: use static config even if provider is unhealthy
       if (staticCfg) {
-        console.log(`🧠 [Intel] ${tier}: no candidates — falling back to static config: ${staticCfg.provider}/${staticCfg.model}`);
+        console.log(`🧠 [Intel] ${tier}: no healthy candidates — using static config anyway: ${staticCfg.provider}/${staticCfg.model}`);
         return {
           provider: staticCfg.provider,
           model: staticCfg.model,
@@ -160,7 +423,7 @@ class ConsumptionIntelligence {
           reason: 'static_fallback',
           estimatedTokens: options?.estimatedPromptTokens || 500,
           estimatedCost: 0,
-          confidence: 0.3,
+          confidence: 0.2,
           alternatives: [],
           source: options?.source || 'request',
           timestamp: Date.now(),
@@ -198,11 +461,8 @@ class ConsumptionIntelligence {
       timestamp: Date.now(),
     };
 
-    // Record decision
     this.decisions.push(decision);
-    if (this.decisions.length > this.maxDecisionHistory) {
-      this.decisions.shift();
-    }
+    if (this.decisions.length > this.maxDecisionHistory) this.decisions.shift();
 
     console.log(`🧠 [Intel] ${tier} → ${decision.provider}/${decision.model} (${decision.reason}, conf=${decision.confidence.toFixed(2)})`);
     return decision;
@@ -220,19 +480,19 @@ class ConsumptionIntelligence {
   /**
    * Get the best alternative when a model fails.
    */
-  getFallback(tier: EffortLevel, failedProvider: string, failedModel: string, source: 'request' | 'health-check' | 'balance-check' | 'recovery-check' = 'request'): ConsumptionDecision | null {
+  async getFallback(tier: EffortLevel, failedProvider: string, failedModel: string, source: 'request' | 'health-check' | 'balance-check' | 'recovery-check' = 'request'): Promise<ConsumptionDecision | null> {
     const excludeProviders = new Set([failedProvider]);
 
     // Try same tier excluding failed provider
     try {
-      return this.selectModel(tier, { excludeProviders: [...excludeProviders], source });
+      return await this.selectModel(tier, { excludeProviders: [...excludeProviders], source });
     } catch {
       // Fall back to next tier up
       const tiers: EffortLevel[] = ['trivial', 'light', 'moderate', 'heavy', 'intensive', 'extreme'];
       const idx = tiers.indexOf(tier);
       for (let i = idx + 1; i < tiers.length; i++) {
         try {
-          return this.selectModel(tiers[i], { excludeProviders: [...excludeProviders], source });
+          return await this.selectModel(tiers[i], { excludeProviders: [...excludeProviders], source });
         } catch { /* continue */ }
       }
     }
@@ -327,6 +587,25 @@ class ConsumptionIntelligence {
     // Provider preference bonus (0–5)
     if (preferProvider && m.provider === preferProvider) score += 5;
 
+    // ── v0.5.7: Provider reputation score (0–10) ──
+    // Known reliable providers get bonus over experimental/random ones.
+    // This prevents ollama-cloud experimental models from outscoring
+    // openrouter's known-good models when all static providers are down.
+    const PROVIDER_REPUTATION: Record<string, number> = {
+      // 'openrouter': 10,   // Removed per user request
+      'bailian':    8,    // Alibaba official, but currently key-expired
+      'zai':        7,    // Z.AI official GLM models
+      'opencodego': 6,    // OpenCode multi-model gateway
+      'claude-cli': 9,    // Anthropic official CLI
+      'codex-cli':  9,    // OpenAI official CLI
+      'ollama-cloud': 3,  // Hosted but models are experimental/unvetted
+      'ollama':     2,    // Local only, tiny models
+      'pi-agent':   5,    // Local Pi agent
+      'hermes-agent': 5,  // Local Hermes agent
+      'openclaw-agent': 5,
+    };
+    score += PROVIDER_REPUTATION[m.provider] || 3;
+
     // Track record bonus: models with more successful requests score higher (up to +5)
     if (m.totalRequests > 0) {
       const successRate = 1 - (m.errorCount / m.totalRequests);
@@ -363,17 +642,19 @@ class ConsumptionIntelligence {
     };
   }
 
-  getRecentDecisions(limit = 20): ConsumptionDecision[] {
-    return this.decisions.slice(-limit).reverse();
+  getRecentDecisions(limit = 20, source?: 'request' | 'health-check' | 'balance-check' | 'recovery-check'): ConsumptionDecision[] {
+    const all = this.decisions.slice().reverse();
+    if (!source) return all.slice(0, limit);
+    return all.filter(d => (d.source || 'request') === source).slice(0, limit);
   }
 
-  getTierRecommendations(): Record<EffortLevel, ConsumptionDecision> {
+  async getTierRecommendations(): Promise<Record<EffortLevel, ConsumptionDecision>> {
     const recs: Partial<Record<EffortLevel, ConsumptionDecision>> = {};
     const tiers: EffortLevel[] = ['trivial', 'light', 'moderate', 'heavy', 'intensive', 'extreme'];
     for (const tier of tiers) {
       try {
         // v0.5.6: mark as health-check so it doesn't pollute the ActivityPanel
-        recs[tier] = this.selectModel(tier, { source: 'health-check' });
+        recs[tier] = await this.selectModel(tier, { source: 'health-check' });
       } catch { /* skip */ }
     }
     return recs as Record<EffortLevel, ConsumptionDecision>;
@@ -432,7 +713,7 @@ class ConsumptionIntelligence {
     // Find the best available model for this tier (excluding the failed one)
     let newDecision: ConsumptionDecision;
     try {
-      newDecision = this.selectModel(tier, {
+      newDecision = await this.selectModel(tier, {
         excludeProviders: [failedProvider],
         estimatedPromptTokens: 500,
         source: 'recovery-check',
@@ -443,7 +724,7 @@ class ConsumptionIntelligence {
       const idx = tiers.indexOf(tier);
       for (let i = idx - 1; i >= 0; i--) {
         try {
-          newDecision = this.selectModel(tiers[i], { estimatedPromptTokens: 500, source: 'recovery-check' });
+          newDecision = await this.selectModel(tiers[i], { estimatedPromptTokens: 500, source: 'recovery-check' });
           console.log(`🔄 [Intel] ${tier}: no candidates — using ${tiers[i]}-tier model: ${newDecision.provider}/${newDecision.model}`);
           break;
         } catch { continue; }

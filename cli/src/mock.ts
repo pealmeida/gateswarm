@@ -1,5 +1,5 @@
 /**
- * GateSwarm v0.5.4 — Mock data for testing without a running server
+ * GateSwarm v0.5.6 — Mock data for testing without a running server
  * Mirrors the shape of real /v05/intel/* responses
  */
 

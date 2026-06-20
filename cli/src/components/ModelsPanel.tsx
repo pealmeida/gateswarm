@@ -1,5 +1,5 @@
 /**
- * GateSwarm v0.5.4 — Models panel
+ * GateSwarm v0.5.6 — Models panel
  * Shows top models by recent usage
  */
 
