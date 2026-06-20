@@ -70,3 +70,9 @@ data/consumption-history.json
 data/provider-quota.json
 data/quota-sync.json
 data/model-matrix.json
+
+# Build artifacts
+dist/
+
+# Tee output (used by RTK output filter, v0.6.x backport)
+tee/
