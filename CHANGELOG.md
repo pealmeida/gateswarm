@@ -5,6 +5,89 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.4] - 2026-06-20 (release/v0.5.x branch)
+
+Plan/Act modes + Effort Override. First feature release on the
+release/v0.5.x cleanup branch. Backported from the v0.6.x
+development line (kept local as v0.6.x-guide).
+
+### Added
+- **Plan/Act auto-detection** — `detectIntentMode()` scores prompts
+  based on keyword patterns. Plan-mode keywords (draft, outline,
+  brainstorm, sketch, explore, what if, options, approach, consider,
+  tradeoff, strategy, roadmap, plan, design, compare, pros and cons)
+  vs act-mode keywords (implement, build, code, fix, deploy, run,
+  test, apply, merge, write the code, create the file). Auto-defaults
+  to act when plan and act scores are tied.
+- **Per-tier `plan_model` config** in `v04_config.json` for moderate,
+  heavy, intensive, extreme. Each tier specifies `plan_model`,
+  `plan_provider`, `plan_max_tokens`, `plan_enable_thinking`. When
+  the request mode is `plan`, the gateway uses the plan_model instead
+  of the primary. This saves tokens on exploration prompts while
+  preserving full capability for execution.
+- **`effort_override` request field** + **`X-Effort-Override` header**.
+  Bypasses ensemble scoring; jumps straight to the named tier
+  (`trivial`/`light`/`moderate`/`heavy`/`intensive`/`extreme`).
+  Invalid values return HTTP 400. The greeting fast-path is skipped
+  when an override is set.
+- **`POST /v06/mode/detect`** — test mode detection on any prompt.
+  Returns `{ mode, confidence, planScore, actScore }`.
+- **`POST /v06/resolve`** — given a (tier, mode), returns the model
+  that would be dispatched. Useful for debugging and dashboards.
+- **CLI commands**: `gateswarm resolve <tier> [mode]`,
+  `gateswarm effort-override <tier> <prompt>`.
+
+### Verified
+- 'draft a CRDT system' + `mode: plan` → claude-sonnet-4-6 (intensive plan)
+- 'implement a CRDT system' + `mode: act` → glm-5.2 (moderate primary)
+- 'hi' (no mode) → auto-detect uses act → glm-5.2
+- 'hi' + `effort_override: intensive` → codex-cli/gpt-5.4 (intensive primary)
+
+## [0.5.3] - 2026-06-20 (release/v0.5.x branch)
+
+Foundational fixes. Ports two surviving-good-ideas from the
+abandoned v0.5.3 side branch (50b4743, on
+origin/claude/bold-shannon-izzjyp). The other 9 ideas in 50b4743
+were independently re-implemented during the v0.5.5/v0.5.6 work;
+only these two gaps remained.
+
+### Fixed
+- **Broken `dotenv` import removed** — `import * as dotenv from
+  'dotenv'` was at the top of `moma-gateway.ts`, but `dotenv` was
+  listed in `package.json` as a dependency yet never installed. The
+  systemd unit already sources `.env` via `set -a; source`, so the
+  import was redundant. Without systemd (e.g. `npm start` on a fresh
+  clone), the gateway would fail with `Cannot find module 'dotenv'`.
+  Removed the import and the dep from `package.json`.
+- **Debounced `agent-registry.save()`** — was called on every
+  `recordUsage()`, which fired per-request. With concurrent traffic
+  this caused 2 full-file writes per request. `scheduleSave()` now
+  coalesces all `save()` calls within a 1-second window into a single
+  disk write, while keeping the in-memory state in real time.
+  Graceful shutdown via SIGINT/SIGTERM triggers `flushPending()` so
+  the last burst is not lost on restart.
+
+### Added
+- `tests/agent-registry-debounce.test.ts` — public-surface regression
+  test (verifies `flushPending` exists, idempotent). Full integration
+  testing against the running service.
+
+### Verified
+- 10 parallel requests → 0 immediate writes → 1 write after 1s debounce window.
+- `npm start` (without systemd) now works without `dotenv` installed.
+
+### Note on the abandoned v0.5.3
+The original v0.5.3 (commit 50b4743 on `origin/claude/bold-shannon-izzjyp`)
+was authored by Claude <noreply@anthropic.com> on 2026-06-13 and
+claimed to fix context fidelity, real cost caps, and revive the
+learning loop. It was never merged because it predated the v0.5.x
+architecture rewrite. Of its 11 documented fixes, 9 were
+independently re-implemented in the v0.5.5/v0.5.6 work; only the
+2 fixed here (dotenv, debounce) remained as gaps.
+
+## [0.5.6-routing-fix] - 2026-06-20
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
 ## [0.5.6-routing-fix] - 2026-06-20
 
 ### Fixed
