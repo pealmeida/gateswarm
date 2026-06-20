@@ -80,11 +80,15 @@
       ]
     },
     "light": {
-      "model": "glm-4.7-flash",
-      "provider": "zai",
+      "model": "minimax-m2.7",
+      "provider": "ollama-cloud",
       "max_tokens": 512,
       "enable_thinking": false,
       "fallback_models": [
+        {
+          "model": "minimax-m2.7",
+          "provider": "ollama-cloud"
+        },
         {
           "model": "glm-4.7",
           "provider": "zai"
@@ -92,10 +96,6 @@
         {
           "model": "glm-4.5-air",
           "provider": "zai"
-        },
-        {
-          "model": "minimax-m2.7",
-          "provider": "ollama-cloud"
         }
       ]
     },
