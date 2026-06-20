@@ -915,6 +915,34 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
     if (hdr === 'plan' || hdr === 'act') modeOverride = hdr as IntentMode;
   }
 
+// Effort override: body.effort_override or X-Effort-Override header.
+// v0.5.7: bypass ensemble scoring; skip straight to the named tier's primary model.
+// Useful when the caller knows the request's complexity and wants to skip scoring.
+  const VALID_EFFORTS = ['trivial', 'light', 'moderate', 'heavy', 'intensive', 'extreme'] as const;
+  type EffortLevel2 = typeof VALID_EFFORTS[number];
+  let effortOverride: EffortLevel2 | null = null;
+  if (typeof body.effort_override === 'string') {
+    const e = body.effort_override.trim().toLowerCase();
+    if ((VALID_EFFORTS as readonly string[]).includes(e)) {
+      effortOverride = e as EffortLevel2;
+    } else {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        error: { message: `effort_override must be one of: ${VALID_EFFORTS.join(', ')}`, type: 'bad_request' }
+      }));
+      return;
+    }
+  }
+  if (!effortOverride && req.headers['x-effort-override']) {
+    const hdr = (req.headers['x-effort-override'] as string).trim().toLowerCase();
+    if ((VALID_EFFORTS as readonly string[]).includes(hdr)) {
+      effortOverride = hdr as EffortLevel2;
+    }
+  }
+  if (effortOverride) {
+    console.log(`🎯 [${agent.name}] Effort override: ${effortOverride} (bypassing ensemble scoring)`);
+  }
+
 // ─── v0.5.1: Direct Routing Bypass ──────────────────────────
   // Users can skip complexity scoring by specifying provider+model directly.
   // Three methods supported (in priority order):
@@ -931,8 +959,10 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
   // skip the entire classification cascade and RAG injection — just route
   // straight to the local trivial model. Saves 50-200ms of classification
   // + 1-3s of context processing.
+  // v0.5.7: If effort_override is set, skip the greeting fast-path so the
+  // caller's chosen tier is honored.
   const GREETING_RE = /^\s*(hi|hello|hey|yo|sup|good\s+(morning|afternoon|evening)|thanks?|thank\s+you|ok(?:ay)?|bye|cya|gm|gn)\s*[.!]?\s*$/i;
-  if (promptText && GREETING_RE.test(promptText) && promptText.length < 30) {
+  if (!effortOverride && promptText && GREETING_RE.test(promptText) && promptText.length < 30) {
     const trivialCfg = getConfig().tier_models.trivial;
     // v0.5.5: Check provider health before fast-path routing.
     // If the trivial provider is throttled/rate-limited, fall through to
@@ -1051,6 +1081,12 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
   const v04Score = await scoreIntentV04(promptText);
   let score = v04Score.value;
   let effort: EffortLevel = v04Score.tier ?? 'moderate';
+
+  // v0.5.7: effort_override bypasses ensemble scoring; jump straight to the named tier.
+  if (effortOverride) {
+    score = ({ trivial: 0.05, light: 0.15, moderate: 0.28, heavy: 0.38, intensive: 0.45, extreme: 0.55 } as Record<string, number>)[effortOverride];
+    effort = effortOverride as EffortLevel;
+  }
 
   // ─── v0.4.4: Context Continuity Anchor ─────────────────────
   // Extract session ID from request body or generate from agent+prompt hash
