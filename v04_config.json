@@ -60,11 +60,15 @@
   },
   "tier_models": {
     "trivial": {
-      "model": "qwen2.5:0.5b",
+      "model": "qwen2.5:1.5b",
       "provider": "ollama",
       "max_tokens": 256,
       "enable_thinking": false,
       "fallback_models": [
+        {
+          "model": "qwen2.5:0.5b",
+          "provider": "ollama"
+        },
         {
           "model": "glm-4.7-flash",
           "provider": "zai"
