@@ -2068,6 +2068,31 @@ async function init() {
         return jsonResponse(res, 200, result);
       }
 
+      // ─── v0.6: Plan/Act Routing Resolution ───────────────
+      // POST /v06/resolve — Show what model would be used for a given (tier, mode)
+      if (url.pathname === '/v06/resolve' && method === 'POST') {
+        const body = await parseBody(req);
+        const tier = body.tier as EffortLevel;
+        const mode = (body.mode || 'auto') as IntentMode;
+        if (!tier || !['trivial','light','moderate','heavy','intensive','extreme'].includes(tier)) {
+          return jsonResponse(res, 400, { error: { message: 'tier must be one of: trivial, light, moderate, heavy, intensive, extreme', type: 'bad_request' } });
+        }
+        const resolved = getTierModelForMode(tier, mode);
+        if (!resolved) {
+          return jsonResponse(res, 404, { error: { message: `no model configured for tier=${tier}`, type: 'not_found' } });
+        }
+        return jsonResponse(res, 200, {
+          tier,
+          mode,
+          resolved: {
+            model: resolved.model,
+            provider: resolved.provider,
+            max_tokens: resolved.max_tokens,
+            enable_thinking: resolved.enable_thinking,
+          },
+        });
+      }
+
       if (url.pathname === '/v05/intel/models' && method === 'GET') {
         const models = modelMatrix.getAllModels();
         return jsonResponse(res, 200, {
