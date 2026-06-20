@@ -162,6 +162,8 @@ Plan/Act Mode Commands (v0.5.2):
                                               Fields: plan_model, plan_provider,
                                                       plan_max_tokens, plan_enable_thinking
   mode-detect <prompt text>                 Detect intent mode (plan/act/auto) from prompt text
+  effort-override <tier> <prompt text>      Force a specific tier, bypassing ensemble scoring (v0.5.7)
+  resolve <tier> [mode]                     Show what model would be used for tier+mode (v0.5.7)
 
 Consumption Intelligence Commands (v0.5.6):
   intel                                     Show v0.5.6 intel: tier recommendations, stats, providers
@@ -483,6 +485,32 @@ async function cmdModeDetect(promptText: string) {
   console.log(`Mode: ${result.mode}, Confidence: ${pct}%, Plan score: ${result.planScore}, Act score: ${result.actScore}`);
 }
 
+// ─── v0.5.7 Effort Override + Mode Resolve Commands ──────────
+
+async function cmdEffortOverride(tier: string, prompt: string) {
+  const validTiers = ['trivial', 'light', 'moderate', 'heavy', 'intensive', 'extreme'];
+  if (!validTiers.includes(tier)) {
+    console.error(`❌ tier must be one of: ${validTiers.join(', ')}`);
+    process.exit(1);
+  }
+  const result = await gatewayFetch('/v1/chat/completions', 'POST', {
+    model: 'gateswarm',
+    messages: [{ role: 'user', content: prompt }],
+    effort_override: tier,
+    stream: false,
+    max_tokens: 50,
+  });
+  console.log(`🎯 Forced tier '${tier}' → ${result.model}`);
+  console.log(`   Response: ${(result.choices?.[0]?.message?.content || '').slice(0, 100)}...`);
+}
+
+async function cmdResolve(tier: string, mode: string = 'auto') {
+  const result = await gatewayFetch('/v06/resolve', 'POST', { tier, mode });
+  console.log(`\n🎯 Tier=${result.tier} Mode=${result.mode}`);
+  console.log(`   → ${result.resolved.provider}/${result.resolved.model}`);
+  console.log(`   max_tokens=${result.resolved.max_tokens}  thinking=${result.resolved.enable_thinking}\n`);
+}
+
 // ─── v0.5.6 Consumption Intelligence Commands ────────────────
 
 async function cmdIntel() {
@@ -722,6 +750,20 @@ async function main() {
         process.exit(1);
       }
       await cmdModeDetect(args.slice(1).join(' '));
+      break;
+    case 'effort-override':
+      if (args.length < 3) {
+        console.error('Usage: gateswarm effort-override <tier> <prompt text>');
+        process.exit(1);
+      }
+      await cmdEffortOverride(args[1], args.slice(2).join(' '));
+      break;
+    case 'resolve':
+      if (args.length < 2) {
+        console.error('Usage: gateswarm resolve <tier> [mode]');
+        process.exit(1);
+      }
+      await cmdResolve(args[1], args[2] || 'auto');
       break;
 
     // ─── v0.5.6 Consumption Intelligence Commands ─────────
