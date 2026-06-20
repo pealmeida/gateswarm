@@ -2,9 +2,9 @@
 import * as dotenv from 'dotenv';
 dotenv.config({ path: new URL('../.env', import.meta.url).pathname });
 /**
- * GateSwarm MoMA Router v0.5.6 — Multi-Agent API Gateway
+ * GateSwarm MoMA Router v0.5.4 — Multi-Agent API Gateway
  *
- * v0.5.6: Routing Transparency
+ * v0.5.4: Routing Transparency
  *   - Unify scoreToEffort (canonical, config-driven)
  *   - ConsumptionDecision.source field — distinguish real requests from
  *     health/balance/recovery checks
@@ -1097,7 +1097,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
   const modeDetection = detectIntentMode(promptText);
   const activeMode: IntentMode = modeOverride ?? modeDetection.mode;
 
-  // ─── v0.5.6: Token Consumption Intelligence Routing (async with probing) ──────
+  // ─── v0.5.4: Token Consumption Intelligence Routing (async with probing) ──────
   let decision: ConsumptionDecision;
   try {
     decision = await consumptionIntelligence.selectModel(effort, {
@@ -1695,7 +1695,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
 
       res.setHeader('X-Mode', activeMode);
       res.setHeader('X-Mode-Confidence', modeDetection.confidence.toFixed(2));
-      // v0.5.6: debug headers so operators can verify the actual classification
+      // v0.5.4: debug headers so operators can verify the actual classification
       // and routing decision without tailing server logs.
       res.setHeader('X-Tier', effort);
       res.setHeader('X-Score', score.toFixed(4));
@@ -1972,7 +1972,7 @@ async function init() {
   console.log('🔄 [Intel] Tier recovery check: every 5min');
 
   const agents = agentRegistry.getAgents();
-  console.log(`🚀 GateSwarm MoMA Router v0.5.6 (Routing Transparency) starting on :${PORT}`);
+  console.log(`🚀 GateSwarm MoMA Router v0.5.4 (Routing Transparency) starting on :${PORT}`);
   console.log(`📊 Providers: ${agentRegistry.getProviders().map(p => p.id).join(', ')}`);
   console.log(`🤖 Registered agents: ${agents.map(a => a.name).join(', ')}`);
 
@@ -2003,7 +2003,7 @@ async function init() {
         const agents = agentRegistry.getAgents();
         return jsonResponse(res, 200, {
           status: 'healthy',
-          router: 'GateSwarm MoMA Router v0.5.6 (Routing Transparency)',
+          router: 'GateSwarm MoMA Router v0.5.4 (Routing Transparency)',
           turboquant: 'v3.6',
           ensemble: 'enabled',
           feedback: 'enabled',
@@ -2560,7 +2560,7 @@ async function init() {
   });
 
   server.listen(PORT, () => {
-    console.log(`✅ GateSwarm MoMA Router v0.5.6 (Routing Transparency) listening on http://localhost:${PORT}`);
+    console.log(`✅ GateSwarm MoMA Router v0.5.4 (Routing Transparency) listening on http://localhost:${PORT}`);
     console.log(`📡 Endpoint: http://localhost:${PORT}/v1/chat/completions`);
     console.log(`📊 Metrics: http://localhost:${PORT}/metrics`);
     console.log(`🤖 Agents: http://localhost:${PORT}/v1/agents`);

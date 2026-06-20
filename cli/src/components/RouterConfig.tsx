@@ -1,5 +1,5 @@
 /**
- * GateSwarm v0.5.6 — Router config panel
+ * GateSwarm v0.5.4 — Router config panel
  * Shows current configuration: static fallback, intel health, discovery, etc.
  */
 
@@ -34,7 +34,7 @@ export function RouterConfig({ intel, consumption, height = 14 }: Props) {
         <Text dimColor>─ runtime state ─</Text>
       </Box>
       <Box>
-        <Text>  v0.5.6 • token-consumption-intel • 408 models • 10 providers (live counts via /v05/intel)</Text>
+        <Text>  v0.5.4 • token-consumption-intel • 408 models • 10 providers (live counts via /v05/intel)</Text>
       </Box>
       <Box>
         <Text dimColor>  Discovery: </Text>

@@ -1,6 +1,6 @@
 {
   "name": "gateswarm-router",
-  "version": "0.5.6",
+  "version": "0.5.4",
   "description": "GateSwarm MoMA Gateway v0.5.2 — Plan/Act Routing + CLI Providers.",
   "type": "module",
   "main": "dist/moma-gateway.js",
