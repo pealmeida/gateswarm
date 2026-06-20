@@ -319,6 +319,12 @@ class ProviderQuotaManager {
     if (!quota) return;
     quota.consecutive429s = 0;
     quota.throttled = false;
+    // v0.5.6 routing-fix: a successful request proves the provider is healthy.
+    // Decay accumulated rateLimitHits (half-life ~3 successes) instead of
+    // leaving them as a permanent penalty that tanks the health score.
+    if (quota.rateLimitHits > 0) {
+      quota.rateLimitHits = Math.max(0, quota.rateLimitHits - 1);
+    }
     this.updateHealthScore(provider);
   }
 

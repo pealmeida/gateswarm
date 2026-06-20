@@ -1,7 +1,7 @@
 {
   "name": "gateswarm-bar",
-  "version": "0.5.4",
-  "description": "GateSwarm v0.5.4 — TUI for monitoring providers, models, tiers, and router config",
+  "version": "0.5.6",
+  "description": "GateSwarm v0.5.6 — TUI for monitoring providers, models, tiers, and router config",
   "type": "module",
   "bin": {
     "gateswarm-bar": "./dist/cli.js"

@@ -1,5 +1,5 @@
 /**
- * GateSwarm v0.5.4 — Tiers matrix panel
+ * GateSwarm v0.5.6 — Tiers matrix panel
  * Shows the 6-tier routing recommendations and candidates
  */
 
@@ -37,12 +37,31 @@ export function TiersMatrix({ intel, consumption, height = 14 }: Props) {
   ];
   const td = intel.stats.tierDistribution;
 
+  // v0.5.6 routing-fix: Highlight the tier used by the most recent REQUEST
+  // decision (filter out health-check / balance-check / recovery-check noise
+  // so the user sees the actual model that handled their last prompt).
+  const lastRequest = (intel.recentDecisions || []).find(
+    (d) => d.source === 'request'
+  );
+  const activeTier = lastRequest?.tier;
+
   return (
     <Box borderStyle="round" borderColor="magenta" paddingX={1} flexDirection="column" height={height}>
       <Box>
         <Text color="magenta" bold>┌─ TIERS MATRIX </Text>
         <Text dimColor>─ 6-tier dynamic routing ─</Text>
       </Box>
+      {activeTier && (
+        <Box>
+          <Text color="cyan" bold>★ LAST REQUEST → </Text>
+          <Text color={TIER_COLORS[activeTier] || 'white'} bold>{activeTier.padEnd(10)}</Text>
+          <Text dimColor> | </Text>
+          <Text bold>{(lastRequest?.provider || '?').padEnd(13)}</Text>
+          <Text>/{lastRequest?.model || '?'}</Text>
+          <Text dimColor>  conf=</Text>
+          <Text>{((lastRequest?.confidence || 0) * 100).toFixed(0)}%</Text>
+        </Box>
+      )}
       {tiers.map((tier) => {
         const rec = intel.recommendations[tier];
         if (!rec) return null;
@@ -51,13 +70,14 @@ export function TiersMatrix({ intel, consumption, height = 14 }: Props) {
         const confColor = rec.confidence >= 0.8 ? 'green' : rec.confidence >= 0.5 ? 'yellow' : 'red';
         const reasonColor = rec.reason === 'cheapest_available' ? 'green' :
           rec.reason === 'static_fallback' ? 'yellow' : 'cyan';
+        const isActive = tier === activeTier;
         return (
           <Box key={tier}>
-            <Text>  </Text>
-            <Text color={TIER_COLORS[tier]} bold>{TIER_EMOJI[tier]} {tier.padEnd(10)}</Text>
+            <Text>{isActive ? '►' : ' '} </Text>
+            <Text color={TIER_COLORS[tier]} bold={isActive}>{TIER_EMOJI[tier]} {tier.padEnd(10)}</Text>
             <Text dimColor>→ </Text>
-            <Text bold>{rec.provider.padEnd(13)}</Text>
-            <Text>/{rec.model.padEnd(28)}</Text>
+            <Text bold={isActive}>{rec.provider.padEnd(13)}</Text>
+            <Text dimColor={!isActive}>/{rec.model.padEnd(28)}</Text>
             <Text dimColor> conf=</Text>
             <Text color={confColor}>{conf}%</Text>
             <Text dimColor>  </Text>

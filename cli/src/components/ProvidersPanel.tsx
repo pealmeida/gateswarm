@@ -1,8 +1,8 @@
 /**
- * GateSwarm v0.5.4 — Providers panel
+ * GateSwarm v0.5.6 — Providers panel
  * Shows each provider with 5h/weekly/monthly quota bars
  *
- * v0.5.4: When synced quota data is available (from real provider dashboards),
+ * v0.5.6: When synced quota data is available (from real provider dashboards),
  * shows real percentages with [synced] marker. Falls back to internal tracking.
  */
 
