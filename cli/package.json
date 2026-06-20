@@ -1,6 +1,6 @@
 {
   "name": "gateswarm-bar",
-  "version": "0.5.6",
+  "version": "0.5.4",
   "description": "GateSwarm v0.5.6 — TUI for monitoring providers, models, tiers, and router config",
   "type": "module",
   "bin": {
