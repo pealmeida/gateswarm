@@ -2,20 +2,20 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Node.js 20+](https://img.shields.io/badge/node-20+-brightgreen.svg)](https://nodejs.org/)
-[![Version](https://img.shields.io/badge/version-0.5.4-blue.svg)](https://github.com/pealmeida/gateswarm-router)
+[![Version](https://img.shields.io/badge/version-0.5.6-blue.svg)](https://github.com/pealmeida/gateswarm-router)
 [![Latest release](https://img.shields.io/github/v/release/pealmeida/gateswarm-router?sort=semver)](https://github.com/pealmeida/gateswarm-router/releases)
 
 **Self-optimizing LLM routing gateway with health-aware tier selection, Plan/Act dual-model routing, and effort overrides.** Scores every prompt via a 25-feature ensemble, picks the cheapest capable model per intent mode, and learns from every interaction.
 
-> **Latest stable:** [v0.5.4](https://github.com/pealmeida/gateswarm-router/releases/tag/v0.5.4) (Plan/Act + Effort Override)
-> **Previously shipped:** [v0.5.3](https://github.com/pealmeida/gateswarm-router/releases/tag/v0.5.3) (Foundational fixes: dotenv + debounced writes) · [v0.5.6](https://github.com/pealmeida/gateswarm-router/releases/tag/v0.5.6) (Routing Transparency + Quota-Aware Routing + OSS Hygiene)
-> **Releases on GitHub:** v0.4.4, v0.5.2, v0.5.3, v0.5.4, v0.5.6
+> **Latest stable:** [v0.5.6](https://github.com/pealmeida/gateswarm-router/releases/tag/v0.5.6) (Plan/Act + Effort Override)
+> **Previously shipped:** [v0.5.5](https://github.com/pealmeida/gateswarm-router/releases/tag/v0.5.5) (Routing Transparency + Quota-Aware Routing + OSS Hygiene) · [v0.5.3](https://github.com/pealmeida/gateswarm-router/releases/tag/v0.5.3) (Foundational fixes: dotenv + debounced writes)
+> **Releases on GitHub:** v0.4.4, v0.5.2, v0.5.3, v0.5.5, v0.5.6
 
 ---
 
 ## What's New
 
-### v0.5.4 — Plan/Act + Effort Override (current stable)
+### v0.5.6 — Plan/Act + Effort Override (current stable — LATEST)
 
 - **Plan/Act auto-detection** — `detectIntentMode()` scores prompts based on keyword patterns. Plan keywords (draft, outline, brainstorm, sketch, explore, what if, options, approach, consider, tradeoff, strategy, roadmap, plan, design, compare, pros and cons) vs act keywords (implement, build, code, fix, deploy, run, test, apply, merge, write the code, create the file). Auto-defaults to act when scores are tied.
 - **Per-tier `plan_model` config** — each of moderate, heavy, intensive, extreme has a separate plan_model/plan_provider/plan_max_tokens/plan_enable_thinking. When the request mode is `plan`, the gateway routes to the plan model instead of the primary. Saves tokens on exploration while preserving capability for execution.
@@ -24,25 +24,10 @@
 - **`POST /v06/resolve`** — given a (tier, mode), returns the model that would be dispatched. Useful for debugging and dashboards.
 - **CLI commands**: `gateswarm resolve <tier> [mode]`, `gateswarm effort-override <tier> <prompt>`.
 
-### v0.5.3 — Foundational fixes (release/v0.5.x branch)
+### v0.5.5 — Routing Transparency + Quota-Aware Routing + OSS Hygiene (foundation for v0.5.6)
 
 - **Removed broken `dotenv` import + dep** — was listed in `package.json` as a dependency but never installed, which would fail `npm start` outside systemd. The systemd unit already sources `.env` via `set -a; source`, so the import was redundant.
 - **Debounced `agent-registry.save()`** — was 2 full-file writes per request; now coalesces bursts into 1 write per 1s window. Graceful shutdown via SIGINT/SIGTERM triggers `flushPending()` so the last burst is not lost on restart. Verified: 10 parallel requests → 0 immediate writes → 1 write after 1s.
-
-### v0.5.6 — Routing Transparency + Quota-Aware Routing (on main, the canonical release)
-
-- **Health-aware routing** — tier primaries re-routed to currently-healthy providers (zai for moderate/heavy, codex-cli for intensive/extreme). Bailian (key expired) and OpenCodeGo (quota exhausted) removed from all tier fallbacks.
-- **LLM judge config-driven** — was hardcoded to `bailian/qwen3.5-plus`; now reads from `v04_config.feedback_loop.llmJudgeModel`, defaulting to `zai/glm-4.7`.
-- **Provider health-score decay** — `recordSuccess()` now decays `rateLimitHits` so transient 429s don't permanently poison the health score (was the cause of zai health=0 from quota probes).
-- **RAG signal Q* filter** — `RagEntry.tier` is overloaded between effort tiers (moderate/heavy) and compressor quality tiers (Q0/Q1/Q2). RAG now filters Q* entries so compressor summaries don't pollute the complexity score.
-- **TUI last-request accuracy** — `TiersMatrix.tsx` shows a `★ LAST REQUEST →` header with the actual tier/provider/model of the most recent request decision, plus a `►` marker on the active tier row.
-- **Auth-aware CLI health checks** — `bin/cli-health-probe.sh` verifies binary + auth (OPENAI_API_KEY / ChatGPT OAuth / Anthropic API key / Claude OAuth). Replaces the previous `codex --version` health check that passed without auth.
-- **Portable paths** — hardcoded `/root/.openclaw/workspace/...` paths replaced with portable paths via `import.meta.url` and `${GATESWARM_ROOT}` env var. Anyone cloning the repo to a different path gets a working build.
-- **Ephemeral data untracked** — `data/consumption-history.json`, `data/provider-quota.json`, `data/quota-sync.json`, `data/model-matrix.json` gitignored. The gateway regenerates them on first run.
-- **Pre-release security audit** — `docs/SECURITY_AUDIT.md` documents what was checked and what was fixed.
-- **New CLI commands** — `gateswarm ops-guide`, `gateswarm health`, `gateswarm version`.
-- **New endpoints** — `/v05/intel/ops-guide`, `/v05/intel/last-decision`.
-- **light tier primary to ollama-cloud/minimax-m2.7** (free tier, no RPM limits).
 
 ### v0.5.2 — Plan/Act Dual-Model Routing (the first public release on origin)
 
@@ -445,14 +430,15 @@ The release tags on GitHub are the source of truth. The version sequence is:
 ```
 v0.4.4 (May 14, 2026) — context-aware
 v0.5.2 (Jun 6, 2026)  — plan/act dual routing, recalibrated tiers
-v0.5.3 (Jun 20, 2026) — found: dotenv + debounced writes
-v0.5.4 (Jun 20, 2026) — feat: plan/act + effort override
+v0.5.3 (Jun 20, 2026) — found: dotenv + debounced writes (now part of v0.5.5 line)
+v0.5.5 (Jun 20, 2026) — health-aware routing + portable paths + OSS hygiene
+v0.5.6 (Jun 20, 2026) — feat: plan/act + effort override (LATEST)
 v0.5.6 (Jun 20, 2026) — fix: health-aware routing + portable paths + OSS hygiene
 ```
 
 The `v0.6.x` development line (kept local on the `v0.6.x-guide` branch) is used as a reference for backporting improvements. See [docs/V06_BACKPORT_PLAN.md](docs/V06_BACKPORT_PLAN.md) for the v0.6.x roadmap.
 
-The `v0.5.3` and `v0.5.4` releases are on the `release/v0.5.x` branch. To get them on main, fast-forward `git merge --ff-only release/v0.5.x` then push.
+The `v0.5.3` foundational work is on the `release/v0.5.x` branch (now merged into main as part of v0.5.5). The cleanup branch can be deleted once the v0.5.5/v0.5.6 release sequence is final.
 
 ---
 
