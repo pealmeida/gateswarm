@@ -1,5 +1,5 @@
 {
-  "version": "v0.5.6-routing-fix",
+  "version": "v0.5.4-plan-act",
   "_note": "v0.5.6 routing-fix: bailian API key expired (401) and opencodego hit GoUsageLimitError (resets in 14d). Static primaries re-routed to healthy providers only: zai (GLM Coding Lite), ollama-cloud (free tier), codex-cli (ChatGPT OAuth). When bailian + opencodego recover, restore them as primaries.",
   "trained": "2026-05-27T23:59:52.685Z",
   "method": "ensemble-voter-with-feedback-loop",

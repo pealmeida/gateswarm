@@ -130,7 +130,7 @@ const args = process.argv.slice(2);
 
 function printUsage() {
   console.log(`
-🧠 GateSwarm MoMA Router v0.5.6 — CLI + TUI + Consumption Intelligence
+🧠 GateSwarm MoMA Router v0.5.4 — CLI + TUI + Consumption Intelligence
 
 Ops Commands:
   ops-guide                                 Show operations guide (debugging, updates, versioning)
@@ -165,14 +165,14 @@ Plan/Act Mode Commands (v0.5.2):
   effort-override <tier> <prompt text>      Force a specific tier, bypassing ensemble scoring (v0.5.7)
   resolve <tier> [mode]                     Show what model would be used for tier+mode (v0.5.7)
 
-Consumption Intelligence Commands (v0.5.6):
-  intel                                     Show v0.5.6 intel: tier recommendations, stats, providers
+Consumption Intelligence Commands (v0.5.4):
+  intel                                     Show v0.5.4 intel: tier recommendations, stats, providers
   consumption                               Show per-provider 5h/weekly/monthly consumption + quota
   consumption <window>                      Filter to one window: 5h | weekly | monthly
   quota                                     Show per-provider quota (RPM/RPD/tokens/throttled)
   rediscover                                Force immediate model rediscovery
 
-TUI Commands (v0.5.6):
+TUI Commands (v0.5.4):
   tui                                       Launch GateSwarm Bar TUI (interactive, needs TTY)
   tui --once                                One-shot JSON dump of consumption
   tui --once | jq '.'                       Pipe to jq for scripting
@@ -195,7 +195,7 @@ Examples:
   gateswarm mode-set heavy plan_model qwen3.6-plus
   gateswarm mode-set heavy plan_enable_thinking true
   gateswarm mode-detect "draft an architecture plan for the new service"
-  gateswarm intel                            # v0.5.6 token consumption intel
+  gateswarm intel                            # v0.5.4 token consumption intel
   gateswarm consumption                      # per-provider 5h/weekly/monthly
   gateswarm consumption weekly               # just the weekly window
   gateswarm quota                            # RPM/RPD/tokens remaining
@@ -511,7 +511,7 @@ async function cmdResolve(tier: string, mode: string = 'auto') {
   console.log(`   max_tokens=${result.resolved.max_tokens}  thinking=${result.resolved.enable_thinking}\n`);
 }
 
-// ─── v0.5.6 Consumption Intelligence Commands ────────────────
+// ─── v0.5.4 Consumption Intelligence Commands ────────────────
 
 async function cmdIntel() {
   const data = await gatewayFetch('/v05/intel');
@@ -552,7 +552,7 @@ async function cmdConsumption(window?: string) {
   ];
   const filter = window?.toLowerCase();
 
-  console.log('📊 GateSwarm Consumption (v0.5.6) — Generated: ' + new Date(data.generatedAt).toLocaleString() + '\n');
+  console.log('📊 GateSwarm Consumption (v0.5.4) — Generated: ' + new Date(data.generatedAt).toLocaleString() + '\n');
 
   for (const [label, key] of windows) {
     if (filter && !filter.startsWith(label.slice(0, 2))) continue;
@@ -637,7 +637,7 @@ function pctBadge(pct: number | null): string {
 
 async function cmdQuota() {
   const data = await gatewayFetch('/v05/intel/quota');
-  console.log('📊 Provider Quota (v0.5.6)\n');
+  console.log('📊 Provider Quota (v0.5.4)\n');
   console.log('PROVIDER         HEALTH  RPM         RPD              TOKENS         THROTTLED');
   console.log('─────────────────────────────────────────────────────────────────────────────');
   for (const q of data.quotas) {
@@ -656,7 +656,7 @@ async function cmdRediscover() {
 }
 
 async function cmdTui(args: string[]) {
-  // Launch the v0.5.6 GateSwarm Bar TUI client.
+  // Launch the v0.5.4 GateSwarm Bar TUI client.
   // In a TTY: full interactive UI. In non-TTY (piped): snapshot mode.
   // Resolve the cli/dist path relative to this script's location.
   // Path is: <this-script-dir>/../cli/dist/cli.js
@@ -766,7 +766,7 @@ async function main() {
       await cmdResolve(args[1], args[2] || 'auto');
       break;
 
-    // ─── v0.5.6 Consumption Intelligence Commands ─────────
+    // ─── v0.5.4 Consumption Intelligence Commands ─────────
     case 'intel':
       await cmdIntel();
       break;
@@ -800,7 +800,7 @@ async function main() {
   }
 }
 
-// ─── v0.5.6 Operations Commands ──────────────────────────────
+// ─── v0.5.4 Operations Commands ──────────────────────────────
 
 async function cmdOpsGuide(): Promise<void> {
   try {
