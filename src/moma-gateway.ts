@@ -2021,6 +2021,17 @@ async function init() {
         }
       }
 
+      // ─── v0.6: Plan/Act Mode Detection ───────────────────
+      // POST /v06/mode/detect — Test mode detection on a prompt
+      if (url.pathname === '/v06/mode/detect' && method === 'POST') {
+        const body = await parseBody(req);
+        if (!body.prompt || typeof body.prompt !== 'string') {
+          return jsonResponse(res, 400, { error: { message: 'prompt is required (string)', type: 'bad_request' } });
+        }
+        const result = detectIntentMode(body.prompt);
+        return jsonResponse(res, 200, result);
+      }
+
       if (url.pathname === '/v05/intel/models' && method === 'GET') {
         const models = modelMatrix.getAllModels();
         return jsonResponse(res, 200, {
