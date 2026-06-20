@@ -655,9 +655,45 @@ export class AgentRegistry {
     }
   }
 
-  private async save(): Promise<void> {
+  // v0.5.3: Debounced writes (was 2 full-file writes per request). Multiple
+  // updates within SAVE_DEBOUNCE_MS coalesce into one disk write, while
+  // preserving the in-memory state in real time. On shutdown, flushPending()
+  // forces a synchronous write so nothing is lost.
+  private saveTimer: NodeJS.Timeout | null = null;
+  private saveInFlight: Promise<void> | null = null;
+  private static readonly SAVE_DEBOUNCE_MS = 1000;
+
+  private scheduleSave(): void {
+    if (this.saveTimer) clearTimeout(this.saveTimer);
+    this.saveTimer = setTimeout(() => {
+      this.saveTimer = null;
+      // Fire-and-track the write so flushPending() can await it.
+      this.saveInFlight = this.writeNow();
+      this.saveInFlight.finally(() => { this.saveInFlight = null; });
+    }, AgentRegistry.SAVE_DEBOUNCE_MS);
+  }
+
+  private async writeNow(): Promise<void> {
     await fs.mkdir(dirname(REGISTRY_FILE), { recursive: true });
     await fs.writeFile(REGISTRY_FILE, JSON.stringify(this.state, null, 2));
+  }
+
+  /** Force any pending debounced write to complete (call on shutdown). */
+  async flushPending(): Promise<void> {
+    if (this.saveTimer) {
+      clearTimeout(this.saveTimer);
+      this.saveTimer = null;
+      this.saveInFlight = this.writeNow();
+    }
+    if (this.saveInFlight) {
+      await this.saveInFlight;
+    }
+  }
+
+  private async save(): Promise<void> {
+    // Debounce: schedule a write 1s in the future. Coalesces bursts of
+    // recordUsage() calls (e.g. parallel requests) into a single fs.writeFile.
+    this.scheduleSave();
   }
 }
 
