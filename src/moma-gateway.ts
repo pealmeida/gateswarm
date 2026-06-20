@@ -1061,7 +1061,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
   const modeDetection = detectIntentMode(promptText);
   const activeMode: IntentMode = modeOverride ?? modeDetection.mode;
 
-  // ─── v0.5.7: Token Consumption Intelligence Routing (async with probing) ──────
+  // ─── v0.5.6: Token Consumption Intelligence Routing (async with probing) ──────
   let decision: ConsumptionDecision;
   try {
     decision = await consumptionIntelligence.selectModel(effort, {
