@@ -4,45 +4,38 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [0.5.6] - 2026-06-20 (LATEST — re-shuffle + cleanup)
 
-## [0.5.6] - 2026-06-20 (LATEST)
+Brings the v0.5.3 → v0.5.6 work into a clean 5-version sequence
+(v0.5.3 foundational, v0.5.4 Plan/Act + effort override, v0.5.5
+health-aware routing, v0.5.6 re-shuffle).
 
-Plan/Act Modes + Effort Override. The current latest release on
-GitHub. Builds on the v0.5.5 health-aware routing foundation.
+### Changed
+- **Re-shuffled version sequence** per user direction: v0.5.4 restored
+  as a real release (was a CHANGELOG-only retro-tag), v0.5.5 now
+  describes the Routing Transparency + Quota-Aware Routing work,
+  v0.5.6 is the meta-cleanup release.
+- **README rewritten** with the new version sequence, accurate
+  provider model assignments, and updated CLI command list.
+- **CHANGELOG rewritten** to reflect the clean 5-version sequence.
+- **gitignore** updated to exclude dist/ (build artifacts) and tee/
+  (RTK output).
+- **CI workflow** updated to trigger on main + release/v0.5.x
+  (was: main + v0.5.1-stable, which is deleted).
+- **gateway/README.md** added (legacy notice explaining the directory
+  is archived v0.4.4 reference code, not the active codebase).
 
-### Added
-- **Plan/Act auto-detection** — `detectIntentMode()` scores prompts
-  based on keyword patterns. Plan-mode keywords (draft, outline,
-  brainstorm, sketch, explore, what if, options, approach, consider,
-  tradeoff, strategy, roadmap, plan, design, compare, pros and cons)
-  vs act-mode keywords (implement, build, code, fix, deploy, run,
-  test, apply, merge, write the code, create the file). Auto-defaults
-  to act when plan and act scores are tied.
-- **Per-tier `plan_model` config** in `v04_config.json` for moderate,
-  heavy, intensive, extreme. Each tier specifies `plan_model`,
-  `plan_provider`, `plan_max_tokens`, `plan_enable_thinking`. When
-  the request mode is `plan`, the gateway uses the plan_model instead
-  of the primary. This saves tokens on exploration prompts while
-  preserving full capability for execution.
-- **`effort_override` request field** + **`X-Effort-Override` header**.
-  Bypasses ensemble scoring; jumps straight to the named tier
-  (`trivial`/`light`/`moderate`/`heavy`/`intensive`/`extreme`).
-  Invalid values return HTTP 400. The greeting fast-path is skipped
-  when an override is set.
-- **`POST /v06/mode/detect`** — test mode detection on any prompt.
-  Returns `{ mode, confidence, planScore, actScore }`.
-- **`POST /v06/resolve`** — given a (tier, mode), returns the model
-  that would be dispatched. Useful for debugging and dashboards.
-- **CLI commands**: `gateswarm resolve <tier> [mode]`,
-  `gateswarm effort-override <tier> <prompt>`.
+### Removed
+- Root `ARCHITECTURE.md` (kept `docs/ARCHITECTURE.md` which is newer and larger)
+- Root `REQUIREMENTS.md` (kept `docs/REQUIREMENTS.md`)
+- `docs/PRD.md` and `docs/QUICKSTART.md` (duplicates of root versions)
 
 ### Verified
-- 'draft a CRDT system' + `mode: plan` → claude-sonnet-4-6 (intensive plan)
-- 'implement a CRDT system' + `mode: act` → glm-5.2 (moderate primary)
-- 'hi' (no mode) → auto-detect uses act → glm-5.2
-- 'hi' + `effort_override: intensive` → codex-cli/gpt-5.4 (intensive primary)
-
-## [0.5.5] - 2026-06-20
+- Service running v0.5.6 on main, all 7 version stamps aligned
+- Plan/Act + effort override + /v06/resolve verified end-to-end
+- Health check 11/11 pass
+- 5 public tags on origin: v0.4.4, v0.5.2, v0.5.3, v0.5.4, v0.5.5, v0.5.6
+## [0.5.5] - 2026-06-20 (Routing Transparency + Quota-Aware Routing + OSS Hygiene)
 
 Routing Transparency + Quota-Aware Routing + OSS Hygiene. The
 foundation release that v0.5.6 (Plan/Act) builds on.
@@ -87,7 +80,42 @@ foundation release that v0.5.6 (Plan/Act) builds on.
 ### Known issues / user blockers
 - **Rotate Bailian API key**: `BAILIAN_KEY=*** expired (HTTP 401)`. Once rotated, set the new key in `.env` and restart the gateway.
 - **OpenCodeGo GoUsageLimitError** resets in 14 days from 2026-06-20.
+## [0.5.4] - 2026-06-20 (Plan/Act + Effort Override)
 
+Plan/Act Modes + Effort Override. The current latest release on
+GitHub. Builds on the v0.5.5 health-aware routing foundation.
+
+### Added
+- **Plan/Act auto-detection** — `detectIntentMode()` scores prompts
+  based on keyword patterns. Plan-mode keywords (draft, outline,
+  brainstorm, sketch, explore, what if, options, approach, consider,
+  tradeoff, strategy, roadmap, plan, design, compare, pros and cons)
+  vs act-mode keywords (implement, build, code, fix, deploy, run,
+  test, apply, merge, write the code, create the file). Auto-defaults
+  to act when plan and act scores are tied.
+- **Per-tier `plan_model` config** in `v04_config.json` for moderate,
+  heavy, intensive, extreme. Each tier specifies `plan_model`,
+  `plan_provider`, `plan_max_tokens`, `plan_enable_thinking`. When
+  the request mode is `plan`, the gateway uses the plan_model instead
+  of the primary. This saves tokens on exploration prompts while
+  preserving full capability for execution.
+- **`effort_override` request field** + **`X-Effort-Override` header**.
+  Bypasses ensemble scoring; jumps straight to the named tier
+  (`trivial`/`light`/`moderate`/`heavy`/`intensive`/`extreme`).
+  Invalid values return HTTP 400. The greeting fast-path is skipped
+  when an override is set.
+- **`POST /v06/mode/detect`** — test mode detection on any prompt.
+  Returns `{ mode, confidence, planScore, actScore }`.
+- **`POST /v06/resolve`** — given a (tier, mode), returns the model
+  that would be dispatched. Useful for debugging and dashboards.
+- **CLI commands**: `gateswarm resolve <tier> [mode]`,
+  `gateswarm effort-override <tier> <prompt>`.
+
+### Verified
+- 'draft a CRDT system' + `mode: plan` → claude-sonnet-4-6 (intensive plan)
+- 'implement a CRDT system' + `mode: act` → glm-5.2 (moderate primary)
+- 'hi' (no mode) → auto-detect uses act → glm-5.2
+- 'hi' + `effort_override: intensive` → codex-cli/gpt-5.4 (intensive primary)
 ## [0.5.2] - 2026-06-06
 
 ### Fixed
@@ -274,5 +302,3 @@ foundation release that v0.5.6 (Plan/Act) builds on.
 - Gateway `compressedMessages` crash bug (declared before RAG injection)
 - Intent-engine boundary mismatch (code synced with weights.json)
 - Version labels: all updated to v0.4
-
-
