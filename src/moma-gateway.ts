@@ -2,9 +2,9 @@
 import * as dotenv from 'dotenv';
 dotenv.config({ path: new URL('../.env', import.meta.url).pathname });
 /**
- * GateSwarm MoMA Router v0.5.4 — Multi-Agent API Gateway
+ * GateSwarm MoMA Router v0.5.6 — Multi-Agent API Gateway
  *
- * v0.5.4: Routing Transparency
+ * v0.5.6: Routing Transparency
  *   - Unify scoreToEffort (canonical, config-driven)
  *   - ConsumptionDecision.source field — distinguish real requests from
  *     health/balance/recovery checks
@@ -404,7 +404,7 @@ async function handleDirectRoute(
   const cleanModel = model.includes('/') ? model.split('/').slice(1).join('/') : model;
 
   const startTime = Date.now();
-  // v0.5.4: Respect the client's stream flag — don't force stream:false.
+  // v0.5.6: Respect the client's stream flag — don't force stream:false.
   // Pi (and other clients) expect a true SSE stream when they ask for it.
   // Forcing stream:false broke streaming clients and caused
   // "Stream ended without finish_reason" errors.
@@ -437,7 +437,7 @@ async function handleDirectRoute(
       });
     }
 
-    // v0.5.4: Forward the upstream stream as-is when client wants streaming.
+    // v0.5.6: Forward the upstream stream as-is when client wants streaming.
     // This is the only way to make streaming clients (Pi, etc.) happy —
     // they need a real SSE stream with [DONE] markers and finish_reason.
     if (clientWantsStream && response.body) {
@@ -954,7 +954,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
     return handleDirectRoute(req, res, agent, messages, promptText, directRoute.providerId, directRoute.model);
   }
 
-  // ─── v0.5.4: Greeting/Ultra-Short Fast-Path ──────────────
+  // ─── v0.5.6: Greeting/Ultra-Short Fast-Path ──────────────
   // For extremely short prompts (greetings, "hi", "ok", single-word Q&A),
   // skip the entire classification cascade and RAG injection — just route
   // straight to the local trivial model. Saves 50-200ms of classification
@@ -1097,7 +1097,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
   const modeDetection = detectIntentMode(promptText);
   const activeMode: IntentMode = modeOverride ?? modeDetection.mode;
 
-  // ─── v0.5.4: Token Consumption Intelligence Routing (async with probing) ──────
+  // ─── v0.5.6: Token Consumption Intelligence Routing (async with probing) ──────
   let decision: ConsumptionDecision;
   try {
     decision = await consumptionIntelligence.selectModel(effort, {
@@ -1140,7 +1140,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
   console.log(`🧠 [${agent.name}] Score: ${score.toFixed(3)} → ${effort} (${activeMode}) → ${providerId}/${model} [${decision.reason}, conf=${decision.confidence.toFixed(2)}]`);
   const interactionId = `${agent.id}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
-  // ─── v0.5.4: Trivial Fast-Path ──────────────────────
+  // ─── v0.5.6: Trivial Fast-Path ──────────────────────
   // For TRIVIAL-tier requests targeting a TINY local model (qwen2.5:0.5b,
   // qwen2.5:1.5b, gemma2:2b etc), strip the system prompt and RAG context
   // when the user prompt is short. A 0.5B model on CPU takes ~20s to process
@@ -1695,7 +1695,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
 
       res.setHeader('X-Mode', activeMode);
       res.setHeader('X-Mode-Confidence', modeDetection.confidence.toFixed(2));
-      // v0.5.4: debug headers so operators can verify the actual classification
+      // v0.5.6: debug headers so operators can verify the actual classification
       // and routing decision without tailing server logs.
       res.setHeader('X-Tier', effort);
       res.setHeader('X-Score', score.toFixed(4));
@@ -1972,7 +1972,7 @@ async function init() {
   console.log('🔄 [Intel] Tier recovery check: every 5min');
 
   const agents = agentRegistry.getAgents();
-  console.log(`🚀 GateSwarm MoMA Router v0.5.4 (Routing Transparency) starting on :${PORT}`);
+  console.log(`🚀 GateSwarm MoMA Router v0.5.6 (Routing Transparency) starting on :${PORT}`);
   console.log(`📊 Providers: ${agentRegistry.getProviders().map(p => p.id).join(', ')}`);
   console.log(`🤖 Registered agents: ${agents.map(a => a.name).join(', ')}`);
 
@@ -2003,7 +2003,7 @@ async function init() {
         const agents = agentRegistry.getAgents();
         return jsonResponse(res, 200, {
           status: 'healthy',
-          router: 'GateSwarm MoMA Router v0.5.4 (Routing Transparency)',
+          router: 'GateSwarm MoMA Router v0.5.6 (Routing Transparency)',
           turboquant: 'v3.6',
           ensemble: 'enabled',
           feedback: 'enabled',
@@ -2560,7 +2560,7 @@ async function init() {
   });
 
   server.listen(PORT, () => {
-    console.log(`✅ GateSwarm MoMA Router v0.5.4 (Routing Transparency) listening on http://localhost:${PORT}`);
+    console.log(`✅ GateSwarm MoMA Router v0.5.6 (Routing Transparency) listening on http://localhost:${PORT}`);
     console.log(`📡 Endpoint: http://localhost:${PORT}/v1/chat/completions`);
     console.log(`📊 Metrics: http://localhost:${PORT}/metrics`);
     console.log(`🤖 Agents: http://localhost:${PORT}/v1/agents`);
