@@ -37,6 +37,7 @@ export interface FeatureVector {
   novelty_score: number;
   multi_domain: number;
   user_expertise_level: number;
+  compound_tech: number;
 }
 
 // ─── Domain Keywords ──────────────────────────────────────
@@ -69,6 +70,27 @@ const TECH_KEYWORDS = new Set([
   'sharding', 'partition', 'failover', 'circuit-breaker', 'cluster',
   'middleware', 'broker', 'cache', 'limiter', 'rate-limit', 'lua',
   'palindrome', 'lru', 'brotli', 'gzip', 'compression',
+  // v0.5.6-bug6: common JS/TS/Python idioms that show up as compound tokens
+  // (split by whitespace in extractFeatures, so 'async/await' is one token).
+  // Adding the compound form here is enough — the word match is exact-token.
+  'async/await', 'event-loop', 'call-stack', 'arrow-function', 'arrow-functions',
+  'higher-order', 'higher-order-function', 'destructuring', 'spread-operator',
+  'template-literal', 'template-literals', 'ternary-operator', 'short-circuit',
+  'closure', 'closures', 'hoisting', 'currying', 'iife', 'iifes',
+  'promise', 'promises', 'callback', 'callbacks', 'thenable', 'thenables',
+  'generator', 'generators', 'iterator', 'iterators', 'iterable', 'iterables',
+  'recursion', 'recursive', 'memoization', 'memoize', 'polymorphism',
+  'inheritance', 'encapsulation', 'abstraction', 'composition', 'dependency-injection',
+  'singleton', 'factory', 'observer', 'observer-pattern', 'pub-sub', 'pubsub',
+  'mutex', 'semaphore', 'deadlock', 'livelock', 'race-condition', 'race-conditions',
+  'coroutine', 'coroutines', 'thread', 'threads', 'threading', 'multithreading',
+  'lambda', 'lambdas', 'comprehension', 'list-comprehension', 'dictionary',
+  'list-comprehensions', 'generator-expression',
+  'decorator', 'decorators', 'context-manager', 'context-managers',
+  // Domain patterns
+  'machine-learning', 'deep-learning', 'neural-network', 'neural-networks',
+  'transformer', 'transformers', 'embedding', 'embeddings', 'rag', 'fine-tuning',
+  'tokenization', 'prompt-engineering', 'agentic', 'multi-agent',
 ]);
 
 // ─── Signal Keywords (v3.3) ─────────────────────────────
@@ -77,7 +99,9 @@ const SIGNAL_KEYWORDS = {
   imperativeVerbs: ['write', 'create', 'build', 'implement', 'generate', 'fix',
     'debug', 'optimize', 'explain', 'analyze', 'describe', 'design', 'architect',
     'engineer', 'develop', 'construct', 'compose', 'formulate', 'devise'],
-  codeKeywords: ['code', 'function', 'def ', 'class ', 'import ', 'fn ', 'const '],
+  codeKeywords: ['code', 'function', 'def ', 'class ', 'import ', 'fn ', 'const ',
+    'async/await', 'await ', 'await(', 'await.', 'async ', 'async(',
+    'promise', 'callback', '=>', '=>{', 'return ', 'let ', 'var ', 'yield '],
   sequentialMarkers: ['first ', 'then ', 'finally', 'step ', 'part ', 'section ', 'also '],
   constraintWords: ['must ', 'should ', 'required ', 'only ', 'cannot ', 'limit '],
   contextMarkers: ['given ', 'consider ', 'assume ', 'suppose ', 'based on ', 'according to '],
@@ -163,6 +187,19 @@ export function extractFeatures(prompt: string): FeatureVector {
   ).length;
   const user_expertise_level = sophisticated >= 3 ? 2 : sophisticated >= 1 ? 1 : 0;
 
+  // v0.5.6-bug6: Compound technical tokens (async/await, event-loop, etc.)
+  // are single words in the feature extractor (split on whitespace) and
+  // would otherwise get the same weight as a single short keyword. Give
+  // them a discrete bump — explaining a named concept warrants at least
+  // the light tier, not trivial.
+  const COMPOUND_TECH_PATTERNS = [
+    /^[a-z][a-z0-9]*[-/][a-z][a-z0-9]*$/i,  // async/await, event-loop, call-stack
+    /^[a-z]+_(function|method|pattern|handler|provider|controller|service|component|module|interface|api)$/i,
+  ];
+  const compound_tech = words.filter(w =>
+    COMPOUND_TECH_PATTERNS.some(p => p.test(w)) && w.length >= 6
+  ).length;
+
   return {
     has_question, has_code, has_imperative, has_arithmetic,
     has_sequential, has_constraint, has_context, has_architecture, has_design,
@@ -171,7 +208,7 @@ export function extractFeatures(prompt: string): FeatureVector {
     has_negation, entity_count, code_block_size,
     domain_finance, domain_legal, domain_medical, domain_engineering,
     temporal_references: temporal_refs, output_format_spec, prior_context_needed,
-    novelty_score, multi_domain, user_expertise_level,
+    novelty_score, multi_domain, user_expertise_level, compound_tech,
   };
 }
 
@@ -184,7 +221,7 @@ function zeroFeatures(): FeatureVector {
     has_negation: 0, entity_count: 0, code_block_size: 0,
     domain_finance: 0, domain_legal: 0, domain_medical: 0, domain_engineering: 0,
     temporal_references: 0, output_format_spec: 0, prior_context_needed: 0,
-    novelty_score: 0, multi_domain: 0, user_expertise_level: 0,
+    novelty_score: 0, multi_domain: 0, user_expertise_level: 0, compound_tech: 0,
   };
 }
 
@@ -222,6 +259,12 @@ export function heuristicScoreFromFeatures(features: FeatureVector, wordCount: n
   // Domain specificity & user expertise
   const domainScore = t.multi_domain * 0.05 + t.user_expertise_level * 0.03 +
     ((t.domain_finance + t.domain_legal + t.domain_medical + t.domain_engineering) > 0 ? 0.03 : 0);
+  // v0.5.6-bug6: compound technical tokens (async/await, event-loop, etc.) signal
+  // that the user is asking about a named concept worth at least a light-tier
+  // explanation. Without this, a 2-word prompt like 'Explain async/await' lands
+  // in trivial (0.198 < 0.21 boundary) and the 0.5B model can't write a coherent
+  // technical explanation. Each compound term adds a small, capped boost.
+  const compoundScore = Math.min(t.compound_tech * 0.04, 0.12);
   // System-design bonus: compound complexity (architecture + many tech terms + length)
   const sysCount = t.has_architecture + t.technical_design +
     (t.technical_terms > 3 ? 1 : 0) + t.multi_domain;
@@ -229,7 +272,7 @@ export function heuristicScoreFromFeatures(features: FeatureVector, wordCount: n
     : wordCount >= 10 && sysCount >= 2 ? 0.06 : 0;
 
   const score = lengthScore + structScore + archScore + techScore + codeScore +
-    reasonScore + domainScore + systemBonus;
+    reasonScore + domainScore + compoundScore + systemBonus;
 
   return Math.min(Math.max(score, 0), 1);
 }
