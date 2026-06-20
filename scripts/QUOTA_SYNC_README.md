@@ -29,7 +29,7 @@ and feeds it into the GateSwarm TUI.
 
 ```bash
 # Manual sync
-python3 /root/.openclaw/workspace/gateswarm-moma-router/scripts/quota-sync.py
+python3 $(dirname "$0")/quota-sync.py
 
 # Auto-sync every 5 min (cron job already configured)
 # Job ID: 1bf77be7-5235-4172-90e5-9494a32a1188

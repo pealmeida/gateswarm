@@ -630,7 +630,13 @@ async function cmdRediscover() {
 async function cmdTui(args: string[]) {
   // Launch the v0.5.6 GateSwarm Bar TUI client.
   // In a TTY: full interactive UI. In non-TTY (piped): snapshot mode.
-  const cliPath = '/root/.openclaw/workspace/gateswarm-moma-router/cli/dist/cli.js';
+  // Resolve the cli/dist path relative to this script's location.
+  // Path is: <this-script-dir>/../cli/dist/cli.js
+  const { fileURLToPath } = await import('url');
+  const { dirname, join } = await import('path');
+  const __filename = fileURLToPath(import.meta.url);
+  const __dirname = dirname(__filename);
+  const cliPath = join(__dirname, '..', 'cli', 'dist', 'cli.js');
   const { spawn } = await import('child_process');
   const child = spawn('node', [cliPath, ...args], { stdio: 'inherit' });
   child.on('exit', (code) => process.exit(code ?? 0));
@@ -830,6 +836,11 @@ async function cmdHealth(): Promise<void> {
 async function cmdVersion(): Promise<void> {
   console.log('📦 GateSwarm Version Sync Check\n');
   const fs = await import('fs/promises');
+  const path = await import('path');
+  const { fileURLToPath } = await import('url');
+  const __filename = fileURLToPath(import.meta.url);
+  const __dirname = path.dirname(__filename);
+  const repoRoot = path.resolve(__dirname, '..');
 
   // 1. Service reports
   try {
@@ -842,15 +853,15 @@ async function cmdVersion(): Promise<void> {
 
   // 2. Files on disk
   const files: Array<[string, string]> = [
-    ['package.json', '/root/.openclaw/workspace/gateswarm-moma-router/package.json'],
-    ['cli/package.json', '/root/.openclaw/workspace/gateswarm-moma-router/cli/package.json'],
-    ['v04_config.json', '/root/.openclaw/workspace/gateswarm-moma-router/v04_config.json'],
-    ['moma-gateway.ts', '/root/.openclaw/workspace/gateswarm-moma-router/src/moma-gateway.ts'],
+    ['package.json', path.join(repoRoot, 'package.json')],
+    ['cli/package.json', path.join(repoRoot, 'cli/package.json')],
+    ['v04_config.json', path.join(repoRoot, 'v04_config.json')],
+    ['moma-gateway.ts', path.join(repoRoot, 'src/moma-gateway.ts')],
     ['/usr/local/bin/gateswarm', '/usr/local/bin/gateswarm'],
   ];
-  for (const [label, path] of files) {
+  for (const [label, p] of files) {
     try {
-      const content = await fs.readFile(path, 'utf-8');
+      const content = await fs.readFile(p, 'utf-8');
       const m = content.match(/v?0\.5\.\d+(-[a-z0-9-]+)?/);
       console.log(`  [${label.padEnd(22)}] ${m ? m[0] : '⚠️  no version found'}`);
     } catch (e: any) {
@@ -867,7 +878,7 @@ async function cmdVersion(): Promise<void> {
 
   // 4. Pi
   try {
-    const content = await fs.readFile('/root/.pi/agent/models.json', 'utf-8');
+    const content = await fs.readFile(path.join(process.env.HOME || '~', '.pi/agent/models.json'), 'utf-8');
     const d = JSON.parse(content);
     const m = d.providers?.moma?.models?.[0]?.name;
     console.log(`  [~/.pi/agent/models.json] ${m ?? '⚠️  no moma provider'}`);
