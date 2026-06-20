@@ -2252,6 +2252,40 @@ async function init() {
         });
       }
 
+      // ─── v0.5.7-bug3: Classification-only endpoint (no dispatch) ─────
+      // POST /v1/score — Run the ensemble scorer on a prompt and return the
+      // chosen (tier, model, provider) without dispatching any inference.
+      // Used by the Pi statusline extension (pi-v33-statusline) so the
+      // footer reflects the same routing decision the gateway will make
+      // on the actual request, instead of mirroring the ensemble locally.
+      if (url.pathname === '/v1/score' && method === 'POST') {
+        const body = await parseBody(req);
+        if (!body.prompt || typeof body.prompt !== 'string') {
+          return jsonResponse(res, 400, { error: { message: 'prompt is required (string)', type: 'bad_request' } });
+        }
+        const modeOverride = (body.mode === 'plan' || body.mode === 'act') ? body.mode as IntentMode : undefined;
+        const scored = await scoreIntentV04(body.prompt);
+        const tierModel = getTierModelForMode(scored.tier as EffortLevel, modeOverride ?? detectIntentMode(body.prompt).mode);
+        return jsonResponse(res, 200, {
+          prompt: body.prompt,
+          score: scored.value,
+          tier: scored.tier,
+          method: scored.method,
+          confidence: scored.confidence,
+          lowConfidence: scored.lowConfidence,
+          classifierAccuracy: scored.classifierAccuracy,
+          latencyMs: scored.latencyMs,
+          selected: tierModel ? {
+            model: tierModel.model,
+            provider: tierModel.provider,
+            max_tokens: tierModel.max_tokens,
+            enable_thinking: tierModel.enable_thinking,
+          } : null,
+          mode: modeOverride ?? 'auto',
+          timestamp: Date.now(),
+        });
+      }
+
       if (url.pathname === '/v05/intel/models' && method === 'GET') {
         const models = modelMatrix.getAllModels();
         return jsonResponse(res, 200, {
