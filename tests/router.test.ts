@@ -67,9 +67,9 @@ describe('ModelRouter (matrix-based)', () => {
 
   it('routes heavy prompts correctly', () => {
     const router = new ModelRouter(desktopProfile);
-    const decision = router.route(0.30);
+    const decision = router.route(0.35);
     expect(decision.effort).toBe('heavy');
-    expect(decision.score).toBe(0.30);
+    expect(decision.score).toBe(0.35);
   });
 
   it('routes extreme to cloud on all devices', () => {
@@ -91,9 +91,9 @@ describe('ModelRouter (matrix-based)', () => {
   it('includes effort level in decision', () => {
     const router = new ModelRouter(desktopProfile);
     expect(router.route(0.05).effort).toBe('trivial');
-    expect(router.route(0.16).effort).toBe('light');
-    expect(router.route(0.25).effort).toBe('moderate');
-    expect(router.route(0.30).effort).toBe('heavy');
+    expect(router.route(0.25).effort).toBe('light');
+    expect(router.route(0.30).effort).toBe('moderate');
+    expect(router.route(0.35).effort).toBe('heavy');
     expect(router.route(0.40).effort).toBe('intensive');
     expect(router.route(0.80).effort).toBe('extreme');
   });
@@ -116,7 +116,7 @@ describe('ModelRouter (matrix-based)', () => {
 
   it('builds informative reason string', () => {
     const router = new ModelRouter(desktopProfile);
-    const decision = router.route(0.25);
+    const decision = router.route(0.30);
     expect(decision.reason).toContain('moderate');
     expect(decision.reason).toContain('desktop-high');
   });

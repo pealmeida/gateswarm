@@ -158,7 +158,7 @@ def test_model_override():
 
 def test_weights_file():
     print("\n[Weights File]")
-    weights_path = os.path.join(os.path.dirname(__file__), "..", "..", "v32_cascade_weights.json")
+    weights_path = os.path.join(os.path.dirname(__file__), "..", "v32_cascade_weights.json")
     assert_test("weights file exists", os.path.exists(weights_path))
     with open(weights_path) as f:
         data = json.load(f)

@@ -135,8 +135,20 @@ def extract_features(text: str) -> dict:
     }
 
 
+# Canonical feature names (used by the trained weights) that differ from the
+# keys emitted by extract_features. The cascade was trained on a feature named
+# "code"; extract_features emits "has_code". Without this alias the code signal
+# is silently zeroed out of the cascade vector, discarding a trained weight.
+FEATURE_ALIASES = {
+    "code": "has_code",
+}
+
+
 def _features_to_vector(f: dict) -> np.ndarray:
-    return np.array([float(f.get(n, 0)) for n in FEATURE_NAMES], dtype=np.float64)
+    return np.array(
+        [float(f.get(FEATURE_ALIASES.get(n, n), 0)) for n in FEATURE_NAMES],
+        dtype=np.float64,
+    )
 
 
 def score_to_tier(score: float) -> str:

@@ -23,8 +23,8 @@ describe('Routing Matrix', () => {
       expect(scoreToEffort(0.05)).toBe('trivial');
     });
 
-    it('maps 0.25 → moderate', () => {
-      expect(scoreToEffort(0.25)).toBe('moderate');
+    it('maps 0.30 → moderate', () => {
+      expect(scoreToEffort(0.30)).toBe('moderate');
     });
 
     it('maps 0.40 → intensive', () => {
@@ -44,13 +44,13 @@ describe('Routing Matrix', () => {
     });
 
     it('maps boundary values correctly', () => {
-      // v3.6: updated for unified tier boundaries from v04_config.json
-      expect(scoreToEffort(0.15)).toBe('trivial');   // < 0.1557
-      expect(scoreToEffort(0.16)).toBe('light');     // 0.1557 ≤ x < 0.1842
-      expect(scoreToEffort(0.20)).toBe('moderate');  // 0.1842 ≤ x < 0.2788
-      expect(scoreToEffort(0.30)).toBe('heavy');     // 0.2788 ≤ x < 0.3488
-      expect(scoreToEffort(0.40)).toBe('intensive'); // 0.3488 ≤ x < 0.4611
-      expect(scoreToEffort(0.50)).toBe('extreme');   // ≥ 0.4611
+      // Unified tier boundaries from v04_config.json: [0.21, 0.28, 0.32, 0.37, 0.46]
+      expect(scoreToEffort(0.15)).toBe('trivial');   // < 0.21
+      expect(scoreToEffort(0.25)).toBe('light');     // 0.21 ≤ x < 0.28
+      expect(scoreToEffort(0.30)).toBe('moderate');  // 0.28 ≤ x < 0.32
+      expect(scoreToEffort(0.35)).toBe('heavy');     // 0.32 ≤ x < 0.37
+      expect(scoreToEffort(0.40)).toBe('intensive'); // 0.37 ≤ x < 0.46
+      expect(scoreToEffort(0.50)).toBe('extreme');   // ≥ 0.46
     });
   });
 
