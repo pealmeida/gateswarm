@@ -206,7 +206,7 @@ export const DEFAULT_CLI_PROVIDERS: Record<string, CliProviderEntry> = {
       modelAlias: {
         'cx/gpt-5.5-codex': 'gpt-5.5',
         'cx/gpt-5.4-codex': 'gpt-5.4',
-        'cx/gpt-5.3-codex': 'gpt-5.5',
+        'cx/gpt-5.3-codex': 'gpt-5.3',
         'cx/gpt-4.1': 'gpt-4.1',
       },
       healthCheck: { command: '"${GATESWARM_ROOT:-.}"/bin/cli-health-probe.sh codex-cli', expectedExitCode: 0 },

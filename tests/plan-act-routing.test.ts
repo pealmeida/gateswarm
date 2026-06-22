@@ -25,15 +25,19 @@ describe('plan-mode dispatch target resolution (gateway contract)', () => {
     }
   });
 
-  it('CLI plan models keep their provider prefix; HTTP/OpenCodeGo plan models are bare', () => {
-    // heavy/intensive route to CLI reasoning models (cc/, cx/ prefixes)
-    const heavy = getTierModelForMode('heavy', 'plan')!;
-    expect(heavy.model.startsWith('cx/') || heavy.model.startsWith('cc/')).toBe(true);
+  it('CLI plan models keep their provider prefix; HTTP plan models are bare', () => {
+    // intensive/extreme route to CLI reasoning models (cc/, cx/ prefixes)
+    const intensive = getTierModelForMode('intensive', 'plan')!;
+    expect(intensive.provider).toBe('claude-cli');
+    expect(intensive.model.startsWith('cc/') || intensive.model.startsWith('cx/')).toBe(true);
     const extreme = getTierModelForMode('extreme', 'plan')!;
-    expect(extreme.provider).toBe('opencodego');
-    expect(extreme.model).toBe('deepseek-v4-pro');
-    expect(extreme.model.includes('/')).toBe(false);
-    // trivial routes to a bare HTTP model (no provider prefix)
+    expect(extreme.provider).toBe('claude-cli');
+    expect(extreme.model.startsWith('cc/') || extreme.model.startsWith('cx/')).toBe(true);
+    // heavy routes to a bare HTTP plan model (no provider prefix)
+    const heavy = getTierModelForMode('heavy', 'plan')!;
+    expect(heavy.provider).toBe('zai');
+    expect(heavy.model.includes('/')).toBe(false);
+    // trivial falls back to its bare HTTP default (no plan_model configured)
     const trivial = getTierModelForMode('trivial', 'plan')!;
     expect(trivial.model.includes('/')).toBe(false);
   });

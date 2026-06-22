@@ -553,9 +553,9 @@ describe('🌐 Multi-Provider Routing Integration', () => {
     const { getTierModel } = await import('../src/v04-config.js');
     const heavy = getTierModel('heavy');
 
-    // Primary should use the configured OpenCodeGo deep reasoning model.
-    expect(heavy!.provider).toBe('opencodego');
-    expect(heavy!.model).toBe('deepseek-v4-pro');
+    // Primary should use the configured Z.AI reasoning model.
+    expect(heavy!.provider).toBe('zai');
+    expect(heavy!.model).toBe('glm-5.1');
 
     // Fallback chain should include both HTTP and CLI providers
     const hasHttp = heavy!.fallback_models!.some((fm: any) =>
@@ -572,8 +572,8 @@ describe('🌐 Multi-Provider Routing Integration', () => {
     const { getTierModel } = await import('../src/v04-config.js');
     const extreme = getTierModel('extreme');
 
-    expect(extreme!.provider).toBe('opencodego');
-    expect(extreme!.model).toBe('deepseek-v4-pro');
+    expect(extreme!.provider).toBe('codex-cli');
+    expect(extreme!.model).toBe('cx/gpt-5.4-codex');
 
     // Should retain a premium CLI fallback for provider diversity.
     const cliFallback = extreme!.fallback_models!.find((fm: any) =>

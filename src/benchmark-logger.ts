@@ -9,39 +9,14 @@ import { promises as fs } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { createHash } from 'crypto';
+import { priceUsd, BASELINE_MODEL } from './openrouter-pricing.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const BENCHMARK_LOGS_DIR = join(__dirname, '../data/benchmark-logs');
 
-// OpenRouter pricing per 1M tokens (USD)
-const PRICING: Record<string, { input: number; output: number }> = {
-  // L0 Free
-  'openrouter/owl-alpha': { input: 0, output: 0 },
-  'minimax/minimax-m2.5:free': { input: 0, output: 0 },
-  'qwen/qwen3-coder:free': { input: 0, output: 0 },
-  'z-ai/glm-4.5-air:free': { input: 0, output: 0 },
-  'meta-llama/llama-3.3-70b-instruct:free': { input: 0, output: 0 },
-  // L1 Light
-  'z-ai/glm-4.7-flash': { input: 0.06, output: 0.40 },
-  'google/gemini-2.5-flash-lite': { input: 0.10, output: 0.40 },
-  'deepseek/deepseek-v4-flash': { input: 0.14, output: 0.28 },
-  // L2 Standard
-  'qwen/qwen-plus': { input: 0.26, output: 0.78 },
-  'qwen/qwen3.5-plus-02-15': { input: 0.26, output: 1.56 },
-  'minimax/minimax-m2.5': { input: 0.15, output: 1.15 },
-  'google/gemini-2.5-flash': { input: 0.30, output: 2.50 },
-  // L3 Quality
-  'anthropic/claude-sonnet-4.6': { input: 3.00, output: 15.00 },
-  'anthropic/claude-haiku-4.5': { input: 1.00, output: 5.00 },
-  'openai/o4-mini': { input: 1.10, output: 4.40 },
-  // L4 Elite
-  'anthropic/claude-opus-4.6': { input: 5.00, output: 25.00 },
-  'anthropic/claude-opus-4.7': { input: 5.00, output: 25.00 },
-  'openai/gpt-5.5': { input: 5.00, output: 30.00 },
-};
-
-const BASELINE_MODEL = 'anthropic/claude-opus-4.6';
-const BASELINE_PRICING = PRICING[BASELINE_MODEL];
+// Cost is evaluated against OpenRouter list prices for the equivalent model —
+// the single source of truth lives in openrouter-pricing.ts. The baseline used
+// for savings is the most expensive elite model (Claude Opus).
 
 export interface BenchmarkLogEntry {
   timestamp: string;
@@ -88,28 +63,11 @@ export class BenchmarkLogger {
     await fs.mkdir(BENCHMARK_LOGS_DIR, { recursive: true });
   }
 
-  private calculateCost(model: string | undefined, tokensIn: number, tokensOut: number): number {
-    // Handle undefined/null model
-    if (!model) return 0;
-    
-    // Try exact match first
-    let pricing = PRICING[model];
-    
-    // If no match and model starts with 'openrouter/', try without prefix
-    if (!pricing && model.startsWith('openrouter/')) {
-      const withoutPrefix = model.replace('openrouter/', '');
-      pricing = PRICING[withoutPrefix];
-    }
-    
-    // If still no match, try with 'openrouter/' prefix
-    if (!pricing && !model.startsWith('openrouter/')) {
-      pricing = PRICING['openrouter/' + model];
-    }
-    
-    // Default to free if no pricing found
-    pricing = pricing || { input: 0, output: 0 };
-    
-    return (tokensIn / 1_000_000) * pricing.input + (tokensOut / 1_000_000) * pricing.output;
+  private calculateCost(model: string | undefined, provider: string | undefined, tokensIn: number, tokensOut: number): number {
+    // Prices every routed model at its OpenRouter equivalent (single source of
+    // truth). Models with no OpenRouter equivalent (e.g. tiny local models) are
+    // treated as free.
+    return priceUsd(model, provider, tokensIn, tokensOut);
   }
 
   async log(entry: Omit<BenchmarkLogEntry, 'timestamp' | 'request_id' | 'prompt_hash' | 'cost_usd' | 'baseline_cost_usd' | 'savings_usd' | 'savings_pct'>): Promise<BenchmarkLogEntry> {
@@ -117,8 +75,8 @@ export class BenchmarkLogger {
     const request_id = `req_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const prompt_hash = `sha256:${createHash('sha256').update(entry.prompt || '').digest('hex').slice(0, 16)}`;
     
-    const cost_usd = this.calculateCost(entry.routed_model, entry.tokens_in, entry.tokens_out);
-    const baseline_cost_usd = this.calculateCost(BASELINE_MODEL, entry.tokens_in, entry.tokens_out);
+    const cost_usd = this.calculateCost(entry.routed_model, entry.provider, entry.tokens_in, entry.tokens_out);
+    const baseline_cost_usd = this.calculateCost(BASELINE_MODEL, undefined, entry.tokens_in, entry.tokens_out);
     const savings_usd = baseline_cost_usd - cost_usd;
     const savings_pct = baseline_cost_usd > 0 ? (savings_usd / baseline_cost_usd) * 100 : 0;
 

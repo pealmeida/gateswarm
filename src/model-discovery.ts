@@ -8,6 +8,7 @@
 
 import { modelMatrix, ModelEntry, EffortLevel, scoreModelForTier } from './model-matrix.js';
 import { agentRegistry } from './agent-registry.js';
+import { costPer1kUsd } from './openrouter-pricing.js';
 
 // ─── Types ───────────────────────────────────────────────
 
@@ -143,6 +144,15 @@ function getModelHeuristics(providerId: string, modelId: string): ModelHeuristic
 
   // Tools support — most modern models support this
   supportsTools = contextWindow >= 32000;
+
+  // Cost: price against the OpenRouter equivalent (single source of truth).
+  // Falls back to the provider-based estimate above when there is no equivalent
+  // (e.g. tiny local-only models stay free).
+  const orCost = costPer1kUsd(modelId, providerId);
+  if (orCost.input > 0 || orCost.output > 0) {
+    costPer1kInput = orCost.input;
+    costPer1kOutput = orCost.output;
+  }
 
   // Tier assignment
   const { tier } = scoreModelForTier({

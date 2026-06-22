@@ -80,15 +80,11 @@
       ]
     },
     "light": {
-      "model": "minimax-m2.7",
+      "model": "minimax-m3",
       "provider": "ollama-cloud",
       "max_tokens": 512,
       "enable_thinking": false,
       "fallback_models": [
-        {
-          "model": "minimax-m2.7",
-          "provider": "ollama-cloud"
-        },
         {
           "model": "glm-4.7",
           "provider": "zai"
@@ -114,7 +110,7 @@
           "provider": "zai"
         },
         {
-          "model": "minimax-m2.7",
+          "model": "minimax-m3",
           "provider": "ollama-cloud"
         },
         {
@@ -143,14 +139,14 @@
         },
         {
           "model": "deepseek-v4-pro",
-          "provider": "ollama-cloud"
+          "provider": "opencodego"
         },
         {
           "model": "minimax-m3",
           "provider": "ollama-cloud"
         },
         {
-          "model": "kimi-k2.7-code",
+          "model": "kimi-k2.6",
           "provider": "ollama-cloud"
         },
         {
@@ -179,7 +175,7 @@
         },
         {
           "model": "deepseek-v4-pro",
-          "provider": "ollama-cloud"
+          "provider": "opencodego"
         },
         {
           "model": "minimax-m3",
@@ -192,7 +188,7 @@
       "provider": "codex-cli",
       "max_tokens": 8192,
       "enable_thinking": true,
-      "plan_model": "cc/claude-opus-4-6",
+      "plan_model": "cc/claude-opus-4-7",
       "plan_provider": "claude-cli",
       "plan_max_tokens": 4096,
       "plan_enable_thinking": true,
@@ -207,7 +203,7 @@
         },
         {
           "model": "deepseek-v4-pro",
-          "provider": "ollama-cloud"
+          "provider": "opencodego"
         },
         {
           "model": "minimax-m3",

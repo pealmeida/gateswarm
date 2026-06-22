@@ -82,10 +82,11 @@ describe('getTierModelForMode', () => {
     }
   });
 
-  it('mode "plan" on heavy returns plan_model "cx/gpt-5.5-codex" and plan_enable_thinking false', () => {
+  it('mode "plan" on heavy returns the configured HTTP plan_model and plan_enable_thinking false', () => {
     const result = getTierModelForMode('heavy', 'plan');
     expect(result).not.toBeNull();
-    expect(result!.model).toBe('cx/gpt-5.5-codex');
+    expect(result!.model).toBe('glm-5');
+    expect(result!.provider).toBe('zai');
     expect(result!.enable_thinking).toBe(false);
   });
 
@@ -119,12 +120,20 @@ describe('getTierModelForMode', () => {
     }
   });
 
-  it('plan_enable_thinking is false for trivial through intensive tiers', () => {
-    const tiers = ['trivial', 'light', 'moderate', 'heavy', 'intensive'] as const;
+  it('plan_enable_thinking is false for trivial through heavy tiers', () => {
+    const tiers = ['trivial', 'light', 'moderate', 'heavy'] as const;
     for (const tier of tiers) {
       const result = getTierModelForMode(tier, 'plan');
       expect(result).not.toBeNull();
       expect(result!.enable_thinking).toBe(false);
+    }
+  });
+
+  it('plan_enable_thinking is true for the intensive and extreme reasoning tiers', () => {
+    for (const tier of ['intensive', 'extreme'] as const) {
+      const result = getTierModelForMode(tier, 'plan');
+      expect(result).not.toBeNull();
+      expect(result!.enable_thinking).toBe(true);
     }
   });
 
