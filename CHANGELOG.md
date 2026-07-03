@@ -4,7 +4,60 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-## [0.5.6] - 2026-06-20 (LATEST — re-shuffle + cleanup)
+## [Unreleased] — Multimodal Routing + Security Hardening
+
+The "M" in MoMA becomes real: requests carrying image/audio/video parts
+are detected at ingress and routed to vision-capable models. Plus
+network-safe defaults for production deployments. (Not yet tagged; bump
+the version stamps and cut a release when publishing.)
+
+### Added
+- **Multimodal (MoMA) routing.** `detectRequestModalities()` scans content
+  arrays for `image_url` / `input_audio` / video parts. Vision requests
+  restrict candidates to `supportsVision` models; the static-primary
+  shortcut is skipped unless the static model can see.
+- **`vision_widened` fallback.** When no in-tier vision model is healthy,
+  the router widens the tier band to any healthy vision-capable model
+  instead of degrading to a text-only model.
+- **`X-Modality` response header** (`text` / `text+vision` / `+audio`).
+- **Opt-in auth enforcement** via `GATESWARM_REQUIRE_AUTH=true` — rejects
+  unresolved keys with 401 instead of falling back to the default agent.
+- **Loopback-by-default bind.** Gateway now binds `127.0.0.1`; set
+  `GATESWARM_HOST=0.0.0.0` to expose (warns if exposed without auth).
+- Portable local-demo scripts under `scripts/` (repo-relative paths).
+
+### Changed
+- **MoMA = Mixture of Multimodal Agents** (was "Mixture of Model Agents").
+  Completed the `moa` → `moma` rename across docs, scripts, public assets,
+  the systemd unit name (doctor accepts both), and package keywords.
+- Media parts are flattened to `[image]`/`[audio]` placeholders for
+  text-only targets and CLI agents — raw base64 never enters prompts,
+  scoring, or context compression; media-bearing messages keep their
+  original content arrays for vision targets.
+- Broadened the vision heuristic (llava, vision, moondream, pixtral,
+  gemma3, glm-4.Xv).
+
+### Fixed
+- **Windows `.env` loading.** `new URL().pathname` yielded `/C:/…` paths
+  that Node's `fs` could not open (0 vars loaded, provider 401s); switched
+  to `fileURLToPath` in the gateway and vault-env loader.
+- Model selection now requires an API key for HTTP providers, mirroring
+  dispatch (was selecting keyless providers that then 503'd).
+- `estimatedPromptTokens` was passing a messages array into the
+  string-typed estimator (always ~1 token); now estimates over flattened
+  text.
+- Made the CLI-provider concurrency test compare serialized vs unlimited
+  runs instead of a fixed wall-clock bound (was a timing flake).
+
+### Security
+- Removed a since-deleted `data/agent-registry.json` (gateway-local agent
+  tokens; **no provider secrets were ever committed**) from all Git
+  history — `main`, all branches, and release tags rewritten. Tokens were
+  already rotated/dead.
+- Upgraded dev dependencies to clear all `npm audit` advisories
+  (0 vulnerabilities).
+
+## [0.5.6] - 2026-06-20 (latest tagged release — re-shuffle + cleanup)
 
 Brings the v0.5.3 → v0.5.6 work into a clean 5-version sequence
 (v0.5.3 foundational, v0.5.4 Plan/Act + effort override, v0.5.5

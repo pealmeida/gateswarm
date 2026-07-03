@@ -188,24 +188,32 @@ describe('🔌 CliProviderAdapter', () => {
     });
 
     it('allows parallel requests when maxConcurrent=0 (unlimited)', async () => {
-      const adapter = new CliProviderAdapter(
-        mockCliConfig({
-          argsTemplate: ['-e', 'setTimeout(() => {}, 50)'],
-          maxConcurrent: 0,
-        })
-      );
+      // Measure serialized (maxConcurrent=1) vs unlimited (maxConcurrent=0)
+      // and assert the unlimited run is meaningfully faster. Comparing the two
+      // is robust to machine speed / spawn overhead, unlike a hard wall-clock
+      // threshold (which flaked when 3× spawn cost pushed the unlimited run
+      // just past a fixed ms bound).
+      const run = async (maxConcurrent: number) => {
+        const adapter = new CliProviderAdapter(
+          mockCliConfig({ argsTemplate: ['-e', 'setTimeout(() => {}, 50)'], maxConcurrent })
+        );
+        const start = Date.now();
+        const results = await Promise.all([
+          adapter.chatCompletion([{ role: 'user', content: 'a' }], 'test'),
+          adapter.chatCompletion([{ role: 'user', content: 'b' }], 'test'),
+          adapter.chatCompletion([{ role: 'user', content: 'c' }], 'test'),
+        ]);
+        return { elapsed: Date.now() - start, results };
+      };
 
-      const start = Date.now();
-      const results = await Promise.all([
-        adapter.chatCompletion([{ role: 'user', content: 'a' }], 'test'),
-        adapter.chatCompletion([{ role: 'user', content: 'b' }], 'test'),
-        adapter.chatCompletion([{ role: 'user', content: 'c' }], 'test'),
-      ]);
-      const elapsed = Date.now() - start;
+      const serialized = await run(1);   // ~150ms+ (3 × 50ms back to back)
+      const unlimited = await run(0);    // ~50ms (all three overlap)
 
-      // With unlimited concurrency, all 3 run in ~50ms
-      expect(elapsed).toBeLessThan(150);
-      expect(results).toHaveLength(3);
+      expect(unlimited.results).toHaveLength(3);
+      // Unlimited must be clearly faster than fully serialized. Requiring it to
+      // save at least one sleep's worth (>=40ms of the 100ms gap) keeps the
+      // assertion meaningful without depending on absolute timing.
+      expect(unlimited.elapsed).toBeLessThan(serialized.elapsed - 40);
     });
   });
 });
