@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, beforeAll } from 'vitest';
-import { detectIntentMode, getTierModelForMode, loadConfig } from '../src/v04-config.js';
+import { detectIntentMode, getTierModelForMode, getTierModel, loadConfig } from '../src/v04-config.js';
 
 // ─── detectIntentMode ────────────────────────────────────────────────────────
 
@@ -82,18 +82,31 @@ describe('getTierModelForMode', () => {
     }
   });
 
-  it('mode "plan" on heavy returns plan_model "cx/gpt-5.5-codex" and plan_enable_thinking false', () => {
-    const result = getTierModelForMode('heavy', 'plan');
-    expect(result).not.toBeNull();
-    expect(result!.model).toBe('cx/gpt-5.5-codex');
-    expect(result!.enable_thinking).toBe(false);
+  // Invariant-style assertions: tier→model assignments are operational config
+  // that the gateway itself rewrites at runtime (self-healing rebalance), so
+  // tests verify the plan/act merge logic against whatever is configured
+  // rather than pinning specific model names.
+  it('mode "plan" returns the configured plan_* fields whenever plan_model is set', () => {
+    const tiers = ['trivial', 'light', 'moderate', 'heavy', 'intensive', 'extreme'] as const;
+    for (const tier of tiers) {
+      const raw = getTierModel(tier)!;
+      const result = getTierModelForMode(tier, 'plan')!;
+      if (raw.plan_model) {
+        expect(result.model, `${tier} plan model`).toBe(raw.plan_model);
+        expect(result.provider, `${tier} plan provider`).toBe(raw.plan_provider ?? raw.provider);
+        expect(result.max_tokens, `${tier} plan max_tokens`).toBe(raw.plan_max_tokens ?? raw.max_tokens);
+      } else {
+        expect(result.model, `${tier} without plan_model falls back to act`).toBe(raw.model);
+      }
+    }
   });
 
-  it('mode "plan" on extreme returns plan_model and plan_enable_thinking true', () => {
-    const result = getTierModelForMode('extreme', 'plan');
-    expect(result).not.toBeNull();
-    expect(result!.model).toBeTruthy();
-    expect(result!.enable_thinking).toBe(true);
+  it('upper tiers (intensive, extreme) keep a dedicated plan model (plan/act split)', () => {
+    for (const tier of ['intensive', 'extreme'] as const) {
+      const raw = getTierModel(tier)!;
+      expect(raw.plan_model, `${tier} plan_model`).toBeTruthy();
+      expect(raw.plan_provider, `${tier} plan_provider`).toBeTruthy();
+    }
   });
 
   it('mode "auto" falls back to the default (act) model', () => {
@@ -119,12 +132,16 @@ describe('getTierModelForMode', () => {
     }
   });
 
-  it('plan_enable_thinking is false for trivial through intensive tiers', () => {
-    const tiers = ['trivial', 'light', 'moderate', 'heavy', 'intensive'] as const;
+  it('plan-mode enable_thinking follows plan_enable_thinking (default false), never the act flag', () => {
+    const tiers = ['trivial', 'light', 'moderate', 'heavy', 'intensive', 'extreme'] as const;
     for (const tier of tiers) {
-      const result = getTierModelForMode(tier, 'plan');
-      expect(result).not.toBeNull();
-      expect(result!.enable_thinking).toBe(false);
+      const raw = getTierModel(tier)!;
+      const result = getTierModelForMode(tier, 'plan')!;
+      if (raw.plan_model) {
+        expect(result.enable_thinking, `${tier} plan thinking`).toBe(raw.plan_enable_thinking ?? false);
+      } else {
+        expect(result.enable_thinking, `${tier} without plan_model keeps act thinking`).toBe(raw.enable_thinking);
+      }
     }
   });
 

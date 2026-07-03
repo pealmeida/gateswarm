@@ -23,8 +23,8 @@ describe('Routing Matrix', () => {
       expect(scoreToEffort(0.05)).toBe('trivial');
     });
 
-    it('maps 0.25 → moderate', () => {
-      expect(scoreToEffort(0.25)).toBe('moderate');
+    it('maps 0.25 → light', () => {
+      expect(scoreToEffort(0.25)).toBe('light');
     });
 
     it('maps 0.40 → intensive', () => {
@@ -43,14 +43,13 @@ describe('Routing Matrix', () => {
       expect(scoreToEffort(1.0)).toBe('extreme');
     });
 
-    it('maps boundary values correctly', () => {
-      // v3.6: updated for unified tier boundaries from v04_config.json
-      expect(scoreToEffort(0.15)).toBe('trivial');   // < 0.1557
-      expect(scoreToEffort(0.16)).toBe('light');     // 0.1557 ≤ x < 0.1842
-      expect(scoreToEffort(0.20)).toBe('moderate');  // 0.1842 ≤ x < 0.2788
-      expect(scoreToEffort(0.30)).toBe('heavy');     // 0.2788 ≤ x < 0.3488
-      expect(scoreToEffort(0.40)).toBe('intensive'); // 0.3488 ≤ x < 0.4611
-      expect(scoreToEffort(0.50)).toBe('extreme');   // ≥ 0.4611
+    it('maps boundary values correctly (derived from EFFORT_RANGES — never drifts)', () => {
+      // Cut points are upper-exclusive: a tier's lower bound belongs to that
+      // tier, and the midpoint of every band must land inside it.
+      for (const [tier, [lo, hi]] of Object.entries(EFFORT_RANGES)) {
+        expect(scoreToEffort(lo), `lower bound ${lo} of ${tier}`).toBe(tier);
+        expect(scoreToEffort((lo + hi) / 2), `midpoint of ${tier}`).toBe(tier);
+      }
     });
   });
 

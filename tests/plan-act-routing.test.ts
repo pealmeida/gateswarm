@@ -25,17 +25,26 @@ describe('plan-mode dispatch target resolution (gateway contract)', () => {
     }
   });
 
-  it('CLI plan models keep their provider prefix; HTTP/OpenCodeGo plan models are bare', () => {
-    // heavy/intensive route to CLI reasoning models (cc/, cx/ prefixes)
-    const heavy = getTierModelForMode('heavy', 'plan')!;
-    expect(heavy.model.startsWith('cx/') || heavy.model.startsWith('cc/')).toBe(true);
-    const extreme = getTierModelForMode('extreme', 'plan')!;
-    expect(extreme.provider).toBe('opencodego');
-    expect(extreme.model).toBe('deepseek-v4-pro');
-    expect(extreme.model.includes('/')).toBe(false);
-    // trivial routes to a bare HTTP model (no provider prefix)
-    const trivial = getTierModelForMode('trivial', 'plan')!;
-    expect(trivial.model.includes('/')).toBe(false);
+  it('plan targets are dispatchable: CLI plan models keep their provider prefix, HTTP plan models are bare', () => {
+    // The dispatch contract, independent of which provider each tier currently
+    // points at: CLI providers resolve models via prefix notation (cc/, cx/, …)
+    // so the prefix must be preserved; HTTP providers receive the bare model id.
+    const CLI_PREFIX: Record<string, string> = {
+      'claude-cli': 'cc/', 'codex-cli': 'cx/', 'pi-agent': 'pi/',
+      'hermes-agent': 'hm/', 'openclaw-agent': 'oc/',
+    };
+    for (const tier of tiers) {
+      if (!getTierModel(tier)?.plan_model) continue;
+      const cfg = getTierModelForMode(tier, 'plan')!;
+      const prefix = CLI_PREFIX[cfg.provider];
+      if (prefix) {
+        expect(cfg.model.startsWith(prefix),
+          `${tier} plan model "${cfg.model}" must carry the ${prefix} prefix for ${cfg.provider}`).toBe(true);
+      } else {
+        expect(cfg.model.includes('/'),
+          `${tier} plan model "${cfg.model}" must be a bare model id for HTTP provider ${cfg.provider}`).toBe(false);
+      }
+    }
   });
 
   it('act mode never returns a plan_* model (keeps the tier default)', () => {

@@ -86,10 +86,6 @@
       "enable_thinking": false,
       "fallback_models": [
         {
-          "model": "minimax-m2.7",
-          "provider": "ollama-cloud"
-        },
-        {
           "model": "glm-4.7",
           "provider": "zai"
         },
@@ -192,7 +188,7 @@
       "provider": "codex-cli",
       "max_tokens": 8192,
       "enable_thinking": true,
-      "plan_model": "cc/claude-opus-4-6",
+      "plan_model": "cc/claude-opus-4-8",
       "plan_provider": "claude-cli",
       "plan_max_tokens": 4096,
       "plan_enable_thinking": true,

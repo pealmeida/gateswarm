@@ -50,7 +50,9 @@
     "eval:leaderboard": "tsx eval/leaderboard.ts",
     "eval:features": "tsx eval/feature-report.ts",
     "typecheck": "tsc --noEmit",
-    "lint": "tsc --noEmit"
+    "check:types": "tsc --noEmit",
+    "lint": "tsc --noEmit",
+    "check:consistency": "tsx eval/consistency-check.ts"
   },
   "dependencies": {
     "dotenv": "^17.4.2",

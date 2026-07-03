@@ -86,14 +86,14 @@ All 6 tiers and their current model assignments (live in `v04_config.json`, hot-
 
 | Tier | Score Range | Act Model | Act Provider | Max Tokens | Reasoning |
 |------|-------------|-----------|--------------|------------|-----------|
-| **trivial** | 0.00 – 0.16 | qwen2.5:0.5b | ollama | 256 | — |
-| **light** | 0.16 – 0.28 | minimax-m2.7 | ollama-cloud | 512 | — |
-| **moderate** | 0.28 – 0.35 | glm-5 | zai | 2048 | — |
-| **heavy** | 0.35 – 0.40 | glm-5.1 | zai | 4096 | ✓ |
-| **intensive** | 0.40 – 0.46 | cx/gpt-5.4-codex | codex-cli | 4096 | — |
-| **extreme** | 0.46 – 1.00 | cx/gpt-5.4-codex | codex-cli | 8192 | — |
+| **trivial** | 0.00 – 0.21 | qwen2.5:0.5b | ollama | 256 | — |
+| **light** | 0.21 – 0.28 | minimax-m2.7 | ollama-cloud | 512 | — |
+| **moderate** | 0.28 – 0.32 | glm-5 | zai | 2048 | — |
+| **heavy** | 0.32 – 0.37 | glm-5.1 | zai | 4096 | ✓ |
+| **intensive** | 0.37 – 0.46 | cx/gpt-5.4-codex | codex-cli | 4096 | ✓ |
+| **extreme** | 0.46 – 1.00 | cx/gpt-5.4-codex | codex-cli | 8192 | ✓ |
 
-Reasoning (`enable_thinking`) is on for heavy and extreme tiers. Tier models, plan/act overrides, and fallback chains are fully configurable via CLI or by editing `v04_config.json` directly.
+Reasoning (`enable_thinking`) is on for heavy, intensive, and extreme tiers. Tier models, plan/act overrides, and fallback chains are fully configurable via CLI or by editing `v04_config.json` directly.
 
 ### Plan vs Act (per tier)
 
@@ -106,7 +106,7 @@ Every tier has two model assignments — one for **acting** (default: implementa
 | **moderate** | glm-5 | zai | glm-4.7-flash | zai |
 | **heavy** | glm-5.1 | zai | glm-5 | zai |
 | **intensive** | cx/gpt-5.4-codex | codex-cli | cc/claude-sonnet-4-6 | claude-cli |
-| **extreme** | cx/gpt-5.4-codex | codex-cli | cc/claude-opus-4-6 | claude-cli |
+| **extreme** | cx/gpt-5.4-codex | codex-cli | cc/claude-opus-4-8 | claude-cli |
 
 Auto-detection (`detectIntentMode`) scores stem-aware keyword hits plus intent patterns. Override explicitly with `"mode": "plan"` / `"mode": "act"` in the request body, or the `X-Mode` request header.
 
@@ -236,12 +236,15 @@ Key sections:
 
 A consistency check (`eval/consistency-check.ts`) enforces that every model in the config exists in its provider's catalog. So you can't typo a model name silently.
 
-### 3. Add a new provider
+### 3. Add a new provider or model
 
-1. Add a provider adapter in `src/adapters/` (HTTP or CLI type).
-2. Register in `data/agent-registry.json`.
-3. Reference in `v04_config.json` tier_models.
-4. Run `npx tsx eval/consistency-check.ts` to validate.
+**New model on an existing provider:** add it to the provider's catalog — `HTTP_PROVIDER_MODELS` in `src/agent-registry.ts` for HTTP providers, `DEFAULT_CLI_PROVIDERS` (with a prefix alias) for CLI agents — then reference it in `v04_config.json` tier_models. Unprefixed model names resolve to the first registered provider whose catalog lists them, so no extra routing rule is needed.
+
+**New provider:**
+
+1. HTTP: add a catalog entry to `HTTP_PROVIDER_MODELS` and register it in `AgentRegistry.initialize()` (base URL + API key from `.env`). CLI: add an entry to `DEFAULT_CLI_PROVIDERS` with its prefix alias map.
+2. Reference its models in `v04_config.json` tier_models.
+3. Run `npm run check:consistency` to validate (also enforced by `npm test`).
 
 CLI providers require only an OAuth/binary check; HTTP providers require API keys in `.env`.
 

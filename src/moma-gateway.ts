@@ -968,7 +968,11 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
     // If the trivial provider is throttled/rate-limited, fall through to
     // normal routing which has the full fallback chain.
     const trivialHealth = providerQuota.shouldSwitch(trivialCfg.provider);
-    if (!trivialHealth.shouldSwitch && (trivialCfg?.provider === 'ollama' || trivialCfg?.provider === 'zai' || trivialCfg?.provider === 'ollama-cloud' || trivialCfg?.provider === 'opencodego')) {
+    // Any HTTP provider qualifies — the fast-path is a plain chat-completions
+    // POST. Only CLI providers (subprocess dispatch) must fall through to the
+    // normal routing path. A hardcoded provider list here silently disabled
+    // the fast-path whenever the trivial tier was re-pointed at a new provider.
+    if (!trivialHealth.shouldSwitch && trivialCfg && agentRegistry.isHttpProvider(trivialCfg.provider)) {
       console.log(`⚡ [${agent.name}] Greeting fast-path: '${promptText.slice(0,20)}' → ${trivialCfg.provider}/${trivialCfg.model}`);
       // Strip system messages, send only the user message
       const greetingMessages = [messages.filter((m: any) => m.role === 'user').pop()].filter(Boolean);

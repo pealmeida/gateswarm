@@ -26,7 +26,7 @@ export interface ConsistencyResult {
   cliProviders: string[];
 }
 
-// Mirror agentRegistry.resolveModel prefix/pattern logic to infer providerId from a model string.
+// Mirror agentRegistry.resolveModel prefix/catalog/pattern logic to infer providerId from a model string.
 function inferProvider(model: string): string | null {
   if (model.startsWith('cc/')) return 'claude-cli';
   if (model.startsWith('cx/')) return 'codex-cli';
@@ -37,6 +37,14 @@ function inferProvider(model: string): string | null {
   if (model.startsWith('bailian/')) return 'bailian';
   if (model.startsWith('zai/')) return 'zai';
   if (model.startsWith('opencodego/')) return 'opencodego';
+  // Exact catalog lookup (mirrors agentRegistry.findProviderForModel): any model a
+  // provider catalog lists resolves to that provider without a bespoke prefix rule.
+  for (const [pid, models] of Object.entries(HTTP_PROVIDER_MODELS)) {
+    if (models.includes(model)) return pid;
+  }
+  for (const [pid, p] of Object.entries(DEFAULT_CLI_PROVIDERS)) {
+    if (p.models.includes(model)) return pid;
+  }
   if (model.startsWith('glm-')) return 'zai';
   if (model.startsWith('deepseek-') || model.startsWith('qwen3.7-')) return 'opencodego';
   if (model.startsWith('qwen') || model.startsWith('kimi') || model.startsWith('MiniMax')) return 'bailian';

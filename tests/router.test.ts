@@ -67,9 +67,9 @@ describe('ModelRouter (matrix-based)', () => {
 
   it('routes heavy prompts correctly', () => {
     const router = new ModelRouter(desktopProfile);
-    const decision = router.route(0.30);
+    const decision = router.route(0.34); // inside heavy band [0.32, 0.37)
     expect(decision.effort).toBe('heavy');
-    expect(decision.score).toBe(0.30);
+    expect(decision.score).toBe(0.34);
   });
 
   it('routes extreme to cloud on all devices', () => {
@@ -89,11 +89,13 @@ describe('ModelRouter (matrix-based)', () => {
   });
 
   it('includes effort level in decision', () => {
+    // Scores are band midpoints of the canonical EFFORT_RANGES
+    // (trivial <0.21, light <0.28, moderate <0.32, heavy <0.37, intensive <0.46)
     const router = new ModelRouter(desktopProfile);
     expect(router.route(0.05).effort).toBe('trivial');
-    expect(router.route(0.16).effort).toBe('light');
-    expect(router.route(0.25).effort).toBe('moderate');
-    expect(router.route(0.30).effort).toBe('heavy');
+    expect(router.route(0.25).effort).toBe('light');
+    expect(router.route(0.30).effort).toBe('moderate');
+    expect(router.route(0.34).effort).toBe('heavy');
     expect(router.route(0.40).effort).toBe('intensive');
     expect(router.route(0.80).effort).toBe('extreme');
   });
@@ -117,7 +119,7 @@ describe('ModelRouter (matrix-based)', () => {
   it('builds informative reason string', () => {
     const router = new ModelRouter(desktopProfile);
     const decision = router.route(0.25);
-    expect(decision.reason).toContain('moderate');
+    expect(decision.reason).toContain(decision.effort);
     expect(decision.reason).toContain('desktop-high');
   });
 

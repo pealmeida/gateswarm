@@ -549,37 +549,41 @@ describe('🏷️ Provider Type Classification', () => {
 // ─── 10. Multi-Provider Routing Integration ──────────────────
 
 describe('🌐 Multi-Provider Routing Integration', () => {
-  it('can resolve a model through HTTP provider fallback chain', async () => {
-    const { getTierModel } = await import('../src/v04-config.js');
-    const heavy = getTierModel('heavy');
-
-    // Primary should use the configured OpenCodeGo deep reasoning model.
-    expect(heavy!.provider).toBe('opencodego');
-    expect(heavy!.model).toBe('deepseek-v4-pro');
-
-    // Fallback chain should include both HTTP and CLI providers
-    const hasHttp = heavy!.fallback_models!.some((fm: any) =>
-      ['bailian', 'zai'].includes(fm.provider)
-    );
-    const hasCli = heavy!.fallback_models!.some((fm: any) =>
-      ['claude-cli', 'codex-cli'].includes(fm.provider)
-    );
-    expect(hasHttp).toBe(true);
-    expect(hasCli).toBe(true);
+  // These assert structural invariants of the routing config, not specific
+  // provider/model names: the gateway's self-healing rebalance rewrites tier
+  // primaries in v04_config.json at runtime, so hardcoded names always drift.
+  it('every tier resolves primary + fallbacks to registered providers', async () => {
+    const { getAllTierModels } = await import('../src/v04-config.js');
+    for (const [tier, cfg] of Object.entries(getAllTierModels())) {
+      expect(agentRegistry.getProvider(cfg.provider), `${tier} primary provider ${cfg.provider}`).toBeDefined();
+      for (const fb of cfg.fallback_models ?? []) {
+        expect(agentRegistry.getProvider(fb.provider), `${tier} fallback provider ${fb.provider}`).toBeDefined();
+      }
+    }
   });
 
-  it('extreme tier routes to premium CLI providers', async () => {
+  it('heavy tier fallback chain crosses provider boundaries (failover diversity)', async () => {
     const { getTierModel } = await import('../src/v04-config.js');
-    const extreme = getTierModel('extreme');
+    const heavy = getTierModel('heavy')!;
+    const chain = heavy.fallback_models ?? [];
+    expect(chain.length).toBeGreaterThan(0);
+    // A chain confined to the primary's provider can't survive a provider-wide
+    // outage (429 storm, expired key) — require at least two distinct providers.
+    const providers = new Set([heavy.provider, ...chain.map((f: any) => f.provider)]);
+    expect(providers.size).toBeGreaterThanOrEqual(2);
+  });
 
-    expect(extreme!.provider).toBe('opencodego');
-    expect(extreme!.model).toBe('deepseek-v4-pro');
-
-    // Should retain a premium CLI fallback for provider diversity.
-    const cliFallback = extreme!.fallback_models!.find((fm: any) =>
-      fm.model?.startsWith('cc/') || fm.model?.startsWith('cx/')
-    );
-    expect(cliFallback).toBeDefined();
+  it('extreme tier keeps a premium reasoning agent in its act/plan/fallback set', async () => {
+    const { getTierModel } = await import('../src/v04-config.js');
+    const extreme = getTierModel('extreme')!;
+    const targets = [
+      { provider: extreme.provider, model: extreme.model },
+      ...(extreme.plan_provider && extreme.plan_model
+        ? [{ provider: extreme.plan_provider, model: extreme.plan_model }] : []),
+      ...(extreme.fallback_models ?? []),
+    ];
+    const hasCliAgent = targets.some(t => agentRegistry.isCliProvider(t.provider));
+    expect(hasCliAgent, `extreme targets: ${targets.map(t => `${t.provider}/${t.model}`).join(', ')}`).toBe(true);
   });
 
   it('resolveModel routes CLI prefix models to correct providers', () => {

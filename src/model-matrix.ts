@@ -227,11 +227,12 @@ export function scoreModelForTier(model: ModelEntry): { tier: EffortLevel; score
   else if (id.includes('qwen-coder')) params = 32;
   else if (id.includes('qwen-math')) params = 72;
 
-  // MiniMax
-  else if (id.includes('minimax-m2')) params = 8;
-  else if (id.includes('minimax-m2.1')) params = 12;
-  else if (id.includes('minimax-m2.5')) params = 24;
+  // MiniMax — dotted sub-versions before the bare "m2" catch-all, or
+  // minimax-m2.7 (56B) would match "minimax-m2" and misclassify as 8B
   else if (id.includes('minimax-m2.7')) params = 56;
+  else if (id.includes('minimax-m2.5')) params = 24;
+  else if (id.includes('minimax-m2.1')) params = 12;
+  else if (id.includes('minimax-m2')) params = 8;
   else if (id.includes('minimax-m3')) params = 32;
   else if (id.includes('minimax-text')) params = 32;
 

@@ -153,7 +153,8 @@ export const HTTP_PROVIDER_MODELS: Record<string, string[]> = {
     'qwen3.6-plus', 'kimi-k2.5', 'kimi-k2.6', 'glm-5', 'glm-5.1',
     'minimax-m3', 'minimax-m2.7', 'mimo-v2.5', 'mimo-v2.5-pro'],
   ollama: ['qwen2.5:0.5b', 'qwen2.5:1.5b'],
-  'ollama-cloud': ['kimi-k2.5', 'kimi-k2.6', 'glm-5.1', 'gemma3:12b', 'qwen3-vl:235b', 'minimax-m3'],
+  'ollama-cloud': ['kimi-k2.5', 'kimi-k2.6', 'kimi-k2.7-code', 'glm-5.1', 'gemma3:12b',
+    'qwen3-vl:235b', 'minimax-m2.7', 'minimax-m3', 'deepseek-v4-pro'],
 };
 
 // ─── CLI Provider Defaults ─────────────────────────────
@@ -206,7 +207,7 @@ export const DEFAULT_CLI_PROVIDERS: Record<string, CliProviderEntry> = {
       modelAlias: {
         'cx/gpt-5.5-codex': 'gpt-5.5',
         'cx/gpt-5.4-codex': 'gpt-5.4',
-        'cx/gpt-5.3-codex': 'gpt-5.5',
+        'cx/gpt-5.3-codex': 'gpt-5.3',
         'cx/gpt-4.1': 'gpt-4.1',
       },
       healthCheck: { command: '"${GATESWARM_ROOT:-.}"/bin/cli-health-probe.sh codex-cli', expectedExitCode: 0 },
@@ -344,7 +345,7 @@ export class AgentRegistry {
       type: 'http-api',
       baseUrl: process.env.OLLAMA_BASE || 'http://127.0.0.1:11434/v1',
       apiKey: process.env.OLLAMA_KEY || 'ollama',
-      models: ['qwen2.5:0.5b', 'qwen2.5:1.5b'],
+      models: HTTP_PROVIDER_MODELS.ollama,
     });
 
     this.registerProvider({
@@ -353,7 +354,7 @@ export class AgentRegistry {
       type: 'http-api',
       baseUrl: process.env.OLLAMA_CLOUD_BASE || 'https://ollama.com/v1',
       apiKey: process.env.OLLAMA_CLOUD_KEY || process.env.OLLAMA_API_KEY || '',
-      models: ['kimi-k2.5', 'kimi-k2.6', 'glm-5.1', 'gemma3:12b', 'minimax-m3'],
+      models: HTTP_PROVIDER_MODELS['ollama-cloud'],
     });
 
     // Load persisted state (providers + agents)
@@ -577,6 +578,19 @@ export class AgentRegistry {
 
   // ─── Model Resolution ────────────────────────────────
 
+  /**
+   * Find the provider whose catalog lists this exact model name.
+   * Providers are checked in registration order, so shared models
+   * (e.g. glm-5.1 on both zai and ollama-cloud) resolve deterministically
+   * to the first registered provider that serves them.
+   */
+  findProviderForModel(model: string): string | null {
+    for (const p of Object.values(this.providers)) {
+      if (p.models?.includes(model)) return p.id;
+    }
+    return null;
+  }
+
   resolveModel(agent: AgentConfig, tier: string): { providerId: string; model: string } {
     const model = agent.tierConfig[tier as keyof AgentTierConfig] || agent.tierConfig.moderate;
 
@@ -617,7 +631,14 @@ export class AgentRegistry {
       return { providerId: 'ollama-cloud', model: model.replace('ollama-cloud/', '') };
     }
 
-    // No prefix — detect provider by model name pattern
+    // No prefix — exact catalog lookup across registered providers. Any model a
+    // provider's catalog lists is routable without needing a new prefix rule here.
+    const catalogHit = this.findProviderForModel(model);
+    if (catalogHit) {
+      return { providerId: catalogHit, model };
+    }
+
+    // No catalog hit — detect provider by model name pattern
     // Z.AI models: glm-*
     if (model.startsWith('glm-')) {
       return { providerId: 'zai', model };
