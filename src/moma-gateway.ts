@@ -1064,6 +1064,16 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
           });
           if (resp.ok) {
             emitModeHeaders(req, res, promptText);
+            // Routing-transparency headers — the fast-path bypasses scoring, so
+            // emit the trivial-tier decision explicitly (matching the normal
+            // path at the end of this handler) instead of leaving them blank.
+            res.setHeader('X-Tier', 'trivial');
+            res.setHeader('X-Score', (0.05).toFixed(4));
+            res.setHeader('X-Routed-Model', `${trivialCfg.provider}/${trivialCfg.model}`);
+            res.setHeader('X-Routed-Tier', 'trivial');
+            res.setHeader('X-Routing-Method', 'greeting-fast-path');
+            res.setHeader('X-Routing-Reason', 'greeting-fast-path');
+            res.setHeader('X-Modality', 'text');
             if (clientWantsStream) {
               // Forward the upstream SSE stream as-is
               res.writeHead(200, {
