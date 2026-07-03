@@ -822,6 +822,12 @@ function extractApiKey(req: IncomingMessage): string {
   return (req.headers['x-api-key'] as string) || '';
 }
 
+// Optional auth enforcement. GATESWARM_REQUIRE_AUTH=true rejects requests
+// whose key doesn't resolve to a registered agent, instead of silently
+// falling back to the `default` agent. Off by default to preserve the
+// zero-config local-dev experience; turn ON for any network-exposed deploy.
+const REQUIRE_AUTH = /^(1|true|yes|on)$/i.test(process.env.GATESWARM_REQUIRE_AUTH || '');
+
 async function forwardToProvider(
   providerId: string,
   model: string,
@@ -2430,6 +2436,9 @@ async function init() {
         if (apiKey) {
           agent = await agentRegistry.authenticate(apiKey);
         }
+        if (!agent && REQUIRE_AUTH) {
+          return jsonResponse(res, 401, { error: { message: 'Invalid or missing API key', type: 'authentication_error' } });
+        }
         if (!agent) {
           agent = agentRegistry.getAgent('default') ?? null;
         }
@@ -2533,6 +2542,13 @@ async function init() {
 
         if (apiKey) {
           agent = await agentRegistry.authenticate(apiKey);
+        }
+
+        // Optional strict auth: reject unresolved keys instead of falling back.
+        if (!agent && REQUIRE_AUTH) {
+          return jsonResponse(res, 401, {
+            error: { message: 'Invalid or missing API key', type: 'authentication_error' },
+          });
         }
 
         // If no valid agent key, use default
@@ -2696,8 +2712,14 @@ async function init() {
     }
   });
 
-  server.listen(PORT, () => {
-    console.log(`✅ GateSwarm MoMA Router v0.5.6 (Routing Transparency) listening on http://localhost:${PORT}`);
+  // Bind host: default to loopback so a fresh install is not network-exposed.
+  // Set GATESWARM_HOST=0.0.0.0 to expose it (do this only with REQUIRE_AUTH=true).
+  const HOST = process.env.GATESWARM_HOST || '127.0.0.1';
+  if ((HOST === '0.0.0.0' || HOST === '::') && !REQUIRE_AUTH) {
+    console.warn(`⚠️  SECURITY: binding ${HOST} without GATESWARM_REQUIRE_AUTH — anyone on the network can spend your provider quota. Set GATESWARM_REQUIRE_AUTH=true.`);
+  }
+  server.listen(PORT, HOST, () => {
+    console.log(`✅ GateSwarm MoMA Router v0.5.6 (Routing Transparency) listening on http://${HOST}:${PORT}`);
     console.log(`📡 Endpoint: http://localhost:${PORT}/v1/chat/completions`);
     console.log(`📊 Metrics: http://localhost:${PORT}/metrics`);
     console.log(`🤖 Agents: http://localhost:${PORT}/v1/agents`);
