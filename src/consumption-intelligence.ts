@@ -47,7 +47,8 @@ export type DecisionReason =
   | 'only_available'
   | 'consumption_balanced'
   | 'provider_preferred'
-  | 'static_fallback';
+  | 'static_fallback'
+  | 'vision_widened';
 
 export interface ConsumptionStats {
   totalTokensIn: number;
@@ -321,14 +322,25 @@ class ConsumptionIntelligence {
     excludeProviders?: string[];
     estimatedPromptTokens?: number;
     source?: 'request' | 'health-check' | 'balance-check' | 'recovery-check';
+    /** MoMA: request carries image/video parts — restrict to vision-capable models. */
+    requireVision?: boolean;
   }): Promise<ConsumptionDecision> {
-    const reqs = TIER_REQUIREMENTS[tier];
+    // MoMA: per-request modality needs override the tier's static requirements.
+    const reqs: TierRequirements = options?.requireVision
+      ? { ...TIER_REQUIREMENTS[tier], needsVision: true }
+      : TIER_REQUIREMENTS[tier];
     const staticCfg = getConfig().tier_models[tier];
+
+    // MoMA: a vision request can't take the static-primary shortcut unless the
+    // static model is known vision-capable — otherwise fall through to dynamic
+    // discovery, which filters on supportsVision.
+    const staticVisionOk = !reqs.needsVision
+      || (staticCfg ? this.modelSupportsVision(staticCfg.provider, staticCfg.model) : false);
 
     // ── v0.5.7: Static config is PRIMARY ──────────────────
     // Probe the static config's provider first. If healthy, use it.
     // Skip static priority only for recovery-check (we're looking for alternatives).
-    if (staticCfg && options?.source !== 'recovery-check') {
+    if (staticCfg && staticVisionOk && options?.source !== 'recovery-check') {
       const probe = await this.probeProvider(staticCfg.provider);
       if (probe.healthy && this.isProviderHealthy(staticCfg.provider)) {
         const decision: ConsumptionDecision = {
@@ -390,7 +402,10 @@ class ConsumptionIntelligence {
       if (!providerConfig) return false;
       const baseUrl = agentRegistry.getProviderBaseUrl(m.provider);
       if (!baseUrl && !['ollama', 'ollama-cloud'].includes(m.provider)) return false;
-      // Note: API key can be empty for free-tier providers (openrouter free models)
+      // HTTP dispatch requires an API key (buildTarget rejects keyless
+      // providers with a 503) — mirror that here so we never select a
+      // provider we can't actually dispatch to.
+      if (agentRegistry.isHttpProvider(m.provider) && !agentRegistry.getProviderApiKey(m.provider)) return false;
 
       // ── v0.5.7: Exclude unhealthy providers ──
       if (excludeSet.has(m.provider)) return false;
@@ -413,8 +428,43 @@ class ConsumptionIntelligence {
     });
 
     if (candidates.length === 0) {
+      // MoMA: before degrading a vision request to a text-only model, widen
+      // the tier band — ANY healthy vision-capable model beats sending the
+      // image as an [image] placeholder.
+      if (reqs.needsVision) {
+        const visionAny = allModels.filter(m =>
+          m.supportsVision
+          && !excludeSet.has(m.provider)
+          && this.isProviderHealthy(m.provider)
+          && agentRegistry.getProviderBaseUrl(m.provider)
+          && (!agentRegistry.isHttpProvider(m.provider) || agentRegistry.getProviderApiKey(m.provider)),
+        );
+        if (visionAny.length > 0) {
+          visionAny.sort((a, b) => this.scoreModel(b, tier, reqs, options?.preferProvider) - this.scoreModel(a, tier, reqs, options?.preferProvider));
+          const pick = visionAny[0];
+          console.log(`🧠 [Intel] ${tier}: no in-tier vision candidates — widened tier band to ${pick.provider}/${pick.id} (vision_widened)`);
+          const decision: ConsumptionDecision = {
+            provider: pick.provider,
+            model: pick.id,
+            tier,
+            reason: 'vision_widened',
+            estimatedTokens: options?.estimatedPromptTokens || 500,
+            estimatedCost: 0,
+            confidence: 0.6,
+            alternatives: visionAny.slice(1, 3).map(m => ({ provider: m.provider, model: m.id, reason: 'vision_widened' })),
+            source: options?.source || 'request',
+            timestamp: Date.now(),
+          };
+          this.decisions.push(decision);
+          if (this.decisions.length > this.maxDecisionHistory) this.decisions.shift();
+          return decision;
+        }
+      }
       // Ultimate fallback: use static config even if provider is unhealthy
       if (staticCfg) {
+        if (reqs.needsVision) {
+          console.log(`⚠️  [Intel] ${tier}: vision requested but no vision-capable candidates — degrading to text-only static config (images sent as [image] placeholders)`);
+        }
         console.log(`🧠 [Intel] ${tier}: no healthy candidates — using static config anyway: ${staticCfg.provider}/${staticCfg.model}`);
         return {
           provider: staticCfg.provider,
@@ -478,21 +528,31 @@ class ConsumptionIntelligence {
   }
 
   /**
+   * MoMA: is this model known to accept image input?
+   * Unknown models (not in the matrix) are treated as text-only so a vision
+   * request never silently lands on a model that can't see the image.
+   */
+  modelSupportsVision(provider: string, modelId: string): boolean {
+    const model = modelMatrix.getModel(provider, modelId);
+    return model?.supportsVision === true;
+  }
+
+  /**
    * Get the best alternative when a model fails.
    */
-  async getFallback(tier: EffortLevel, failedProvider: string, failedModel: string, source: 'request' | 'health-check' | 'balance-check' | 'recovery-check' = 'request'): Promise<ConsumptionDecision | null> {
+  async getFallback(tier: EffortLevel, failedProvider: string, failedModel: string, source: 'request' | 'health-check' | 'balance-check' | 'recovery-check' = 'request', requireVision = false): Promise<ConsumptionDecision | null> {
     const excludeProviders = new Set([failedProvider]);
 
     // Try same tier excluding failed provider
     try {
-      return await this.selectModel(tier, { excludeProviders: [...excludeProviders], source });
+      return await this.selectModel(tier, { excludeProviders: [...excludeProviders], source, requireVision });
     } catch {
       // Fall back to next tier up
       const tiers: EffortLevel[] = ['trivial', 'light', 'moderate', 'heavy', 'intensive', 'extreme'];
       const idx = tiers.indexOf(tier);
       for (let i = idx + 1; i < tiers.length; i++) {
         try {
-          return await this.selectModel(tiers[i], { excludeProviders: [...excludeProviders], source });
+          return await this.selectModel(tiers[i], { excludeProviders: [...excludeProviders], source, requireVision });
         } catch { /* continue */ }
       }
     }

@@ -136,10 +136,13 @@ function getModelHeuristics(providerId: string, modelId: string): ModelHeuristic
     id.includes('mimo-v2.5-pro') || id.includes('hy3-preview') ||
     id.includes('cogito');
 
-  // Vision support
+  // Vision support (MoMA: cover common vision model families)
   supportsVision = id.includes('vl') || id.includes('gemini') ||
     id.includes('gemma4') || id.includes('mimo-v2-omni') ||
-    id.includes('qwen3-vl') || id.includes('omni');
+    id.includes('qwen3-vl') || id.includes('omni') ||
+    id.includes('llava') || id.includes('vision') ||
+    id.includes('moondream') || id.includes('pixtral') ||
+    id.includes('gemma3') || /glm-\d(\.\d)?v\b/.test(id);
 
   // Tools support — most modern models support this
   supportsTools = contextWindow >= 32000;

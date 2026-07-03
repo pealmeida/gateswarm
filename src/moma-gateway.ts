@@ -1,6 +1,7 @@
 #!/usr/bin/env tsx
 import * as dotenv from 'dotenv';
-dotenv.config({ path: new URL('../.env', import.meta.url).pathname });
+import { fileURLToPath } from 'url';
+dotenv.config({ path: fileURLToPath(new URL('../.env', import.meta.url)) });
 import { loadVaultEnv } from './secrets/vault-env.js';
 /**
  * GateSwarm MoMA Router v0.5.6 — Multi-Agent API Gateway
@@ -92,7 +93,6 @@ import {
 } from './training-mode.js';
 import { getCalibrationStats, calibrateBronze, calibrateSilver } from './label-combiner.js';
 import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
 
 
 
@@ -127,6 +127,14 @@ function messageContentToText(content: any): string {
 
   if (typeof content === 'object') {
     const record = content as Record<string, any>;
+    // MoMA: media parts become compact placeholders — never stringify a
+    // base64 payload into prompt text (blows up scoring + CLI prompts).
+    if (typeof record.type === 'string') {
+      if (record.type === 'image_url' || record.type === 'image' || record.type === 'input_image') return '[image]';
+      if (record.type === 'input_audio' || record.type === 'audio') return '[audio]';
+      if (record.type === 'video_url' || record.type === 'video') return '[video]';
+      if (record.type === 'file' || record.type === 'document') return '[file]';
+    }
     if (typeof record.text === 'string') return record.text;
     if (typeof record.input_text === 'string') return record.input_text;
     if (typeof record.output_text === 'string') return record.output_text;
@@ -143,6 +151,45 @@ function messageContentToText(content: any): string {
 function normalizeMessageContent(message: any): any {
   if (!message || typeof message !== 'object' || !('content' in message)) return message;
   return { ...message, content: messageContentToText(message.content) };
+}
+
+// ─── MoMA: request modality detection ──────────────────
+// A content part is "media" when its type names an image/audio/video/file
+// input. Media-bearing messages keep their original content arrays so the
+// upstream vision model receives the actual payload; text-only content is
+// still flattened to plain strings for maximum provider compatibility.
+
+const MEDIA_PART_TYPES = new Set([
+  'image_url', 'image', 'input_image',
+  'input_audio', 'audio',
+  'video_url', 'video',
+  'file', 'document',
+]);
+
+function messageHasMediaParts(message: any): boolean {
+  const c = message?.content;
+  if (!Array.isArray(c)) return false;
+  return c.some((part) => part && typeof part === 'object' && MEDIA_PART_TYPES.has(part.type));
+}
+
+export interface RequestModalities {
+  vision: boolean;
+  audio: boolean;
+}
+
+function detectRequestModalities(messages: any[]): RequestModalities {
+  const result: RequestModalities = { vision: false, audio: false };
+  for (const msg of messages) {
+    const c = msg?.content;
+    if (!Array.isArray(c)) continue;
+    for (const part of c) {
+      const t = part && typeof part === 'object' ? part.type : undefined;
+      if (t === 'image_url' || t === 'image' || t === 'input_image' || t === 'video_url' || t === 'video') result.vision = true;
+      else if (t === 'input_audio' || t === 'audio') result.audio = true;
+    }
+    if (result.vision && result.audio) break;
+  }
+  return result;
 }
 
 function createTerminalStreamChunk(model: string, finishReason: StreamFinishReason): string {
@@ -410,7 +457,17 @@ async function handleDirectRoute(
   // Forcing stream:false broke streaming clients and caused
   // "Stream ended without finish_reason" errors.
   const clientWantsStream = body.stream === true;
-  const payload: any = { messages: sanitizedMessages, model: cleanModel };
+  // MoMA: direct-routed image requests to non-vision models get placeholders
+  // instead of a provider 400 on the image_url content parts.
+  const directModalities = detectRequestModalities(sanitizedMessages);
+  const directMessages = directModalities.vision
+    && !consumptionIntelligence.modelSupportsVision(providerId, cleanModel)
+    ? (() => {
+        console.log(`⚠️  [${agent.name}] ${providerId}/${cleanModel} is not vision-capable — sending media parts as placeholders`);
+        return sanitizedMessages.map(normalizeMessageContent);
+      })()
+    : sanitizedMessages;
+  const payload: any = { messages: directMessages, model: cleanModel };
   if (clientWantsStream) {
     payload.stream = true;
     payload.stream_options = { include_usage: true };
@@ -666,7 +723,9 @@ function sanitizeMessages(msgs: any[]): any[] {
   const merged: any[] = [];
   for (const msg of nonSystemMsgs) {
     const prev = merged.length > 0 ? merged[merged.length - 1] : null;
-    if (prev && prev.role === msg.role) {
+    // MoMA: never merge media-bearing messages — stringifying a content
+    // array would inline base64 payloads into text.
+    if (prev && prev.role === msg.role && !messageHasMediaParts(prev) && !messageHasMediaParts(msg)) {
       const prevContent = typeof prev.content === 'string' ? prev.content : JSON.stringify(prev.content);
       const currContent = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
       prev.content = prevContent + '\n---\n' + currContent;
@@ -900,11 +959,15 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
   const body = await parseBody(req);
   (req as any)._body = body;
   const rawMessages = Array.isArray(body.messages) ? body.messages : [];
-  const messages = rawMessages.map(normalizeMessageContent);
+  // MoMA: media-bearing messages keep their original content arrays (the
+  // upstream vision model needs the real payload); everything else is
+  // flattened to plain text for provider compatibility.
+  const requestModalities = detectRequestModalities(rawMessages);
+  const messages = rawMessages.map((m: any) => messageHasMediaParts(m) ? m : normalizeMessageContent(m));
 
-  // Extract prompt text for complexity scoring
+  // Extract prompt text for complexity scoring (media parts become placeholders)
   const lastUserMessage = messages.filter((m: any) => m.role === 'user').pop();
-  const promptText = messageContentToText(lastUserMessage?.content) || JSON.stringify(messages);
+  const promptText = messageContentToText(lastUserMessage?.content) || JSON.stringify(messages.map(normalizeMessageContent));
 
 
 
@@ -1103,11 +1166,17 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
   const activeMode: IntentMode = modeOverride ?? modeDetection.mode;
 
   // ─── v0.5.6: Token Consumption Intelligence Routing (async with probing) ──────
+  // MoMA: estimate over flattened text (media parts count as placeholders);
+  // requireVision restricts candidates to vision-capable models.
+  const estimatedPromptTokens = estimateTokens(
+    messages.map((m: any) => messageContentToText(m?.content)).join('\n'),
+  );
   let decision: ConsumptionDecision;
   try {
     decision = await consumptionIntelligence.selectModel(effort, {
-      estimatedPromptTokens: estimateTokens(messages),
+      estimatedPromptTokens,
       source: 'request',
+      requireVision: requestModalities.vision,
     });
   } catch {
     console.log(`🧠 [${agent.name}] Intelligence engine failed — using static config`);
@@ -1117,7 +1186,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
       model: staticCfg?.model || 'glm-4.5-air',
       tier: effort,
       reason: 'static_fallback',
-      estimatedTokens: estimateTokens(messages),
+      estimatedTokens: estimatedPromptTokens,
       estimatedCost: 0,
       confidence: 0.1,
       alternatives: [],
@@ -1265,7 +1334,8 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
       if (
         prevMsg &&
         prevMsg.role === msg.role &&
-        msg.role !== 'tool'  // Never merge tool messages
+        msg.role !== 'tool' &&  // Never merge tool messages
+        !messageHasMediaParts(prevMsg) && !messageHasMediaParts(msg)  // MoMA: keep media arrays intact
       ) {
         // Merge content
         const prevContent = typeof prevMsg.content === 'string' ? prevMsg.content : JSON.stringify(prevMsg.content);
@@ -1474,7 +1544,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
     const retryTargets: RetryTarget[] = [initial];
 
     // Get intelligent fallbacks from consumption engine
-    const intelFallback = await consumptionIntelligence.getFallback(effort, providerId, model);
+    const intelFallback = await consumptionIntelligence.getFallback(effort, providerId, model, 'request', requestModalities.vision);
     if (intelFallback) {
       const ifb = buildTarget(intelFallback.provider, intelFallback.model);
       if (ifb) retryTargets.push(ifb);
@@ -1565,13 +1635,23 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
           : fBaseUrl;
         const reqController = new AbortController();
         reqTimeoutId = setTimeout(() => reqController.abort(), 120000);
+        // MoMA: non-vision targets reject image_url content parts (e.g. zai
+        // error 1210) — flatten media to placeholders for them; vision-capable
+        // targets receive the original content arrays.
+        const targetPayload = requestModalities.vision
+          && !consumptionIntelligence.modelSupportsVision(target.providerId, target.model)
+          ? (() => {
+              console.log(`⚠️  [${agent.name}] ${target.label} is not vision-capable — sending media parts as placeholders`);
+              return { ...payload, messages: payload.messages.map(normalizeMessageContent), model: target.model };
+            })()
+          : { ...payload, model: target.model };
         const resp = await fetch(url, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${target.apiKey}`,
           },
-          body: JSON.stringify({ ...payload, model: target.model }),
+          body: JSON.stringify(targetPayload),
           signal: reqController.signal,
         });
         clearTimeout(reqTimeoutId);
@@ -1741,6 +1821,10 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
       res.setHeader('X-Routed-Tier', effort);
       res.setHeader('X-Routing-Method', decision.source || 'request');
       if (decision.reason) res.setHeader('X-Routing-Reason', decision.reason);
+      // MoMA: expose detected request modalities for transparency
+      res.setHeader('X-Modality', requestModalities.vision || requestModalities.audio
+        ? ['text', requestModalities.vision ? 'vision' : '', requestModalities.audio ? 'audio' : ''].filter(Boolean).join('+')
+        : 'text');
       return jsonResponse(res, 200, data);
     } catch (err: any) {
       console.error(`❌ Provider error: ${err.message}`);
@@ -1935,6 +2019,9 @@ async function handleCliProvider(
  * CLI agents are more lenient than Bailian/ZAI — just merge consecutive same-role messages.
  */
 function sanitizeForCli(msgs: any[]): any[] {
+  // MoMA: CLI providers are text-only — flatten content arrays up front so
+  // media parts become [image]/[audio] placeholders, never raw base64.
+  msgs = msgs.map(normalizeMessageContent);
   if (msgs.length <= 1) return [...msgs];
   const systemMsgs = msgs.filter((m) => m.role === 'system');
   const nonSystemMsgs = msgs.filter((m) => m.role !== 'system');

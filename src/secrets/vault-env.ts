@@ -6,6 +6,7 @@
  * locked/absent vault never blocks the gateway. See src/secrets/README.md.
  */
 
+import { fileURLToPath } from 'node:url';
 import { loadSecrets } from './sv-secrets.mjs';
 
 export interface VaultEnvResult {
@@ -22,7 +23,7 @@ export async function loadVaultEnv(): Promise<VaultEnvResult> {
   const file = process.env.SV_FILE || '.env';
   const source = process.env.SECRETS_SOURCE || 'auto';
   // Same .env the gateway's dotenv call targets (repo root).
-  const envPath = new URL('../../.env', import.meta.url).pathname;
+  const envPath = fileURLToPath(new URL('../../.env', import.meta.url));
 
   try {
     const result = await loadSecrets({ container, file, envPath, source });
