@@ -12,6 +12,7 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import type { EffortLevel, IntentMode } from './types.js';
 import { setTierBoundaries } from './intent-engine.js';
+import { setEnsembleWeights as setVoterWeights, getEnsembleWeights as getVoterWeights } from './ensemble-voter.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CONFIG_FILE = join(__dirname, '../v04_config.json');
@@ -227,6 +228,10 @@ export function setRetrainFrequency(interactions: number): void {
 export function setEnsembleWeights(weights: Partial<EnsembleWeightsConfig>): void {
   const cfg = getConfig();
   cfg.ensemble.weights = { ...cfg.ensemble.weights, ...weights };
+  // Propagate to the live voter — config weights were previously write-only
+  // (the voter kept its own module-level copy that nothing ever updated).
+  setVoterWeights(weights);
+  cfg.ensemble.weights = { ...cfg.ensemble.weights, ...getVoterWeights() };
 }
 
 export function getTierModel(tier: EffortLevel): TierModelConfig | null {

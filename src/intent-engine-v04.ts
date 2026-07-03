@@ -82,6 +82,7 @@ export async function scoreIntent(prompt: string): Promise<ComplexityScore> {
 
     return {
       value: vote.finalScore,
+      rawValue: vote.rawScore,
       method: vote.method,
       latencyMs: latency,
       tier: vote.tier,

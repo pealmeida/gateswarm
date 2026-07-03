@@ -12,17 +12,23 @@
  * in any version. Declared 40/30/15/15 but cascade was always -1 (unavailable),
  * so effective weights were heuristic 70% + RAG 30%. Now weights are honest.
  *
- * Confidence-based routing:
- *   - confidence > 0.8 → route to predicted tier
- *   - confidence 0.5–0.8 → escalate one tier (safety margin)
- *   - confidence < 0.5 → route to intensive (safe default)
+ * Confidence is margin-based (distance to nearest tier boundary); it is
+ * reported for observability and does not trigger escalation (removed v0.5.2
+ * after it measurably hurt exact accuracy).
  */
 
 import type { EffortLevel } from './types.js';
 import { getRecentEntries } from './feedback-store.js';
+import { scoreToEffort as _scoreToEffort, getTierBoundaries } from './intent-engine.js';
 
 export interface EnsembleVote {
   finalScore: number;
+  /** finalScore WITHOUT the history-bias term. Persist THIS for boundary
+   * retraining: bias is a transient per-session correction, and fitting
+   * boundaries to bias-polluted scores couples the two feedback loops
+   * (bias shifts scores → retraining shifts boundaries → bias reverts →
+   * boundaries now miscalibrated → oscillation). */
+  rawScore: number;
   tier: EffortLevel;
   confidence: number;
   components: {
@@ -46,12 +52,15 @@ let weights = {
 
 export function setEnsembleWeights(w: Partial<typeof weights>): void {
   weights = { ...weights, ...w };
-  // Normalize to sum=1
-  const total = Object.values(weights).reduce((a, b) => a + b, 0);
+  // Normalize ONLY the multiplicative score weights to sum=1. historyBias is
+  // an ADDITIVE term (±0.1 cap applied directly, never multiplied by its
+  // weight) — including it in the normalization compressed the score scale
+  // to ~0.8× and systematically under-routed everything in the ensemble path.
+  const total = weights.heuristic + weights.cascade + weights.ragSignal;
   if (total > 0) {
-    for (const k of Object.keys(weights) as (keyof typeof weights)[]) {
-      weights[k] /= total;
-    }
+    weights.heuristic /= total;
+    weights.cascade /= total;
+    weights.ragSignal /= total;
   }
 }
 
@@ -233,18 +242,20 @@ export interface EnsembleInput {
   enableCascade?: boolean;
 }
 
-// Tier cut points — MUST match scoreToEffort()/v04_config.json (v0.5.2 calibration).
-const TIER_BOUNDARIES = [0.21, 0.28, 0.32, 0.37, 0.46];
-
 /**
  * Real confidence from distance to the nearest tier boundary.
  * A score sitting deep inside a tier band is confident; one hugging a
  * boundary is a near coin-flip. ~0.06 margin → full confidence; at the
  * boundary → 0.5. Replaces the old constant 0.7 (which forced 100% escalation).
+ *
+ * Boundaries are read LIVE from intent-engine so retraining
+ * (setTierBoundaries) keeps confidence in sync with the cut points actually
+ * used for routing — a stale hardcoded copy here measured confidence against
+ * dead boundaries after the first recalibration.
  */
 function confidenceFromMargin(score: number): number {
   let d = Math.min(score, 1 - score);
-  for (const b of TIER_BOUNDARIES) d = Math.min(d, Math.abs(score - b));
+  for (const b of getTierBoundaries()) d = Math.min(d, Math.abs(score - b));
   return Math.max(0.5, Math.min(0.95, 0.5 + (d / 0.06) * 0.45));
 }
 
@@ -264,6 +275,7 @@ export function ensembleVote(input: EnsembleInput): EnsembleVote {
   // History bias (additive, −0.1..+0.1)
   const bias = calcHistoryBias();
 
+  let rawScore: number;
   let finalScore: number;
   let confidence: number;
   let method: 'ensemble-v0.4' | 'heuristic-fallback';
@@ -273,12 +285,13 @@ export function ensembleVote(input: EnsembleInput): EnsembleVote {
     method = 'heuristic-fallback';
     if (ragPresent) {
       // Heuristic primary, RAG as a light nudge.
-      finalScore = heuristic * 0.8 + (rag as number) * 0.2 + bias;
+      rawScore = heuristic * 0.8 + (rag as number) * 0.2;
     } else {
       // No RAG context → trust the heuristic directly (full dynamic range).
-      finalScore = heuristic + bias;
+      rawScore = heuristic;
     }
-    finalScore = Math.max(0, Math.min(1, finalScore));
+    rawScore = Math.max(0, Math.min(1, rawScore));
+    finalScore = Math.max(0, Math.min(1, rawScore + bias));
     confidence = confidenceFromMargin(finalScore);
     if (ragPresent) {
       // Lower confidence when heuristic and RAG disagree.
@@ -289,12 +302,14 @@ export function ensembleVote(input: EnsembleInput): EnsembleVote {
     // Full ensemble (trained cascade available).
     method = 'ensemble-v0.4';
     const ragVal = ragPresent ? (rag as number) : heuristic; // fall back to heuristic, not 0.5
-    finalScore =
-      heuristic * weights.heuristic +
-      casc * weights.cascade +
-      ragVal * weights.ragSignal +
-      bias;
-    finalScore = Math.max(0, Math.min(1, finalScore));
+    // Normalize the multiplicative weights at use — historyBias is additive
+    // and must not eat into the score scale (see setEnsembleWeights).
+    const wSum = weights.heuristic + weights.cascade + weights.ragSignal;
+    const wH = wSum > 0 ? weights.heuristic / wSum : 1;
+    const wC = wSum > 0 ? weights.cascade / wSum : 0;
+    const wR = wSum > 0 ? weights.ragSignal / wSum : 0;
+    rawScore = Math.max(0, Math.min(1, heuristic * wH + casc * wC + ragVal * wR));
+    finalScore = Math.max(0, Math.min(1, rawScore + bias));
 
     // Confidence = agreement between methods (genuine variance-based).
     const methods = ragPresent ? [heuristic, casc, rag as number] : [heuristic, casc];
@@ -314,6 +329,7 @@ export function ensembleVote(input: EnsembleInput): EnsembleVote {
 
   return {
     finalScore,
+    rawScore,
     tier,
     confidence,
     components: {
@@ -327,5 +343,9 @@ export function ensembleVote(input: EnsembleInput): EnsembleVote {
   };
 }
 
-import { scoreToEffort as _scoreToEffort } from './intent-engine.js';
+/** True when trained cascade weights are loaded (full ensemble path active). */
+export function cascadeAvailable(): boolean {
+  return cascadeWeights.length > 0;
+}
+
 export const scoreToEffort = _scoreToEffort;

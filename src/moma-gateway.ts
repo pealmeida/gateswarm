@@ -71,7 +71,8 @@ import { scoreIntent as scoreIntentV04 } from './intent-engine-v04.js';
 import { recordFeedback, getInteractionCount, getFeedbackEntries, getTierAccuracy, shouldRetrain, initFeedbackStore, startFeedbackAutoFlush, updateAdequacy } from './feedback-store.js';
 import { selfEvaluate } from './self-eval.js';
 import { addRagEntry, initRagIndex, startRagAutoFlush } from './rag-index.js';
-import { retrainIfNeeded, getActiveWeights } from './retraining.js';
+import { retrainIfNeeded } from './retraining.js';
+import { getEnsembleWeights, cascadeAvailable } from './ensemble-voter.js';
 import { getConfig, getTierModel, getAllTierModels, getReasoningStatus, saveConfig, getTierModelForMode, detectIntentMode } from './v04-config.js';
 import type { EffortLevel, IntentMode } from './types.js';
 import { agentRegistry, AgentConfig } from './agent-registry.js';
@@ -1154,11 +1155,15 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
   // Score complexity — v0.4 ensemble
   const v04Score = await scoreIntentV04(promptText);
   let score = v04Score.value;
+  // Bias-free score for the feedback store: boundary retraining must fit
+  // against the stable signal, not the transient history-bias correction.
+  let rawScore = v04Score.rawValue ?? v04Score.value;
   let effort: EffortLevel = v04Score.tier ?? 'moderate';
 
   // v0.5.7: effort_override bypasses ensemble scoring; jump straight to the named tier.
   if (effortOverride) {
     score = ({ trivial: 0.05, light: 0.15, moderate: 0.28, heavy: 0.38, intensive: 0.45, extreme: 0.55 } as Record<string, number>)[effortOverride];
+    rawScore = score;
     effort = effortOverride as EffortLevel;
   }
 
@@ -1488,7 +1493,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
 
       return handleCliProvider(
         providerId, model, agent, messages, effort,
-        compressionResult, promptText, res, score, body.stream === true,
+        compressionResult, promptText, res, score, rawScore, body.stream === true,
       );
     }
     // Diverted to an HTTP provider — fall through to HTTP dispatch below.
@@ -1753,7 +1758,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
         adequacyScore: null,
         escalated: false,
         userSatisfaction: null,
-        score,
+        score: rawScore,
       });
 
       selfEvaluate({
@@ -1843,7 +1848,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
       console.log(`📝 [${agent.name}] Streaming disabled for CLI provider ${providerId}, using sync dispatch`);
       return handleCliProvider(
         providerId, model, agent, messages, effort,
-        compressionResult, promptText, res, score, true,
+        compressionResult, promptText, res, score, rawScore, true,
       );
     }
     if (agentRegistry.isCliProvider(providerId) && agent.id === providerId) {
@@ -1873,6 +1878,7 @@ async function handleCliProvider(
   promptText: string,
   res: ServerResponse,
   score: number = 0,
+  rawScore: number = score,
   streamResponse = false,
 ): Promise<void> {
   const cliConfig = agentRegistry.getCliProviderConfig(providerId);
@@ -1951,7 +1957,7 @@ async function handleCliProvider(
       adequacyScore: null,
       escalated: false,
       userSatisfaction: null,
-      score,
+      score: rawScore,
     });
 
     // Self-eval (non-blocking)
@@ -2570,14 +2576,19 @@ async function init() {
         const config = getConfig();
         const interactionCount = getInteractionCount();
         const accuracy = getTierAccuracy();
-        const activeWeights = getActiveWeights();
         const reasoningStatus = getReasoningStatus();
+        const cascadeLoaded = cascadeAvailable();
         return jsonResponse(res, 200, {
           version: config.version,
           method: config.method,
           interactions: interactionCount,
           ensemble: {
-            weights: activeWeights,
+            // Live voter weights, not the write-only config copy.
+            weights: getEnsembleWeights(),
+            // Without trained cascade weights the voter runs heuristic-fallback:
+            // score = heuristic*0.8 + rag*0.2 + historyBias (weights above unused).
+            activePath: cascadeLoaded ? 'ensemble-v0.4' : 'heuristic-fallback',
+            cascadeLoaded,
             confidenceThresholds: config.ensemble.confidenceThresholds,
           },
           tierModels: config.tier_models,

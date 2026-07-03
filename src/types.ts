@@ -35,6 +35,8 @@ export interface DeviceProfile {
 
 export interface ComplexityScore {
   value: number; // 0.0 – 1.0
+  /** value without the history-bias term — persist this for boundary retraining */
+  rawValue?: number;
   method: 'ml' | 'heuristic' | 'v3.3-heuristic' | 'heuristic-fallback' | 'ensemble-v0.4';
   latencyMs: number;
   tier?: EffortLevel;

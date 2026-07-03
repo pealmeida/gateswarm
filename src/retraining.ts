@@ -22,6 +22,7 @@ import type { EffortLevel } from './types.js';
 import { getConfig, saveConfig, type EnsembleWeightsConfig } from './v04-config.js';
 import { getFeedbackEntries } from './feedback-store.js';
 import { setTierBoundaries, getTierBoundaries } from './intent-engine.js';
+import { resetHistoryCache } from './ensemble-voter.js';
 
 const TIERS: EffortLevel[] = ['trivial', 'light', 'moderate', 'heavy', 'intensive', 'extreme'];
 
@@ -115,6 +116,11 @@ export async function retrainIfNeeded(): Promise<RetrainResult> {
   if (!setTierBoundaries(best.bounds)) {
     return { retrained: false, reason: 'optimizer produced invalid boundaries' };
   }
+
+  // Boundaries moved — the voter's history-bias cache was computed against the
+  // old calibration. Force a reload so bias reflects post-retrain reality
+  // instead of correcting for misclassifications the new boundaries already fix.
+  resetHistoryCache();
 
   // Persist to config so it survives restarts and stays the canonical source.
   const cfg = getConfig();
