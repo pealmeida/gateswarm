@@ -1374,14 +1374,47 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
   // In that case, fall through to HTTP providers instead.
   const isCli = agentRegistry.isCliProvider(providerId);
   if (isCli && agent.id !== providerId) {
-    const cliSanitized = sanitizeForCli(compressedMessages);
-    compressedMessages.length = 0;
-    compressedMessages.push(...cliSanitized);
+    // Pre-flight the CLI before committing to subprocess dispatch.
+    // handleCliProvider has no fallback chain of its own, so an unavailable
+    // CLI (binary missing, auth absent, quota window exhausted) must divert
+    // to the tier's fallback chain HERE — otherwise a plan-mode request whose
+    // plan model is a CLI agent hard-503s while healthy HTTP fallbacks exist.
+    const avail = await agentRegistry.checkCliProviderAvailability(providerId);
+    if (!avail.ok) {
+      console.log(`⚠️  [${agent.name}] CLI ${providerId}/${model} unavailable (${avail.reason}) — diverting to ${effort} fallback chain`);
+      const unavailableCli = providerId;
+      const fbList = getTierModel(effort)?.fallback_models ?? [];
+      for (const fb of fbList) {
+        if (fb.provider === unavailableCli) continue;
+        if (agentRegistry.isCliProvider(fb.provider)) {
+          if (fb.provider === agent.id) continue; // loop guard applies to fallbacks too
+          const fbAvail = await agentRegistry.checkCliProviderAvailability(fb.provider);
+          if (fbAvail.ok) { providerId = fb.provider; model = fb.model; break; }
+        } else if (
+          agentRegistry.getProviderBaseUrl(fb.provider) &&
+          agentRegistry.getProviderApiKey(fb.provider) &&
+          !providerQuota.shouldSwitch(fb.provider).shouldSwitch
+        ) {
+          providerId = fb.provider; model = fb.model; break;
+        }
+      }
+      if (providerId !== unavailableCli) {
+        console.log(`✅ [${agent.name}] Diverted: ${effort} → ${providerId}/${model}`);
+      }
+    }
+    if (agentRegistry.isCliProvider(providerId)) {
+      // Healthy CLI (original or fallback) — or nothing usable, in which case
+      // handleCliProvider reports the unavailability.
+      const cliSanitized = sanitizeForCli(compressedMessages);
+      compressedMessages.length = 0;
+      compressedMessages.push(...cliSanitized);
 
-    return handleCliProvider(
-      providerId, model, agent, messages, effort,
-      compressionResult, promptText, res, score, body.stream === true,
-    );
+      return handleCliProvider(
+        providerId, model, agent, messages, effort,
+        compressionResult, promptText, res, score, body.stream === true,
+      );
+    }
+    // Diverted to an HTTP provider — fall through to HTTP dispatch below.
   }
   if (isCli && agent.id === providerId) {
     console.log(`🔒 [${agent.name}] Loop guard: skipping CLI dispatch to ${providerId} (self-reference)`);
