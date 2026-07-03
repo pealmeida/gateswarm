@@ -16,7 +16,7 @@
 
 **GateSwarm** is an **LLM routing gateway**. It sits between any OpenAI-compatible client (your IDE agent, your CLI, your app) and a pool of language models — local, cloud HTTP, and CLI agents. Every chat-completion request passes through it. It scores the prompt's complexity, picks the **cheapest model capable of answering it**, forwards the request, and logs the outcome to keep getting smarter.
 
-**MoMA — Mixture of Model Agents** — is the routing pattern at its core. Instead of one model serving every prompt, GateSwarm dynamically mixes and matches across providers based on what each prompt actually needs.
+**MoMA — Mixture of Multimodal Agents** — is the routing pattern at its core. Instead of one model serving every prompt, GateSwarm dynamically mixes and matches across providers based on what each prompt actually needs.
 
 ```
 Your client  ──►  GateSwarm :8900  ──►  right model for the job
@@ -27,11 +27,12 @@ Your client  ──►  GateSwarm :8900  ──►  right model for the job
 
 > **Every prompt gets scored; the cheapest capable model answers; the router learns from every interaction.**
 
-### Three things it does that a normal API client doesn't
+### Four things it does that a normal API client doesn't
 
 1. **Routes by complexity, not by hand.** You stop choosing between GPT-5 and Claude Opus per call. The router picks for you — automatically, per request.
 2. **Plan vs Act, per tier.** *"Design a global CRDT system"* (planning) and *"implement the CRDT in Rust"* (acting) can route to **different models at the same tier**. Planning leans on reasoning agents (Claude Opus, Codex); acting leans on fast/cheap HTTP models (GLM, Qwen).
-3. **Fails over intelligently.** Z.AI rate-limits? The router detects the health drop, decays the score, and falls through to the next healthy provider — without your client ever seeing a 429.
+3. **Routes by modality.** Send an `image_url` content part and the router restricts candidates to **vision-capable models** — widening the tier band if no in-tier vision model is healthy (`vision_widened`). Text-only models never receive raw base64; media parts degrade to `[image]` placeholders when a text-only fallback is unavoidable.
+4. **Fails over intelligently.** Z.AI rate-limits? The router detects the health drop, decays the score, and falls through to the next healthy provider — without your client ever seeing a 429.
 
 ### What it is *not*
 
@@ -49,6 +50,7 @@ Your client  ──►  GateSwarm :8900  ──►  right model for the job
 | **Quality on demand** | Hard prompts automatically escalate to stronger models. You don't have to manually choose. |
 | **Plan vs Act separation** | Planning and acting can dispatch to different models within the same tier — Claude Opus for thinking, Codex for writing. |
 | **Provider failover** | If your Bailian key expires or Z.AI rate-limits, the router detects health decay and falls through to the next provider automatically. |
+| **Multimodal-aware** | Image requests route only to vision-capable models (`X-Modality: text+vision`); text-only providers never see raw base64 payloads. |
 | **OpenAI-compatible** | Drop-in for any OpenAI client. Change `base_url` to `:8900`, no SDK changes. |
 | **Self-improving** | 25-feature ensemble + RAG + history bias + auto-retraining every N interactions. |
 | **Transparent** | CLI (`gateswarm`) and TUI (`gateswarm-bar`) show last decision, weights, health, quota. No black box. |
@@ -115,6 +117,27 @@ Auto-detection (`detectIntentMode`) scores stem-aware keyword hits plus intent p
 The router reads `providerQuota` health scores and skips throttled providers before dispatch. Health decays on every successful call (so a transient 429 from a quota probe doesn't permanently poison a provider), and is reset by re-probing via `POST /v05/intel/rediscover`.
 
 If the static primary for a tier is unhealthy, the router falls through to the configured fallback chain. If all fallbacks are unhealthy, it falls back to `cheapest_available` from the dynamic discovery pool. Read more in [docs/ROUTING_STRATEGY.md](docs/ROUTING_STRATEGY.md).
+
+### Multimodal routing (the "M" in MoMA)
+
+Requests carrying `image_url` / `input_audio` / video content parts are detected at ingress and routed modality-aware:
+
+- **Vision filter.** A request with image parts only considers vision-capable models (`supportsVision` in the model matrix). The tier's static primary is skipped unless it can see.
+- **Tier-band widening.** If no vision model exists in the scored tier's band, the router widens to *any* healthy vision-capable model (`X-Routing-Reason: vision_widened`) — a capable eye beats a perfect tier fit.
+- **Payload hygiene.** Vision targets receive the original content arrays untouched. Text-only targets (including all CLI agents) get compact `[image]`/`[audio]` placeholders — raw base64 never leaks into prompts, scoring, or context compression.
+- **Transparency.** Every response carries `X-Modality` (`text`, `text+vision`, `text+vision+audio`) alongside the other routing headers (`X-Tier`, `X-Score`, `X-Routed-Model`, `X-Routing-Reason`).
+
+```bash
+# Vision request → routed to a vision model automatically
+curl :8900/v1/chat/completions -d '{
+  "model": "auto",
+  "messages": [{ "role": "user", "content": [
+    { "type": "text", "text": "What color is this?" },
+    { "type": "image_url", "image_url": { "url": "data:image/png;base64,..." } }
+  ]}]
+}'
+# → X-Modality: text+vision, X-Routed-Model: ollama-cloud/gemini-3-flash-preview
+```
 
 ---
 
