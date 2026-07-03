@@ -392,6 +392,18 @@ CLI health checks are auth-aware: `bin/cli-health-probe.sh` verifies both the bi
 
 Edit via CLI commands (`model`, `mode-set`, `reasoning`, `weights`, `retrain-freq`) or directly in `v04_config.json`.
 
+### Secrets: Sovereign Vault (recommended)
+
+The gateway loads provider API keys **vault-first** from [Sovereign Vault](https://github.com/pealmeida/sovereign-vault) — a local-first, human-in-the-loop secrets vault — falling back to `.env` automatically when the vault is locked, unavailable, or not installed. No plaintext keys need to live on disk once imported:
+
+```bash
+cp .env.example .env          # fill in your keys once
+node scripts/sv-import-env.mjs  # push them into vault container "env-gateswarm"
+rm .env                       # optional: go vault-only
+```
+
+Requires the Sovereign Vault desktop app running and unlocked (`sovereign-vault` on PATH or `SV_BIN` set). Control behavior with `SECRETS_SOURCE=auto|vault|env`, `SV_CONTAINER`, `SV_FILE`, `SV_TIMEOUT_MS` — see [src/secrets/README.md](src/secrets/README.md).
+
 ### Environment Variables
 
 Copy `.env.example` to `.env` and fill in your keys:

@@ -1,6 +1,7 @@
 #!/usr/bin/env tsx
 import * as dotenv from 'dotenv';
 dotenv.config({ path: new URL('../.env', import.meta.url).pathname });
+import { loadVaultEnv } from './secrets/vault-env.js';
 /**
  * GateSwarm MoMA Router v0.5.6 — Multi-Agent API Gateway
  *
@@ -1951,6 +1952,18 @@ function sanitizeForCli(msgs: any[]): any[] {
   return [...systemMsgs, ...merged];
 }
 async function init() {
+  // ─── Secrets: Sovereign Vault first, .env fallback ───────
+  // Must run before agentRegistry.initialize() — that's where provider
+  // API keys are read from process.env. See src/secrets/README.md.
+  const secrets = await loadVaultEnv();
+  if (secrets.source === 'vault' || secrets.source === 'cache') {
+    console.log(`🔐 [Secrets] ${secrets.count} keys from Sovereign Vault (container: ${secrets.container})`);
+  } else if (secrets.source === 'env') {
+    console.log(`🔐 [Secrets] vault unavailable — ${secrets.count} keys from local .env fallback`);
+  } else {
+    console.log('🔐 [Secrets] no vault and no .env — providers with missing keys will register unconfigured');
+  }
+
   await benchmarkLogger.initialize();
   await agentRegistry.initialize();
   await modelMatrix.initialize();
