@@ -911,12 +911,15 @@ async function cmdVersion(): Promise<void> {
     }
   }
 
-  // 3. systemd
-  try {
-    const content = await fs.readFile('/etc/systemd/system/moa-gateway.service', 'utf-8');
-    const m = content.match(/v0\.5\.\d+/);
-    console.log(`  [systemd Description]   ${m ? m[0] : '⚠️  no version'}`);
-  } catch {}
+  // 3. systemd — canonical unit is moma-gateway.service; legacy deployments used moa-gateway.service
+  for (const unit of ['moma-gateway.service', 'moa-gateway.service']) {
+    try {
+      const content = await fs.readFile(`/etc/systemd/system/${unit}`, 'utf-8');
+      const m = content.match(/v0\.5\.\d+/);
+      console.log(`  [systemd Description]   ${m ? m[0] : '⚠️  no version'}${unit.startsWith('moa-') ? ' (legacy unit name moa-gateway — consider renaming to moma-gateway)' : ''}`);
+      break;
+    } catch {}
+  }
 
   // 4. Pi
   try {

@@ -14,7 +14,7 @@ Run this first when something feels off. All four should be green.
 
 ```bash
 # 1. Service running
-systemctl status moa-gateway --no-pager | grep -E "Active|Description"
+systemctl status moma-gateway --no-pager | grep -E "Active|Description"
 #  → expect: Active: active (running) since ...  Description: GateSwarm MoMA Router v0.5.6 ...
 
 # 2. HTTP endpoint healthy
@@ -46,7 +46,7 @@ If any check fails, jump to **§2 Debugging**.
 Pi TUI (display only)
   └─ → defaultProvider = "moma" (was "moa"; renamed 2026-06-20)
         └─ → baseUrl http://localhost:8900/v1
-              └─ → moa-gateway.service (systemd, port 8900)
+              └─ → moma-gateway.service (systemd, port 8900)
                     ├─ intent-engine-v04.ts    (ensemble voter: heuristic 0.55 + RAG 0.25 + history 0.20)
                     ├─ consumption-intelligence (token/load balancer + cheapest_available scoring)
                     ├─ provider-quota.ts        (health scoring; rateLimitHits penalty)
@@ -77,7 +77,7 @@ symptom: "model output is wrong" or "routing looks off"
   │    └─ if degraded → §2.3 (provider health)
   │
   ├─ read recent routing decisions
-  │    journalctl -u moa-gateway --since "10 min ago" --no-pager | grep "Score:"
+  │    journalctl -u moma-gateway --since "10 min ago" --no-pager | grep "Score:"
   │    └─ look for: static provider X unhealthy → dynamic fallback picked Y
   │                → static config is wrong, fix v04_config.json (§3.2)
   │
@@ -129,7 +129,7 @@ for p in json.load(sys.stdin)['quotas']:
 
 ```bash
 # Stop service FIRST so the in-memory state doesn't overwrite the disk fix
-systemctl stop moa-gateway
+systemctl stop moma-gateway
 python3 -c "
 import json
 p='/root/.openclaw/workspace/gateswarm-moma-router/data/provider-quota.json'
@@ -140,7 +140,7 @@ for pid in ('zai','opencodego','ollama-cloud','ollama','bailian'):
         q['rateLimitHits']=0; q['healthScore']=100; q['throttled']=False; q['consecutive429s']=0
         print(f'  reset {pid}')
 json.dump(d, open(p,'w'), indent=2)"
-systemctl start moa-gateway
+systemctl start moma-gateway
 ```
 
 ### 2.4 RAG signal pollution
@@ -241,7 +241,7 @@ cd cli && npx tsc --noEmit && npx tsc
 #    - MEMORY.md and memory/2026-06-20.md → log the change
 
 # 6. Restart and verify
-systemctl restart moa-gateway
+systemctl restart moma-gateway
 sleep 5
 curl -sS http://localhost:8900/health | python3 -c "import sys,json; d=json.load(sys.stdin); assert d['status']=='healthy', d; print('OK', d['router'])"
 
@@ -308,10 +308,10 @@ The file has 4 sections:
 cp /tmp/v04_config.json.bak /root/.openclaw/workspace/gateswarm-moma-router/v04_config.json
 cp /tmp/agent-registry.json.bak /root/.openclaw/workspace/gateswarm-moma-router/data/agent-registry.json
 cp /tmp/provider-quota.json.bak /root/.openclaw/workspace/gateswarm-moma-router/data/provider-quota.json
-systemctl restart moa-gateway
+systemctl restart moma-gateway
 ```
 
-For source-code rollbacks: `git log --oneline -10 && git checkout <hash> -- <files> && npm run build && systemctl restart moa-gateway`.
+For source-code rollbacks: `git log --oneline -10 && git checkout <hash> -- <files> && npm run build && systemctl restart moma-gateway`.
 
 ---
 
@@ -336,7 +336,7 @@ curl -sS http://localhost:8900/v05/intel/quota | python3 -m json.tool | head -30
 
 ```bash
 # Last 24h of token usage + cost
-journalctl -u moa-gateway --since "24 hours ago" --no-pager | grep -oE "in=[0-9]+ out=[0-9]+|tok=[0-9]+" | sort | uniq -c | sort -rn | head
+journalctl -u moma-gateway --since "24 hours ago" --no-pager | grep -oE "in=[0-9]+ out=[0-9]+|tok=[0-9]+" | sort | uniq -c | sort -rn | head
 ```
 
 Or via the API:
@@ -376,10 +376,10 @@ gateswarm training labels default
 
 | You want to know... | Look at |
 |---|---|
-| Is the service up? | `systemctl status moa-gateway` |
+| Is the service up? | `systemctl status moma-gateway` |
 | What tier was my last prompt? | `curl /v05/intel/last-decision` |
 | What tier is configured for X? | `gateswarm models` (CLI) or read `v04_config.json:tier_models` |
-| Why did I get a wrong-tier answer? | `journalctl -u moa-gateway \| grep "Score.*→"` for that timestamp |
+| Why did I get a wrong-tier answer? | `journalctl -u moma-gateway \| grep "Score.*→"` for that timestamp |
 | Is a provider failing? | `curl /v05/intel/quota` — health < 80 or throttled=true |
 | How much did I spend? | `curl /v05/intel/consumption` |
 | What's the RAG index look like? | `cat /root/.openclaw/workspace/gateswarm-moma-router/data/rag/index.json \| python3 -m json.tool \| less` |
@@ -413,7 +413,7 @@ When you bump the version, update **all of these** in one commit:
 5. /root/.openclaw/workspace/gateswarm-moma-router/src/gateswarm-cli.ts  "GateSwarm MoMA Router v0.5.x — ..."
 6. /root/.openclaw/workspace/gateswarm-moma-router/cli/src/**/*.tsx      "GateSwarm v0.5.x — ..." (any file header)
 7. /usr/local/bin/gateswarm                                              "GateSwarm MoMA Router v0.5.x — CLI wrapper"
-8. /etc/systemd/system/moa-gateway.service                               Description="... v0.5.x - ..."
+8. /etc/systemd/system/moma-gateway.service                               Description="... v0.5.x - ..."
 9. /root/.pi/agent/models.json                                           gateswarm model name + llmJudge
 10. /root/.openclaw/workspace/MEMORY.md                                  durable decision log
 11. /root/.openclaw/workspace/memory/YYYY-MM-DD.md                       session log
@@ -436,7 +436,7 @@ cd /root/.openclaw/workspace/gateswarm-moma-router/cli
 npx tsc
 
 # 3. If gateway is older than source, restart it
-systemctl restart moa-gateway
+systemctl restart moma-gateway
 ```
 
 ### 5.4 The version-sync checklist (run before any release)
@@ -445,7 +445,7 @@ systemctl restart moa-gateway
 cd /root/.openclaw/workspace/gateswarm-moma-router
 
 echo "=== Files claiming each version ==="
-for f in package.json cli/package.json v04_config.json src/moma-gateway.ts src/gateswarm-cli.ts /usr/local/bin/gateswarm /etc/systemd/system/moa-gateway.service; do
+for f in package.json cli/package.json v04_config.json src/moma-gateway.ts src/gateswarm-cli.ts /usr/local/bin/gateswarm /etc/systemd/system/moma-gateway.service; do
   v=$(grep -hoE 'v?0\.5\.[0-9]+(-[a-z0-9-]+)?' "$f" 2>/dev/null | head -1)
   echo "  $v   $f"
 done
@@ -460,7 +460,7 @@ head -2 /usr/local/bin/gateswarm
 
 echo ""
 echo "=== systemd Description ==="
-grep Description /etc/systemd/system/moa-gateway.service
+grep Description /etc/systemd/system/moma-gateway.service
 ```
 
 All five must show the same version. If they don't, the version bump is incomplete.
@@ -490,11 +490,11 @@ The CLI TUI (`gateswarm-bar`) and the gateway (`moma-gateway`) are **two separat
 ### Service is dead
 
 ```bash
-systemctl status moa-gateway --no-pager  # check why
-journalctl -u moa-gateway --since "5 min ago" --no-pager | tail -30  # read crash
+systemctl status moma-gateway --no-pager  # check why
+journalctl -u moma-gateway --since "5 min ago" --no-pager | tail -30  # read crash
 # Most common: unhandled promise rejection in a new code path
 # Recovery:
-systemctl restart moa-gateway
+systemctl restart moma-gateway
 sleep 5
 curl -sS http://localhost:8900/health
 ```
@@ -530,7 +530,7 @@ curl -sS http://localhost:8900/v05/intel/rediscover -X POST
 Most likely cause: a provider's health hasn't been re-probed. Force a rediscover:
 
 ```bash
-systemctl restart moa-gateway  # re-probes all providers on startup
+systemctl restart moma-gateway  # re-probes all providers on startup
 # OR
 curl -sS -X POST http://localhost:8900/v05/intel/rediscover
 ```

@@ -1,4 +1,4 @@
-# GateSwarm MoA Router v0.4.4 — Quick Start
+# GateSwarm MoMA Router v0.5.6 — Quick Start
 
 **Version:** 0.4.4-context-aware
 **Date:** 2026-05-14
@@ -29,7 +29,7 @@ ZAI_BASE=https://api.z.ai/api/coding/paas/v4
 ### 2.2 Install Dependencies
 
 ```bash
-cd gateswarm-moa-router
+cd gateswarm-router
 npm install
 ```
 
@@ -37,7 +37,7 @@ npm install
 
 ```bash
 # Direct start
-npx tsx src/moa-gateway.ts --port 8900
+npx tsx src/moma-gateway.ts --port 8900
 
 # Or use the auto-restart script
 ./scripts/start-gateway.sh --port 8900
@@ -53,7 +53,7 @@ Expected output:
 ```json
 {
   "status": "healthy",
-  "router": "GateSwarm MoA Router v0.4.4",
+  "router": "GateSwarm MoMA Router v0.5.6",
   "turboquant": "v3.6 (structure-aware + dynamic KV + RAG + CWM)",
   "ensemble": "enabled",
   "feedback": "enabled"
@@ -71,14 +71,14 @@ Edit `~/.pi/agent/models.json`:
 ```json
 {
   "providers": {
-    "moa": {
+    "moma": {
       "baseUrl": "http://localhost:8900/v1",
-      "apiKey": "moa-<your-agent-key>",
+      "apiKey": "moma-<your-agent-key>",
       "authHeader": true,
       "api": "openai-completions",
       "models": [{
         "id": "gateswarm",
-        "name": "GateSwarm MoA v0.4.4"
+        "name": "GateSwarm MoMA v0.5.6"
       }]
     }
   }
@@ -89,7 +89,7 @@ Edit `~/.pi/agent/settings.json`:
 
 ```json
 {
-  "defaultProvider": "moa",
+  "defaultProvider": "moma",
   "defaultModel": "gateswarm"
 }
 ```
@@ -101,9 +101,9 @@ Add to `openclaw.json`:
 ```json
 {
   "providers": {
-    "moa": {
+    "moma": {
       "baseUrl": "http://localhost:8900/v1",
-      "apiKey": "moa-<your-agent-key>",
+      "apiKey": "moma-<your-agent-key>",
       "auth": "api-key",
       "api": "openai-completions",
       "models": [...]
@@ -115,7 +115,7 @@ Add to `openclaw.json`:
 ### 3.3 Test
 
 ```bash
-pi -p --provider moa --model gateswarm --no-session "Say hello"
+pi -p --provider moma --model gateswarm --no-session "Say hello"
 ```
 
 ---
@@ -221,7 +221,7 @@ kill -9 $(lsof -t -i:8900)
 rm -rf /tmp/tsx-0/
 
 # Restart
-npx tsx src/moa-gateway.ts --port 8900
+npx tsx src/moma-gateway.ts --port 8900
 ```
 
 ### Provider errors

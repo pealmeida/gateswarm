@@ -1,6 +1,6 @@
 # PRD — Product Requirements Document
 
-## MoMA Gateway Router: Browser-Native Mixture of Agents
+## MoMA Gateway Router: Browser-Native Mixture of Multimodal Agents (MoMA)
 
 **Version:** 1.0.0-mvp  
 **Date:** 2026-05-05  

@@ -1,6 +1,6 @@
 # Safety & Responsible Use Guidelines
 
-GateSwarm MoA Router is a **prompt complexity classifier and model router** — it does not generate content itself. It analyzes prompts and routes them to the most cost-effective LLM. These guidelines cover safe and responsible use of the project.
+GateSwarm MoMA Router is a **prompt complexity classifier and model router** — it does not generate content itself. It analyzes prompts and routes them to the most cost-effective LLM. These guidelines cover safe and responsible use of the project.
 
 ## Scope
 
@@ -69,7 +69,7 @@ All feedback data stays **local**. If you share feedback data for retraining:
 
 ## Docker Security
 
-- Run containers as non-root when possible: `docker run --user 1000 gateswarm-moa-router`
+- Run containers as non-root when possible: `docker run --user 1000 gateswarm-router`
 - Mount only necessary volumes; avoid mounting sensitive directories
 - Keep base images updated: `docker pull` regularly
 

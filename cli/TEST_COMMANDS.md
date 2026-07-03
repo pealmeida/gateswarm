@@ -17,12 +17,12 @@ A complete, copy-paste-ready reference for testing GateSwarm v0.5.4 on
 
 ```bash
 # Service status
-systemctl status moa-gateway
+systemctl status moma-gateway
 
 # Restart if needed
-systemctl restart moa-gateway
+systemctl restart moma-gateway
 sleep 4
-systemctl is-active moa-gateway
+systemctl is-active moma-gateway
 
 # Hit a few endpoints directly
 curl -s http://localhost:8900/v05/intel | python3 -m json.tool | head -10
@@ -213,8 +213,8 @@ echo "$(date -I),$(gateswarm tui --once | jq -c .)" >> /var/log/gateswarm-daily.
 
 ```bash
 # Service not running
-systemctl status moa-gateway
-journalctl -u moa-gateway --no-pager -n 30
+systemctl status moma-gateway
+journalctl -u moma-gateway --no-pager -n 30
 
 # Server unreachable from CLI
 curl -s http://localhost:8900/v05/intel/health  # check endpoint
@@ -257,7 +257,7 @@ chmod +x /usr/local/bin/gateswarm-tui
                               │
                               ▼ HTTP to localhost:8900
 ┌─────────────────────────────────────────────────────────────────────┐
-│  GateSwarm MoMA Router v0.5.3 (systemd: moa-gateway)              │
+│  GateSwarm MoMA Router v0.5.3 (systemd: moma-gateway)              │
 │  ├─ /v05/intel          (tier recommendations, stats)              │
 │  ├─ /v05/intel/consumption (5h/weekly/monthly per provider)        │
 │  ├─ /v05/intel/quota    (RPM/RPD/tokens remaining)                 │
@@ -282,7 +282,7 @@ chmod +x /usr/local/bin/gateswarm-tui
 
 ```bash
 # === Health ===
-systemctl is-active moa-gateway
+systemctl is-active moma-gateway
 curl -s http://localhost:8900/v05/intel | jq '.stats | {models: .totalModels, reqs: .totalRequests, errs: .totalErrors}'
 
 # === v0.5.3 intel ===

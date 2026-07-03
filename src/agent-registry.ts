@@ -663,7 +663,7 @@ export class AgentRegistry {
       return { providerId: 'openrouter', model: `openrouter/${model}` };
     }
 
-    // MOA provider — default to bailian for unknown models
+    // MoMA provider — default to bailian for unknown models
     return { providerId: 'bailian', model };
   }
 

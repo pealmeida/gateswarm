@@ -70,7 +70,7 @@
     "vitest": "^3.1.0"
   },
   "keywords": [
-    "mixture-of-agents",
+    "mixture-of-multimodal-agents",
     "moma",
     "llm-router",
     "model-routing",

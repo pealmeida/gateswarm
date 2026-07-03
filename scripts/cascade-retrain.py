@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-GateSwarm MoA Router v0.4 — Cascade Retrain Script
+GateSwarm MoMA Router v0.4 — Cascade Retrain Script
 
 Retrains the v3.2 binary cascade classifiers on REAL feedback labels
 (instead of formula labels) for improved moderate/heavy tier accuracy.
@@ -284,7 +284,7 @@ def main():
     args = parser.parse_args()
 
     print("=" * 60)
-    print("GateSwarm MoA Router v0.4 — Cascade Retrain")
+    print("GateSwarm MoMA Router v0.4 — Cascade Retrain")
     print("=" * 60)
 
     # Load data

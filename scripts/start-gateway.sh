@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# GateSwarm MoA Router v0.5.1 — persistent startup with auto-restart
+# GateSwarm MoMA Router v0.5.1 — persistent startup with auto-restart
 # Usage: scripts/start-gateway.sh [--port 8900]
 set -e
 
@@ -24,14 +24,14 @@ if lsof -i :"$PORT" -t >/dev/null 2>&1; then
   sleep 1
 fi
 
-echo "🚀 Starting GateSwarm MoA Router v0.5.1 on port $PORT..."
+echo "🚀 Starting GateSwarm MoMA Router v0.5.1 on port $PORT..."
 
 # v0.4.3: Auto-restart on crash with exponential backoff
 MAX_RESTARTS=10
 RESTART_DELAY=5
 
 while true; do
-  npx tsx src/moa-gateway.ts --port "$PORT"
+  npx tsx src/moma-gateway.ts --port "$PORT"
   EXIT_CODE=$?
   
   if [ $MAX_RESTARTS -le 0 ]; then

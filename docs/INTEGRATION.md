@@ -1,6 +1,6 @@
 # Integration Guide
 
-How to integrate GateSwarm MoA Router with your LLM gateway, agent framework, or coding tool.
+How to integrate GateSwarm MoMA Router with your LLM gateway, agent framework, or coding tool.
 
 ---
 
@@ -26,7 +26,7 @@ Use the `model` and `provider` fields from the response to route your actual LLM
 
 ```python
 import sys
-sys.path.insert(0, "/path/to/gateswarm-moa-router")
+sys.path.insert(0, "/path/to/gateswarm-router")
 
 from router import score_prompt, set_tier_models
 
@@ -57,7 +57,7 @@ python router.py --serve --port 8080
 
 ```python
 # Option B: Embedded in a skill
-import sys; sys.path.insert(0, "/path/to/gateswarm-moa-router")
+import sys; sys.path.insert(0, "/path/to/gateswarm-router")
 from router import score_prompt, set_tier_models
 
 # Override models for your providers
@@ -94,7 +94,7 @@ Use for model selection in self-improvement and skill creation loops:
 ```python
 feedback integration/feedback integration
 import sys
-sys.path.insert(0, "/path/to/gateswarm-moa-router")
+sys.path.insert(0, "/path/to/gateswarm-router")
 from router import score_prompt
 
 def select_model_for_task(task_description: str) -> str:

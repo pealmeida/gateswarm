@@ -121,7 +121,7 @@ These can be added later; not required for a safe release.
 ### Infra
 - `bin/cli-health-probe.sh` — new, auto-locates the router root via `$BASH_SOURCE` (no hardcoded paths)
 - `scripts/cli-health-probe.sh` — kept as the canonical source; `bin/` is a copy
-- `/etc/systemd/system/moa-gateway.service` — `Environment=GATESWARM_ROOT=...` added
+- `/etc/systemd/system/moma-gateway.service` — `Environment=GATESWARM_ROOT=...` added
 
 ### Git hygiene
 - `.gitignore` — added 4 ephemeral `data/*.json` files
