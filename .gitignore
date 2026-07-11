@@ -76,3 +76,9 @@ dist/
 
 # Tee output (used by RTK output filter, v0.6.x backport)
 tee/
+
+# Hybrid / calibration eval reports (regenerated)
+eval/reports/
+
+# Git worktrees
+.worktrees/
