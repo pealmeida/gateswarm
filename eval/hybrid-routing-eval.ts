@@ -24,6 +24,7 @@ import {
 } from './lib/hybrid-live.js';
 import { runAblation } from './lib/hybrid-ablation.js';
 import type { AblationMode } from './lib/hybrid-ablation.js';
+import { selectWarmAblationExamples } from './lib/hybrid-warm-fixtures.js';
 
 const FLOORS = {
   exact: 0.48,
@@ -89,6 +90,14 @@ interface LiveRow {
   routedModel: string;
   skipped?: boolean;
   reason?: string;
+}
+
+type AblationTable = Record<AblationMode, EffortMetrics>;
+interface AblationReport {
+  n: number;
+  cold: AblationTable;
+  warm?: AblationTable;
+  warmInvalidReason?: string;
 }
 
 function usage(): string {
@@ -172,7 +181,7 @@ function writeSummary(opts: {
   metrics: EffortMetrics;
   offline: { ok: boolean; fails: string[] };
   probes: CriticalProbeResult[];
-  ablation: Record<AblationMode, EffortMetrics>;
+  ablation: AblationReport;
   live: LiveRow[];
   worst: ScoreRow[];
 }): string {
@@ -194,6 +203,15 @@ function writeSummary(opts: {
   const unavailableFrac = scoredLive.length ? (scoredLive.length - judgeAvail.length) / scoredLive.length : 0;
   const skippedCount = live.length - scoredLive.length;
   const modes: AblationMode[] = ['heuristic', 'heuristic+rag', 'heuristic+history', 'full'];
+
+  const pushAblationTable = (lines: string[], table: AblationTable): void => {
+    lines.push(`| Mode | Exact | Adjacent |`);
+    lines.push(`|------|-------|----------|`);
+    for (const mode of modes) {
+      const m = table[mode];
+      lines.push(`| ${mode} | ${pct(m.exact)} | ${pct(m.adjacent)} |`);
+    }
+  };
 
   const lines: string[] = [];
   lines.push(`# Hybrid routing eval summary`);
@@ -232,19 +250,27 @@ function writeSummary(opts: {
     for (const f of offline.fails) lines.push(`- ${f}`);
   }
   lines.push('');
-  lines.push(`## Ablation`);
+  lines.push(`## Ablation (n=${ablation.n})`);
   lines.push('');
-  lines.push(`| Mode | Exact | Adjacent |`);
-  lines.push(`|------|-------|----------|`);
-  for (const mode of modes) {
-    const m = ablation[mode];
-    lines.push(`| ${mode} | ${pct(m.exact)} | ${pct(m.adjacent)} |`);
+  lines.push(`### Cold stores`);
+  lines.push('');
+  pushAblationTable(lines, ablation.cold);
+  lines.push('');
+  if (ablation.warm) {
+    lines.push(`### Warm stores`);
+    lines.push('');
+    pushAblationTable(lines, ablation.warm);
+    lines.push('');
+  } else {
+    lines.push(
+      `ABLATION_INVALID (cold stores): ${ablation.warmInvalidReason ?? 'warm-store seeding failed'}.`,
+    );
+    lines.push('');
+    lines.push(
+      `> **Cold-store caveat:** With no warm RAG store and empty feedback history, \`heuristic+rag\`, \`heuristic+history\`, and \`full\` may be numerically identical to (or barely different from) heuristic-only. Treat ablation deltas as informative only when stores are warm.`,
+    );
+    lines.push('');
   }
-  lines.push('');
-  lines.push(
-    `> **Cold-store caveat:** With no warm RAG store and empty feedback history, \`heuristic+rag\`, \`heuristic+history\`, and \`full\` may be numerically identical to (or barely different from) heuristic-only. Treat ablation deltas as informative only when stores are warm.`,
-  );
-  lines.push('');
   lines.push(`## Live spot-check (n=${scoredLive.length}, skipped=${skippedCount}, sampled=${live.length})`);
   lines.push('');
   lines.push(
@@ -519,7 +545,19 @@ async function main(): Promise<void> {
   );
 
   console.log(`Phase 2 — Ablation…`);
-  const ablation = runAblation(all);
+  const ablationExamples = selectWarmAblationExamples(all);
+  const cold = runAblation(ablationExamples, { warm: false });
+  const ablation: AblationReport = {
+    n: ablationExamples.length,
+    cold,
+  };
+  try {
+    ablation.warm = runAblation(ablationExamples, { warm: true });
+  } catch (e) {
+    const reason = e instanceof Error ? e.message : String(e);
+    ablation.warmInvalidReason = reason;
+    console.error(`ABLATION_INVALID (cold stores): ${reason}`);
+  }
   writeFileSync(join(outDir, 'ablation.json'), JSON.stringify(ablation, null, 2));
 
   console.log(`Phase 3 — Live spot-check (5×6=30, seed=${seed})…`);
