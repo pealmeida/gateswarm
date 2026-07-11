@@ -166,6 +166,9 @@ export function v33Score(prompt: string): V33ScoreResult {
 // and made CONFIG-DRIVEN so the training loop can recalibrate boundaries from
 // real labels without a code change. The 5 cut points are kept in a module-level
 // cache with a validated setter; defaults are the calibrated values.
+// Phase 1.1 is the one permitted train-only refit after the b57e59b score-scale
+// shift. After running `npm run eval:refit-boundaries -- --apply`, mirror the
+// fitted frozen cuts here and in DEFAULT_V04_CONFIG.tier_boundaries.
 const DEFAULT_BOUNDARIES: [number, number, number, number, number] = [0.21, 0.28, 0.32, 0.37, 0.46];
 let _boundaries: [number, number, number, number, number] = [...DEFAULT_BOUNDARIES];
 

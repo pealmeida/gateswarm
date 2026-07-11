@@ -49,6 +49,7 @@
     "eval:cv": "tsx eval/cv.ts",
     "eval:leaderboard": "tsx eval/leaderboard.ts",
     "eval:features": "tsx eval/feature-report.ts",
+    "eval:refit-boundaries": "tsx eval/refit-boundaries.ts",
     "eval:hybrid": "tsx eval/hybrid-routing-eval.ts",
     "eval:assess": "tsx eval/assess.ts",
     "eval:calibrate": "tsx eval/calibrate.ts",

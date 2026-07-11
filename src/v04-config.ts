@@ -107,6 +107,9 @@ export const DEFAULT_V04_CONFIG: V04Config = {
   // v0.5.2: unified with v04_config.json + intent-engine DEFAULT_BOUNDARIES.
   // These were stale (old [0.1557…] cut points), so a config-load failure would
   // silently fall back to divergent boundaries and misroute every tier.
+  // Phase 1.1 is the one permitted train-only refit after the b57e59b score-scale
+  // shift. After running `npm run eval:refit-boundaries -- --apply`, mirror the
+  // fitted frozen cuts here and in intent-engine DEFAULT_BOUNDARIES.
   tier_boundaries: {
     trivial: [0.00, 0.21],
     light: [0.21, 0.28],

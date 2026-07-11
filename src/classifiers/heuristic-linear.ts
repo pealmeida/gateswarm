@@ -13,16 +13,21 @@ import type { EffortLevel } from '../types.js';
 import { extractFeatures, heuristicScoreFromFeatures, type FeatureVector } from '../feature-extractor-v04.js';
 import { detectIntentMode } from '../v04-config.js';
 
-const TIERS: EffortLevel[] = ['trivial', 'light', 'moderate', 'heavy', 'intensive', 'extreme'];
-const DEFAULT_BOUNDARIES = [0.21, 0.28, 0.32, 0.37, 0.46];
+export const HEURISTIC_TIERS: EffortLevel[] = ['trivial', 'light', 'moderate', 'heavy', 'intensive', 'extreme'];
+export const DEFAULT_HEURISTIC_BOUNDARIES = [0.21, 0.28, 0.32, 0.37, 0.46];
+
+export interface ScoredTier {
+  score: number;
+  tier: EffortLevel;
+}
 
 export function scoreToTier(score: number, b: number[]): EffortLevel {
   let i = 0;
   while (i < b.length && score >= b[i]) i++;
-  return TIERS[i];
+  return HEURISTIC_TIERS[i];
 }
 
-function rawScore(prompt: string): number {
+export function rawHeuristicScore(prompt: string): number {
   const f: FeatureVector = extractFeatures(prompt);
   const wc = prompt.split(/\s+/).filter(Boolean).length;
   return heuristicScoreFromFeatures(f, wc);
@@ -30,32 +35,114 @@ function rawScore(prompt: string): number {
 
 /**
  * Grid-search 5 monotonic cut-points maximizing exact accuracy on labeled
- * (score, tier) pairs. Mirrors retraining.optimizeBoundaries but local to the
- * fold so the eval stays leak-free.
+ * (score, tier) pairs. This is exact over sorted score gaps, with empty bands
+ * allowed, so ties at the same score cannot be split by impossible cut points.
  */
-function fitBoundaries(pairs: { score: number; tier: EffortLevel }[]): number[] {
-  if (pairs.length < 12) return DEFAULT_BOUNDARIES;
-  const tierIdx = (t: EffortLevel) => TIERS.indexOf(t);
-  const grid: number[] = [];
-  for (let v = 0.05; v <= 0.9; v += 0.01) grid.push(Number(v.toFixed(2)));
-  let best = DEFAULT_BOUNDARIES, bestAcc = -1;
-  // Coordinate ascent from defaults (full 5-D grid is too large; this is enough
-  // for a baseline and keeps runtime sane).
-  let cur = DEFAULT_BOUNDARIES.slice();
-  for (let pass = 0; pass < 3; pass++) {
-    for (let k = 0; k < 5; k++) {
-      for (const v of grid) {
-        const cand = cur.slice(); cand[k] = v;
-        if (cand.some((x, i) => i > 0 && x <= cand[i - 1])) continue; // keep monotonic
-        let acc = 0;
-        for (const p of pairs) if (scoreToTier(p.score, cand) === p.tier) acc++;
-        acc /= pairs.length;
-        if (acc > bestAcc) { bestAcc = acc; best = cand.slice(); }
-      }
-      cur = best.slice();
+export function fitMonotonicCutPoints(pairs: ScoredTier[]): number[] {
+  const clean = pairs.filter((p) =>
+    Number.isFinite(p.score) && HEURISTIC_TIERS.includes(p.tier),
+  );
+  if (!clean.length) return [...DEFAULT_HEURISTIC_BOUNDARIES];
+
+  const tierIdx = (t: EffortLevel) => HEURISTIC_TIERS.indexOf(t);
+  const uniqueScores = [...new Set(clean.map((p) => p.score))].sort((a, b) => a - b);
+  const scoreIndex = new Map(uniqueScores.map((score, i) => [score, i]));
+  const groupCounts = uniqueScores.map(() => Array(HEURISTIC_TIERS.length).fill(0) as number[]);
+  for (const p of clean) groupCounts[scoreIndex.get(p.score)!][tierIdx(p.tier)]++;
+
+  const g = uniqueScores.length;
+  const prefix = Array.from({ length: HEURISTIC_TIERS.length }, () => Array(g + 1).fill(0) as number[]);
+  for (let i = 0; i < g; i++) {
+    for (let t = 0; t < HEURISTIC_TIERS.length; t++) {
+      prefix[t][i + 1] = prefix[t][i] + groupCounts[i][t];
     }
   }
-  return best;
+  const correctIn = (from: number, to: number, tier: number) => prefix[tier][to] - prefix[tier][from];
+
+  const representativeCut = (pos: number): number => {
+    if (pos <= 0) return uniqueScores[0] / 2;
+    if (pos >= g) return (uniqueScores[g - 1] + 1) / 2;
+    return (uniqueScores[pos - 1] + uniqueScores[pos]) / 2;
+  };
+
+  interface Cell {
+    correct: number;
+    penalty: number;
+    prev: number;
+  }
+
+  const better = (a: Cell | null, b: Cell): Cell =>
+    !a || b.correct > a.correct || (b.correct === a.correct && b.penalty < a.penalty) ? b : a;
+
+  const dp: Array<Array<Cell | null>> = Array.from({ length: 5 }, () => Array(g + 1).fill(null));
+  for (let pos = 0; pos <= g; pos++) {
+    dp[0][pos] = {
+      correct: correctIn(0, pos, 0),
+      penalty: Math.abs(representativeCut(pos) - DEFAULT_HEURISTIC_BOUNDARIES[0]),
+      prev: -1,
+    };
+  }
+
+  for (let boundary = 1; boundary < 5; boundary++) {
+    for (let pos = 0; pos <= g; pos++) {
+      let best: Cell | null = null;
+      for (let prev = 0; prev <= pos; prev++) {
+        const prior = dp[boundary - 1][prev];
+        if (!prior) continue;
+        best = better(best, {
+          correct: prior.correct + correctIn(prev, pos, boundary),
+          penalty: prior.penalty + Math.abs(representativeCut(pos) - DEFAULT_HEURISTIC_BOUNDARIES[boundary]),
+          prev,
+        });
+      }
+      dp[boundary][pos] = best;
+    }
+  }
+
+  let end: Cell | null = null;
+  let endPos = 0;
+  for (let pos = 0; pos <= g; pos++) {
+    const prior = dp[4][pos];
+    if (!prior) continue;
+    const candidate = {
+      correct: prior.correct + correctIn(pos, g, 5),
+      penalty: prior.penalty,
+      prev: prior.prev,
+    };
+    const chosen = better(end, candidate);
+    if (chosen === candidate) {
+      end = candidate;
+      endPos = pos;
+    }
+  }
+
+  const positions = Array(5).fill(0) as number[];
+  let pos = endPos;
+  for (let boundary = 4; boundary >= 0; boundary--) {
+    positions[boundary] = pos;
+    pos = dp[boundary][pos]?.prev ?? 0;
+  }
+  return materializeCutPositions(uniqueScores, positions);
+}
+
+function materializeCutPositions(uniqueScores: number[], positions: number[]): number[] {
+  const g = uniqueScores.length;
+  const out: number[] = [];
+  for (let i = 0; i < positions.length;) {
+    const pos = positions[i];
+    let j = i + 1;
+    while (j < positions.length && positions[j] === pos) j++;
+    const n = j - i;
+    const lower = pos <= 0 ? 0 : uniqueScores[pos - 1];
+    const upper = pos >= g ? 1 : uniqueScores[pos];
+    for (let k = 0; k < n; k++) out.push(lower + ((upper - lower) * (k + 1)) / (n + 1));
+    i = j;
+  }
+  for (let i = 0; i < out.length; i++) {
+    out[i] = Math.max(0.000001, Math.min(0.999999, out[i]));
+    if (i > 0 && out[i] <= out[i - 1]) out[i] = Math.min(0.999999, out[i - 1] + 0.000001);
+  }
+  return out;
 }
 
 export class HeuristicLinearClassifier implements TierClassifier {
@@ -63,18 +150,18 @@ export class HeuristicLinearClassifier implements TierClassifier {
   kind = 'rule' as const;
   version = 'v0.5.2';
   requiresTraining = true; // fits boundaries; still runs without (defaults)
-  private boundaries = DEFAULT_BOUNDARIES;
+  private boundaries = DEFAULT_HEURISTIC_BOUNDARIES;
 
   fit(train: LabeledPrompt[]): void {
     const pairs = train
       .filter((t) => t.tier)
-      .map((t) => ({ score: rawScore(t.prompt), tier: t.tier! }));
-    this.boundaries = fitBoundaries(pairs);
+      .map((t) => ({ score: rawHeuristicScore(t.prompt), tier: t.tier! }));
+    this.boundaries = fitMonotonicCutPoints(pairs);
   }
 
   predictEffort(prompt: string): TierPrediction {
     const start = performance.now();
-    const score = rawScore(prompt);
+    const score = rawHeuristicScore(prompt);
     const tier = scoreToTier(score, this.boundaries);
     // Confidence from distance to nearest boundary (matches ensemble-voter logic).
     let d = Math.min(score, 1 - score);

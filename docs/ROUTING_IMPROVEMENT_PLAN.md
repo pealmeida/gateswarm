@@ -110,9 +110,22 @@ learned model + more data.**
 
 ### Phase 1 — Recalibrate & unify the scale (1 day)
 
+> **Phase 1.1 executed 2026-07-11 — verdict: NO boundary change.** The refit
+> harness (`eval/refit-boundaries.ts`, train-only DP fit + 5-fold CV) showed
+> current cuts are already near-optimal for THIS worktree's scorer
+> (CV 48.9% ± 6.5 current vs 45.6% ± 4.2 fitted; held-out 66.7% vs 53.3% —
+> train-fit gains don't generalize at n=60). **Finding A1 revised:** the
+> +0.16 score skew in the eval run came from *uncommitted* `v0.5.6-cal`
+> keyword expansions in the MAIN checkout's `feature-extractor-v04.ts` —
+> the eval gateway ran that dirty code, not this branch. Measured with those
+> keywords included, CV drops to 46.7% and the heavy↔intensive inversion
+> worsens (fitted: heavy 46.7% / intensive 0%). Boundary tuning is exhausted;
+> the accuracy lever is Phase 2 features. Boundaries stay frozen at
+> `[0.21, 0.28, 0.32, 0.37, 0.46]`.
+
 | # | Fix | Gate |
 |---|---|---|
-| 1.1 | Re-fit the 5 cuts on the **train split only** (`eval/splits/train.v1.json`), report 5-fold CV. This is the one permitted boundary re-fit (score scale changed in `b57e59b`); freeze after. Expected ≈ +12–18pp exact held-out. | CV exact ≥ 55%; no tier recall < 25% except intensive (known A2 limit) |
+| 1.1 | ~~Re-fit the 5 cuts on the train split~~ **DONE — refit rejected on evidence** (see note above). Refit tooling ships; re-run only after Phase 2 feature changes. | CV report archived in refit script output |
 | 1.2 | Derive `tierComplexityMap` / `tierScores` / cascade thresholds from the live boundaries (band midpoints from config) — delete the three hardcoded copies. | RAG nudge toward "heavy" lands inside the heavy band |
 | 1.3 | Single scoring module: server formula compiled for browser too; delete or alias `v33Score`'s divergent formula. | browser and server produce identical scores on a shared test vector |
 | 1.4 | Add a **score-distribution drift guard** to CI: per-tier median scores on the golden set vs the boundaries; fail if any tier's median leaves its band (this is what would have caught `b57e59b`). | CI red on future scale shifts |
