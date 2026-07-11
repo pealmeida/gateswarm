@@ -85,6 +85,7 @@ import type { LoadBalanceDecision } from './provider-quota.js';
 import { consumptionTracker } from './consumption-tracker.js';
 import { quotaSync } from './quota-sync.js';
 import { getCliProvidersEnabled } from './v04-config.js';
+import { getUnusableProviderBodyReason, providerFailureKindForHttp, providerHealth } from './adapters/provider-health.js';
 import { turboQuantCompress, MODEL_CONTEXT_WINDOWS } from './turboquant-compressor.js';
 import { ragIndex, queryRag } from './rag-index.js';
 import {
@@ -1131,6 +1132,13 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
               }
             } else {
               const data = await resp.json();
+              const bodyFailure = getUnusableProviderBodyReason(data);
+              if (bodyFailure) {
+                console.log(`⚡ [${agent.name}] Greeting fast-path returned unusable body (${bodyFailure.reason}) — falling through to normal routing`);
+                providerHealth.recordFailure(trivialCfg.provider, bodyFailure.kind, `${trivialCfg.provider}/${trivialCfg.model}`, bodyFailure.message);
+                consumptionIntelligence.recordFallbackOutcome('trivial', trivialCfg.provider, trivialCfg.model, false, bodyFailure.reason);
+                throw new Error(`Greeting fast-path unusable response: ${bodyFailure.reason}`);
+              }
               return jsonResponse(res, 200, data);
             }
             return;
@@ -1143,8 +1151,11 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
             console.log(`⚡ [${agent.name}] Greeting fast-path failed (429) — falling through to normal routing`);
             // Fall through to normal routing below
           } else {
-            const errData = await resp.json().catch(() => ({}));
-            return jsonResponse(res, resp.status, { error: errData.error || { message: `Provider error: ${resp.status}`, type: 'provider_error' } });
+            const errorText = await resp.text().catch(() => '');
+            const failureKind = providerFailureKindForHttp(resp.status, errorText);
+            providerHealth.recordFailure(trivialCfg.provider, failureKind, `${trivialCfg.provider}/${trivialCfg.model}`, errorText || `HTTP ${resp.status}`);
+            consumptionIntelligence.recordFallbackOutcome('trivial', trivialCfg.provider, trivialCfg.model, false, String(resp.status));
+            console.log(`⚡ [${agent.name}] Greeting fast-path failed (${resp.status}) — falling through to normal routing`);
           }
         }
       } catch {
@@ -1465,7 +1476,11 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
   // back to it would create an infinite loop (agent → gateway → agent → …).
   // In that case, fall through to HTTP providers instead.
   const isCli = agentRegistry.isCliProvider(providerId);
-  if (isCli && agent.id !== providerId) {
+  // Non-streaming requests skip this early dispatch and go through the retry
+  // loop below, which validates the response body (auth-error text, empty
+  // content) and can advance to fallback_models. Streaming must stay here:
+  // tokens are already on the wire, so mid-stream fallback is impossible.
+  if (isCli && agent.id !== providerId && body.stream === true) {
     // Pre-flight the CLI before committing to subprocess dispatch.
     // handleCliProvider has no fallback chain of its own, so an unavailable
     // CLI (binary missing, auth absent, quota window exhausted) must divert
@@ -1519,7 +1534,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
     const baseUrl = agentRegistry.getProviderBaseUrl(providerId);
     const apiKey = agentRegistry.getProviderApiKey(providerId);
 
-    if (!baseUrl || !apiKey) {
+    if (!agentRegistry.isCliProvider(providerId) && (!baseUrl || !apiKey)) {
       return jsonResponse(res, 503, {
         error: { message: `Provider ${providerId} not configured`, type: 'provider_unavailable' },
       });
@@ -1548,6 +1563,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
     const buildTarget = (pid: string, mdl: string): RetryTarget | null => {
       // CLI provider
       if (agentRegistry.isCliProvider(pid)) {
+        if (agent.id === pid) return null;
         return { providerId: pid, model: mdl, label: `${pid}/${mdl}`, isCli: true };
       }
       // HTTP provider
@@ -1602,6 +1618,12 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
         break;
       }
 
+      const healthSkip = providerHealth.getSkipReason(target.providerId);
+      if (healthSkip) {
+        console.log(`⏭️  [${agent.name}] Skipping ${target.label}: ${healthSkip}`);
+        continue;
+      }
+
       // ─── v0.5.5: Pre-flight quota check ───
       // Skip providers that are throttled or have critically low health.
       // This prevents the cascade failure where we try 5+ providers that are
@@ -1621,12 +1643,24 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
           const avail = await agentRegistry.checkCliProviderAvailability(target.providerId);
           if (!avail.ok) {
             console.log(`⚠️  [${agent.name}] CLI ${target.label} unavailable: ${avail.reason}`);
+            providerHealth.recordFailure(target.providerId, 'transport', target.label, avail.reason ?? 'unavailable');
             continue;
           }
           const cliResult = await (async () => {
             const adapter = agentRegistry.getCliAdapter(target.providerId)!;
-            return adapter.chatCompletion(payload.messages, target.model, {});
+            return adapter.chatCompletion(sanitizeForCli(payload.messages), target.model, {});
           })();
+          const bodyFailure = getUnusableProviderBodyReason({
+            choices: [{ message: { role: 'assistant', content: cliResult.content } }],
+          });
+          if (bodyFailure) {
+            console.log(`⚠️  [${agent.name}] CLI ${target.label} returned unusable body (${bodyFailure.reason}), trying fallback...`);
+            modelMatrix.recordError(target.providerId, target.model, bodyFailure.reason);
+            consumptionTracker.recordUsage(target.providerId, { tokensIn: 0, tokensOut: 0, latencyMs: 0, error: true });
+            providerHealth.recordFailure(target.providerId, bodyFailure.kind, target.label, bodyFailure.message);
+            consumptionIntelligence.recordFallbackOutcome(effort, target.providerId, target.model, false, bodyFailure.reason);
+            continue;
+          }
 
           data = {
             id: `chatcmpl-cli-${Date.now()}`,
@@ -1638,11 +1672,13 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
           };
           latency = Date.now() - startTime;
           actualTarget = target;
+          providerHealth.recordSuccess(target.providerId);
           break;
         } catch (err: any) {
           console.log(`⚠️  [${agent.name}] CLI ${target.label} failed: ${err.message}`);
           // v0.5.5: Feed CLI failure to intelligence layer
           consumptionIntelligence.recordFallbackOutcome(effort, target.providerId, target.model, false, 'cli_error');
+          providerHealth.recordFailure(target.providerId, 'transport', target.label, err.message);
           continue;
         }
       }
@@ -1696,14 +1732,30 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
 
         if (!resp.ok) {
           const error = await resp.text();
-          console.error(`❌ Provider error: ${resp.status} ${error}`);
-          jsonResponse(res, resp.status, { error: { message: error, type: 'provider_error' } });
-          return;
+          const failureKind = providerFailureKindForHttp(resp.status, error);
+          console.log(`⚠️  [${agent.name}] ${target.label} provider error (${resp.status}), trying fallback...`);
+          modelMatrix.recordError(target.providerId, target.model, `provider error (${resp.status})`);
+          if (failureKind === 'rate_limit') providerQuota.record429(target.providerId);
+          consumptionTracker.recordUsage(target.providerId, { tokensIn: 0, tokensOut: 0, latencyMs: 0, error: true });
+          providerHealth.recordFailure(target.providerId, failureKind, target.label, error || `HTTP ${resp.status}`);
+          consumptionIntelligence.recordFallbackOutcome(effort, target.providerId, target.model, false, String(resp.status));
+          continue;
         }
 
         data = await resp.json();
+        const bodyFailure = getUnusableProviderBodyReason(data);
+        if (bodyFailure) {
+          console.log(`⚠️  [${agent.name}] ${target.label} returned unusable body (${bodyFailure.reason}), trying fallback...`);
+          modelMatrix.recordError(target.providerId, target.model, bodyFailure.reason);
+          if (bodyFailure.kind === 'rate_limit') providerQuota.record429(target.providerId);
+          consumptionTracker.recordUsage(target.providerId, { tokensIn: 0, tokensOut: 0, latencyMs: 0, error: true });
+          providerHealth.recordFailure(target.providerId, bodyFailure.kind, target.label, bodyFailure.message);
+          consumptionIntelligence.recordFallbackOutcome(effort, target.providerId, target.model, false, bodyFailure.reason);
+          continue;
+        }
         latency = Date.now() - startTime;
         actualTarget = target;
+        providerHealth.recordSuccess(target.providerId);
         break;
       } catch (err: any) {
         clearTimeout(reqTimeoutId);
@@ -1711,9 +1763,11 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
           console.error(`⏱️  ${target.label} timed out after 120s, trying fallback...`);
           modelMatrix.recordError(target.providerId, target.model, 'timeout after 120s');
           consumptionTracker.recordUsage(target.providerId, { tokensIn: 0, tokensOut: 0, latencyMs: 120000, error: true });
+          providerHealth.recordFailure(target.providerId, 'timeout', target.label, 'timeout after 120s');
         } else {
           console.error(`❌ Forward error to ${target.label}: ${err.message}`);
           consumptionTracker.recordUsage(target.providerId, { tokensIn: 0, tokensOut: 0, latencyMs: 0, error: true });
+          providerHealth.recordFailure(target.providerId, 'transport', target.label, err.message);
         }
         continue;
       }
@@ -1721,7 +1775,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
 
     if (!data) {
       const tried = retryTargets.map(t => t.label).join(' → ');
-      jsonResponse(res, 503, { error: { message: `All providers unavailable (tried: ${tried})`, type: 'service_unavailable' } });
+      jsonResponse(res, 502, { error: { message: `All providers failed or returned unusable responses (tried: ${tried})`, type: 'provider_chain_exhausted' } });
       return;
     }
     if (actualTarget.providerId !== providerId) {
