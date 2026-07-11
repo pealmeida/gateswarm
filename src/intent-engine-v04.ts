@@ -15,7 +15,7 @@ import { extractFeatures, heuristicScoreFromFeatures } from './feature-extractor
 import { ensembleVote, type EnsembleVote } from './ensemble-voter.js';
 import { queryRag, getRagSignalEntries } from './rag-index.js';
 import { getConfig } from './v04-config.js';
-import { scoreToEffort } from './intent-engine.js';
+import { scoreToEffort, tierMidpoints } from './intent-engine.js';
 
 // ─── v3.3 Fallback ───────────────────────────────────────
 
@@ -61,12 +61,9 @@ export async function scoreIntent(prompt: string): Promise<ComplexityScore> {
     .filter(w => w.length > 4 && !/^(the|and|for|with|this|that|from|have|been)/.test(w));
   const allRagEntries = getRagSignalEntries(keywords.slice(0, 10));
   const ragEntries = allRagEntries.filter(e => !/^Q[0-9]+$/.test(e.tier));
-  const tierScores: Record<string, number> = {
-    trivial: 0.05, light: 0.15, moderate: 0.30,
-    heavy: 0.50, intensive: 0.70, extreme: 0.90,
-  };
+  const tierScores = tierMidpoints();
   const ragSignal = ragEntries.length > 0
-    ? ragEntries.reduce((sum, e) => sum + (tierScores[e.tier] ?? 0.3), 0) / ragEntries.length
+    ? ragEntries.reduce((sum, e) => sum + (tierScores[e.tier as EffortLevel] ?? tierScores.moderate), 0) / ragEntries.length
     : undefined;
 
   // Ensemble vote

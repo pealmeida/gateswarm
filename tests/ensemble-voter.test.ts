@@ -32,9 +32,10 @@ import {
   recordInteraction,
   resetHistoryCache,
   cascadeAvailable,
+  getCascadeThresholds,
 } from '../src/ensemble-voter.js';
 import { loadConfig } from '../src/v04-config.js';
-import { setTierBoundaries, scoreToEffort } from '../src/intent-engine.js';
+import { setTierBoundaries, scoreToEffort, tierMidpoints } from '../src/intent-engine.js';
 
 const DEFAULT_BOUNDS = [0.21, 0.28, 0.32, 0.37, 0.46];
 const DEFAULT_WEIGHTS = { heuristic: 0.55, cascade: 0.0, ragSignal: 0.25, historyBias: 0.2 };
@@ -48,6 +49,7 @@ beforeEach(() => {
   mockRecentEntries = [];
   resetHistoryCache();
   setTierBoundaries([...DEFAULT_BOUNDS]);
+  loadCascadeWeights([], []);
   // setEnsembleWeights normalizes; feed defaults so the multiplicative set is clean.
   setEnsembleWeights({ ...DEFAULT_WEIGHTS });
 });
@@ -164,8 +166,13 @@ describe('setEnsembleWeights — additive historyBias is not normalized', () => 
       expect(v.method).toBe('ensemble-v0.4');
       expect(v.rawScore).toBeCloseTo(1, 5);
     } finally {
-      loadCascadeWeights([], [...DEFAULT_BOUNDS]); // unload so other tests keep fallback path
+      loadCascadeWeights([], []); // unload so other tests keep fallback path
     }
+  });
+
+  it('defaults cascade thresholds to the live canonical boundaries', () => {
+    setTierBoundaries([0.10, 0.20, 0.30, 0.40, 0.50]);
+    expect(getCascadeThresholds()).toEqual([0.10, 0.20, 0.30, 0.40, 0.50]);
   });
 });
 
@@ -209,7 +216,8 @@ describe('calcRagSignal', () => {
         { tier: 'extreme', complexityAvg: 0, escalationHistory: false },
       ],
     });
-    expect(sig).toBeCloseTo((0.05 + 0.9) / 2, 5);
+    const mids = tierMidpoints();
+    expect(sig).toBeCloseTo((mids.trivial + mids.extreme) / 2, 5);
   });
 
   it('adds an escalation bonus when any entry escalated', () => {
@@ -227,6 +235,14 @@ describe('calcRagSignal', () => {
       retrievedEntries: [{ tier: 'extreme', complexityAvg: 0, escalationHistory: true }],
     });
     expect(sig).toBeLessThanOrEqual(1);
+  });
+
+  it('recomputes tier scores when boundaries change', () => {
+    setTierBoundaries([0.10, 0.20, 0.30, 0.40, 0.50]);
+    const sig = calcRagSignal({
+      retrievedEntries: [{ tier: 'heavy', complexityAvg: 0, escalationHistory: false }],
+    });
+    expect(sig).toBeCloseTo(0.35, 5);
   });
 });
 

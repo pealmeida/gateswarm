@@ -19,7 +19,7 @@
 
 import type { EffortLevel } from './types.js';
 import { getRecentEntries } from './feedback-store.js';
-import { scoreToEffort as _scoreToEffort, getTierBoundaries } from './intent-engine.js';
+import { scoreToEffort as _scoreToEffort, getTierBoundaries, tierMidpoints } from './intent-engine.js';
 
 export interface EnsembleVote {
   finalScore: number;
@@ -72,11 +72,16 @@ export function getEnsembleWeights(): typeof weights {
 
 // Placeholder: cascade scores loaded from v3.2 weights file
 let cascadeWeights: number[] = [];
-let cascadeThresholds: number[] = [0.08, 0.18, 0.32, 0.52, 0.72];
+let cascadeThresholds: number[] | null = null;
 
 export function loadCascadeWeights(weightsArr: number[], thresholds: number[]): void {
   cascadeWeights = weightsArr;
-  cascadeThresholds = thresholds;
+  cascadeThresholds = weightsArr.length > 0 && thresholds.length > 0 ? [...thresholds] : null;
+}
+
+/** Cascade cut points default to the live canonical boundaries, not a stale copy. */
+export function getCascadeThresholds(): number[] {
+  return cascadeThresholds ? [...cascadeThresholds] : getTierBoundaries();
 }
 
 function cascadeScore(prompt: string): number {
@@ -137,18 +142,10 @@ export interface RagSignalInput {
   }>;
 }
 
-const tierComplexityMap: Record<EffortLevel, number> = {
-  trivial: 0.05,
-  light: 0.15,
-  moderate: 0.30,
-  heavy: 0.50,
-  intensive: 0.70,
-  extreme: 0.90,
-};
-
 export function calcRagSignal(input: RagSignalInput): number {
   if (input.retrievedEntries.length === 0) return 0.5; // neutral
-  const tiers = input.retrievedEntries.map(e => tierComplexityMap[e.tier] ?? 0.5);
+  const tierScores = tierMidpoints();
+  const tiers = input.retrievedEntries.map(e => tierScores[e.tier] ?? tierScores.moderate);
   const avg = tiers.reduce((a, b) => a + b, 0) / tiers.length;
   const escalationBonus = input.retrievedEntries.filter(e => e.escalationHistory).length > 0 ? 0.1 : 0;
   return Math.min(1, avg + escalationBonus);

@@ -217,9 +217,8 @@ function hashPrompt(prompt: string): string {
 }
 
 function ragTierForSeed(tier: EffortLevel): EffortLevel {
-  // T5 will fix tierComplexityMap, where heavy/intensive/extreme currently sit
-  // above the live extreme boundary. Keep stratified gold-tier seeds here
-  // instead of high-tier-only anchors so the 0.2 RAG blend remains interpretable.
+  // Keep stratified gold-tier seeds so the 0.2 RAG blend remains interpretable;
+  // tier labels are converted to live band midpoints by the voter.
   return tier;
 }
 

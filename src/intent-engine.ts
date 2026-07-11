@@ -1,41 +1,22 @@
 /**
  * Intent Engine — v0.4 Ensemble (Browser-Compatible)
  *
- * Uses the v0.4 25-feature heuristic scoring (browser-compatible subset).
+ * Uses the canonical v0.4 feature extractor + heuristic scorer.
  * The full v0.4 ensemble (with RAG, feedback loop, cascade) runs server-side
- * in moma-gateway.ts. This client-side version uses the enhanced 25-feature
- * heuristic that matches the server's heuristic component.
+ * in moma-gateway.ts. This client-side version delegates to the same
+ * browser-safe feature-extractor-v04 module as the server heuristic path.
  *
- * Formula: signals × 0.15 + log1p(word_count) × 0.08 + has_context × 0.1
- * Features: 25 (expanded from v3.3's 9)
+ * Features: 28 (expanded from v3.3's 9)
  * Tier boundaries: from v04_config.json
  */
 
 import type { ComplexityScore, EffortLevel } from './types.js';
-
-// ─── v3.3 Heuristic Scoring (LLM-Validated) ─────────────────────────
-// 9-signal formula confirmed at 99% agreement with glm-4.7-flash judge
-// Boundaries calibrated on 50K Alpaca score distribution
-
-const EFFORT_BOUNDARIES = [0.08, 0.18, 0.32, 0.52, 0.72];
-
-const SIGNAL_KEYWORDS = {
-  imperativeVerbs: ['write', 'create', 'build', 'implement', 'generate', 'fix',
-    'debug', 'optimize', 'explain', 'analyze', 'describe', 'design'],
-  codeKeywords: ['code', 'function', 'def ', 'class ', 'import ', 'fn ', 'const '],
-  sequentialMarkers: ['first ', 'then ', 'finally', 'step ', 'part ', 'section ', 'also '],
-  constraintWords: ['must ', 'should ', 'required ', 'only ', 'cannot ', 'limit '],
-  contextMarkers: ['given ', 'consider ', 'assume ', 'suppose ', 'based on ', 'according to '],
-  architectureKeywords: ['architecture', 'design pattern', 'system design', 'microservice',
-    'scalable', 'distributed'],
-  designKeywords: ['technical design', 'implementation plan', 'migration strategy',
-    'deployment', 'pipeline', 'schema', 'database'],
-};
+import { extractFeatures, heuristicScoreFromFeatures, type FeatureVector } from './feature-extractor-v04.js';
 
 export interface V33ScoreResult {
   tier: EffortLevel;
   score: number;
-  signals: number;
+  signals: number; // count of fired v3.3 binary signals in the v0.4 feature vector
   wordCount: number;
   hasContext: boolean;
 }
@@ -83,81 +64,35 @@ export function optimizedScore(prompt: string): number {
 export const heuristicScore = optimizedScore;
 
 /**
- * Full v3.3 scoring with detail.
+ * Backward-compatible v3.3 scoring surface.
+ *
+ * The returned shape is stable, but the score now comes from the canonical
+ * v0.4 feature extractor + heuristic scorer so browser and server routing do
+ * not drift while sharing the same boundaries.
  */
 export function v33Score(prompt: string): V33ScoreResult {
   if (!prompt || !prompt.trim()) {
     return { tier: 'trivial', score: 0, signals: 0, wordCount: 0, hasContext: false };
   }
 
-  const t = prompt.toLowerCase();
-  const words = t.split(/\s+/).filter(Boolean);
+  const words = prompt.split(/\s+/).filter(Boolean);
   const wordCount = words.length;
+  const features = extractFeatures(prompt);
+  const score = heuristicScoreFromFeatures(features, wordCount);
 
-  // Count signals (0-9)
-  let signals = 0;
-
-  // 1. Question mark
-  if (prompt.includes('?')) signals++;
-
-  // 2. Code keywords
-  if (SIGNAL_KEYWORDS.codeKeywords.some(k => t.includes(k))) signals++;
-
-  // 3. Imperative verbs (at start)
-  if (SIGNAL_KEYWORDS.imperativeVerbs.some(v => t.startsWith(v + ' '))) signals++;
-
-  // 4. Arithmetic operators
-  if (/[0-9]+\s*[+\-*/=]/.test(prompt)) signals++;
-
-  // 5. Sequential markers
-  if (SIGNAL_KEYWORDS.sequentialMarkers.some(k => t.includes(k))) signals++;
-
-  // 6. Constraint words
-  if (SIGNAL_KEYWORDS.constraintWords.some(k => t.includes(k))) signals++;
-
-  // 7. Context markers
-  const hasContext = SIGNAL_KEYWORDS.contextMarkers.some(k => t.includes(k));
-  if (hasContext) signals++;
-
-  // 8. Architecture keywords
-  if (SIGNAL_KEYWORDS.architectureKeywords.some(k => t.includes(k))) signals++;
-
-  // 9. Design/implementation keywords
-  if (SIGNAL_KEYWORDS.designKeywords.some(k => t.includes(k))) signals++;
-
-  // Formula: signals × 0.15 + log1p(word_count) × 0.08 + has_context × 0.1
-  let score = signals * 0.15 + Math.log1p(wordCount) * 0.08 + (hasContext ? 0.1 : 0);
-
-  // Bonus: multi-system complexity (cross-cutting concerns)
-  // Only applies for prompts with 10+ words where system keywords indicate real architectural depth
-  const sysKeywords = [
-    'distributed', 'microservice', 'event sourcing', 'cqrs',
-    'federated', 'zero-knowledge', 'zkp', 'zk-proof', 'blockchain',
-    'multi-region', 'multi-tenant', 'load balanc', 'service mesh',
-    'message queue', 'kafka', 'redis', 'elasticsearch',
-    'ci/cd', 'kubernetes', 'docker', 'terraform',
-    'websocket', 'grpc', 'graphql', 'rest api',
-    'authentication', 'authorization', 'encryption',
-    'observability', 'monitoring', 'tracing',
-    'failover', 'disaster recovery', 'backup',
-    'real-time', 'streaming', 'batch processing',
-    'autonomous', 'self-healing', 'asic', 'fine-tuning',
-    'custom hardware', 'acceleration', 'inference',
+  const signalKeys: (keyof FeatureVector)[] = [
+    'has_question', 'has_code', 'has_imperative', 'has_arithmetic',
+    'has_sequential', 'has_constraint', 'has_context',
+    'has_architecture', 'has_design',
   ];
-  const sysCount = sysKeywords.filter(kw => t.includes(kw)).length;
-  if (wordCount >= 15 && sysCount >= 5) score += 0.35;
-  else if (wordCount >= 15 && sysCount >= 4) score += 0.25;
-  else if (wordCount >= 12 && sysCount >= 3) score += 0.15;
-  else if (wordCount >= 10 && sysCount >= 3) score += 0.10;
-  else if (wordCount >= 10 && sysCount >= 2) score += 0.05;
-  else if (sysCount >= 2) score += 0.03;
+  const signals = signalKeys.reduce((sum, key) => sum + (features[key] > 0 ? 1 : 0), 0);
 
   return {
     tier: scoreToEffort(score),
-    score: Math.min(Math.max(score, 0), 1),
+    score,
     signals,
     wordCount,
-    hasContext,
+    hasContext: features.has_context > 0,
   };
 }
 
@@ -185,6 +120,24 @@ export function setTierBoundaries(b: number[]): boolean {
 
 export function getTierBoundaries(): number[] {
   return [..._boundaries];
+}
+
+function midpoint(lo: number, hi: number): number {
+  return (lo + hi) / 2;
+}
+
+/**
+ * Representative score for each effort tier, derived live from the configured
+ * boundaries. Used by RAG/history priors so tier labels never imply scores on
+ * the retired pre-v0.5.2 scale.
+ */
+export function tierMidpoints(): Record<EffortLevel, number> {
+  const [b0, b1, b2, b3, b4] = _boundaries;
+  const extremeUpper = Math.min(1, b4 + 2 * (b4 - b3));
+  return {
+    trivial: midpoint(0, b0), light: midpoint(b0, b1), moderate: midpoint(b1, b2),
+    heavy: midpoint(b2, b3), intensive: midpoint(b3, b4), extreme: midpoint(b4, extremeUpper),
+  };
 }
 
 export function scoreToEffort(score: number): EffortLevel {
