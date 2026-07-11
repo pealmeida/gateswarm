@@ -33,6 +33,13 @@ the real moderate band is ~[0.30, 0.43], not [0.28, 0.32); the configured heavy 
 [0.32, 0.37) contains almost no actual heavy-gold scores (heavy p25 = 0.450).
 
 **A2 — Score is non-monotonic in gold tier: heavy > intensive.**
+> **2026-07-11 correction (post Phase 1):** the inversion belongs to the eval
+> gateway's *dirty* scorer (uncommitted main-checkout keywords). This branch's
+> committed scorer has monotonic medians — trivial 0.179, light 0.281,
+> moderate 0.311, heavy 0.326, intensive 0.398, extreme 0.516 — but the
+> moderate/heavy gap (0.311 vs 0.326) is far tighter than the band structure
+> assumes, so the Phase 2 separation work still stands; the target is weak
+> mid-band separation, not an ordering flip.
 Per-tier score medians: moderate 0.341, **heavy 0.470, intensive 0.418**, extreme 0.585.
 Heavy prompts ("implement LRU cache / rate limiter / parser") are dense in code
 keywords, imperatives, and tech terms — every lexical feature fires. Intensive prompts
