@@ -2,10 +2,9 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Node.js 20+](https://img.shields.io/badge/node-20+-brightgreen.svg)](https://nodejs.org/)
-[![Version](https://img.shields.io/badge/version-0.5.6-blue.svg)](https://github.com/pealmeida/gateswarm-router/releases)
 [![Latest release](https://img.shields.io/github/v/release/pealmeida/gateswarm-router?sort=semver)](https://github.com/pealmeida/gateswarm-router/releases)
 
-**Self-optimizing LLM routing gateway.** Scores every prompt, picks the cheapest *capable* model, learns from every interaction.
+**Evidence-gated LLM routing gateway.** Scores every prompt, picks the cheapest *capable* model, and collects feedback for safer improvements.
 
 > **Latest stable:** [v0.5.6](https://github.com/pealmeida/gateswarm-router/releases/tag/v0.5.6) — Routing Transparency + Quota-Aware Routing + OSS Hygiene
 > **Releases:** v0.4.4 · v0.5.2 · v0.5.3 · v0.5.4 · v0.5.5 · v0.5.6 (see [Releases](#releases) below)
@@ -14,18 +13,18 @@
 
 ## What is it?
 
-**GateSwarm** is an **LLM routing gateway**. It sits between any OpenAI-compatible client (your IDE agent, your CLI, your app) and a pool of language models — local, cloud HTTP, and CLI agents. Every chat-completion request passes through it. It scores the prompt's complexity, picks the **cheapest model capable of answering it**, forwards the request, and logs the outcome to keep getting smarter.
+**GateSwarm** is an **LLM routing gateway**. It sits between any OpenAI-compatible client (your IDE agent, your CLI, your app) and a pool of language models — local, cloud HTTP, and CLI agents. Every chat-completion request passes through it. It scores the prompt's complexity, picks the **cheapest model capable of answering it**, forwards the request, and records outcome evidence for gated improvements.
 
 **MoMA — Mixture of Multimodal Agents** — is the routing pattern at its core. Instead of one model serving every prompt, GateSwarm dynamically mixes and matches across providers based on what each prompt actually needs.
 
 ```
 Your client  ──►  GateSwarm :8900  ──►  right model for the job
-                                         (cheap local, fast cloud, or reasoning agent)
+                                         (hosted flash model, cloud model, or reasoning agent)
 ```
 
 ### In one sentence
 
-> **Every prompt gets scored; the cheapest capable model answers; the router learns from every interaction.**
+> **Every prompt gets scored; the cheapest capable model answers; feedback informs evidence-gated improvements.**
 
 ### Four things it does that a normal API client doesn't
 
@@ -37,7 +36,7 @@ Your client  ──►  GateSwarm :8900  ──►  right model for the job
 ### What it is *not*
 
 - **Not a model.** GateSwarm doesn't generate text. It decides who should.
-- **Not a training framework.** It runs a small ensemble scorer (heuristic + RAG + history) and periodically retrains the *router's weights* on real traffic — not the underlying models.
+- **Not a training framework.** It uses a heuristic-first scorer. RAG and history remain opt-in ensemble signals (both default to weight 0 pending evidence), while boundary retraining produces reviewed proposals rather than changing live routing.
 - **Not an OpenAI replacement.** It's a transparent drop-in *in front of* OpenAI-compatible providers. Swap the base URL, keep your client code.
 
 ---
@@ -46,15 +45,17 @@ Your client  ──►  GateSwarm :8900  ──►  right model for the job
 
 | Benefit | What it means in practice |
 |---|---|
-| **Cost reduction** | Cheap local `qwen2.5:0.5b` answers trivial questions (*"2+2"*); expensive Claude Opus is reserved for extreme-tier prompts. Saves 60–90% on token spend for mixed workloads. |
+| **Cost reduction** | Hosted flash `zai/glm-4.7-flash` answers trivial questions (*"2+2"*); expensive Claude Opus is reserved for extreme-tier prompts. Saves 60–90% on token spend for mixed workloads. |
 | **Quality on demand** | Hard prompts automatically escalate to stronger models. You don't have to manually choose. |
 | **Plan vs Act separation** | Planning and acting can dispatch to different models within the same tier — Claude Opus for thinking, Codex for writing. |
 | **Provider failover** | If your Bailian key expires or Z.AI rate-limits, the router detects health decay and falls through to the next provider automatically. |
 | **Multimodal-aware** | Image requests route only to vision-capable models (`X-Modality: text+vision`); text-only providers never see raw base64 payloads. |
 | **OpenAI-compatible** | Drop-in for any OpenAI client. Change `base_url` to `:8900`, no SDK changes. |
-| **Self-improving** | 25-feature ensemble + RAG + history bias + auto-retraining every N interactions. |
+| **Evidence-gated learning** | 34-feature heuristic routing collects redacted organic feedback; learned signals and boundary changes activate only after their evidence and review gates pass. |
 | **Transparent** | CLI (`gateswarm`) and TUI (`gateswarm-bar`) show last decision, weights, health, quota. No black box. |
-| **Local + cloud + CLI** | Mixes Ollama (local), Z.AI/Bailian/OpenCodeGo (HTTP), Claude Code/Codex/Pi/Hermes/OpenClaw (CLI agents). |
+| **Local + cloud + CLI** | Mixes optional local Ollama, cloud HTTP providers (Z.AI, Ollama Cloud, Bailian, OpenCodeGo), and Claude Code/Codex/Pi/Hermes/OpenClaw CLI agents. |
+
+Training mode asks for votes on synchronous, streaming, and CLI responses. Gold votes retain full redacted prompts in `data/organic/labeled.jsonl` under a versioned schema, and replies are bound to vote IDs. The ordinal cascade remains inactive unless a gate-passed `v05_ordinal_weights.json` artifact is present; it is not enabled by default.
 
 ---
 
@@ -65,35 +66,35 @@ Client (OpenAI-compatible, any agent)
   |
   v
 GateSwarm Router (:8900)
-  |-- Score complexity (ensemble voter — 25 features)
+  |-- Score complexity (heuristic-first voter — 34 features)
   |-- Detect intent mode (plan vs act, stem-aware keyword match)
   |-- Apply effort_override (if set)
   |-- Route to tier + mode model (trivial → extreme)
   |-- TurboQuant compression (Q8 → Q0) for long contexts
   |-- RAG context retrieval (Q* filter excludes compressor noise)
   |-- Sanitize + forward + fallback
-  |-- Record feedback → retrain periodically
+  |-- Record feedback → evidence-gated training and proposals
   |
   +-----> HTTP Providers                  CLI Providers (subprocess)
           Z.AI (GLM-4.7, GLM-5, GLM-5.1)  Claude Code (cc/)
           Ollama Cloud (minimax-m2.7)      Codex CLI (cx/)
-          Ollama (local: qwen2.5:0.5b)     Pi (pi/)
+          Ollama (optional local provider) Pi (pi/)
                                           Hermes (hm/)
                                           OpenClaw (oc/)
 ```
 
 ### Routing tiers
 
-All 6 tiers and their current model assignments (live in `v04_config.json`, hot-reloaded):
+The six built-in default tiers are defined in `DEFAULT_V04_CONFIG`; deployments may override them through the hot-reloaded `v04_config.json`.
 
 | Tier | Score Range | Act Model | Act Provider | Max Tokens | Reasoning |
 |------|-------------|-----------|--------------|------------|-----------|
-| **trivial** | 0.00 – 0.21 | qwen2.5:0.5b | ollama | 256 | — |
-| **light** | 0.21 – 0.28 | minimax-m2.7 | ollama-cloud | 512 | — |
-| **moderate** | 0.28 – 0.32 | glm-5 | zai | 2048 | — |
-| **heavy** | 0.32 – 0.37 | glm-5.1 | zai | 4096 | ✓ |
-| **intensive** | 0.37 – 0.46 | cx/gpt-5.4-codex | codex-cli | 4096 | ✓ |
-| **extreme** | 0.46 – 1.00 | cx/gpt-5.4-codex | codex-cli | 8192 | ✓ |
+| **trivial** | 0.000000 – 0.208938 | glm-4.7-flash | zai | 256 | — |
+| **light** | 0.208938 – 0.264209 | minimax-m2.7 | ollama-cloud | 512 | — |
+| **moderate** | 0.264209 – 0.325020 | glm-5 | zai | 2048 | — |
+| **heavy** | 0.325020 – 0.365850 | glm-5.1 | zai | 4096 | ✓ |
+| **intensive** | 0.365850 – 0.485382 | cx/gpt-5.4-codex | codex-cli | 4096 | ✓ |
+| **extreme** | 0.485382 – 1.000000 | cx/gpt-5.4-codex | codex-cli | 8192 | ✓ |
 
 Reasoning (`enable_thinking`) is on for heavy, intensive, and extreme tiers. Tier models, plan/act overrides, and fallback chains are fully configurable via CLI or by editing `v04_config.json` directly.
 
@@ -103,7 +104,7 @@ Every tier has two model assignments — one for **acting** (default: implementa
 
 | Tier | Act Model | Act Provider | Plan Model | Plan Provider |
 |------|-----------|--------------|------------|---------------|
-| **trivial** | qwen2.5:0.5b | ollama | (uses act) | — |
+| **trivial** | glm-4.7-flash | zai | (uses act) | — |
 | **light** | minimax-m2.7 | ollama-cloud | (uses act) | — |
 | **moderate** | glm-5 | zai | glm-4.7-flash | zai |
 | **heavy** | glm-5.1 | zai | glm-5 | zai |
@@ -150,6 +151,8 @@ cp .env.example .env          # add your API keys
 npm install
 npm start                     # gateway on :8900
 ```
+
+The default low tiers use hosted Z.AI and Ollama Cloud models, so configure the relevant provider keys; local Ollama is optional and is not a default routing path.
 
 Point any OpenAI-compatible client at `http://localhost:8900/v1`:
 
@@ -230,10 +233,10 @@ Three layers of customization, from safest to most invasive.
 gateswarm model heavy glm-5.1 zai              # change act model
 gateswarm reasoning extreme on                 # toggle thinking
 
-# Ensemble + retraining
+# Ensemble + boundary proposals
 gateswarm weights heuristic 0.35               # reweight ensemble
 gateswarm retrain-freq 200                     # retrain every 200 interactions
-gateswarm retrain                              # manual retrain now
+gateswarm retrain                              # create a reviewable boundary proposal
 
 # Plan/Act
 gateswarm mode-set heavy plan-model glm-5 zai  # change plan model
@@ -254,7 +257,7 @@ Key sections:
 - **`tier_models.<tier>`** — `model`, `provider`, `max_tokens`, `enable_thinking`, plus plan-mode fields
 - **`tier_boundaries`** — score thresholds separating the 6 tiers
 - **`ensemble.weights`** — `heuristic`, `cascade`, `ragSignal`, `historyBias` (must sum to 1.0)
-- **`feedback_loop`** — retraining frequency, LLM judge model, sampling rate
+- **`feedback_loop`** — proposal frequency, LLM judge model, sampling rate
 - **`rag`** — max entries, TTL, query limits
 
 A consistency check (`eval/consistency-check.ts`) enforces that every model in the config exists in its provider's catalog. So you can't typo a model name silently.
@@ -302,9 +305,10 @@ v0.5.3 (Jun 20, 2026) — dotenv + debounced writes (foundational)
 v0.5.4 (Jun 20, 2026) — plan/act + effort override (the feature release)
 v0.5.5 (Jun 20, 2026) — health-aware routing + portable paths + OSS hygiene
 v0.5.6 (Jun 20, 2026) — re-shuffle + CHANGELOG + README (LATEST)
+v0.6.0 (In progress)  — security hardening, reliable fallbacks, honest evals, organic-loop fixes, and routing-core correctness on `release/v0.6.0`
 ```
 
-The `v0.6.x` development line (kept local on the `v0.6.x-guide` branch) is used as a reference for backporting improvements. See [docs/V06_BACKPORT_PLAN.md](docs/V06_BACKPORT_PLAN.md) for the roadmap.
+v0.6.0 is developed on `release/v0.6.0` and driven by a four-pass, 96-finding adversarial review documented in [docs/RELEASE_PLAN_v0.6.0.md](docs/RELEASE_PLAN_v0.6.0.md).
 
 ### Version alignment
 
@@ -339,7 +343,7 @@ Run via `npx tsx src/gateswarm-cli.ts <command>` or alias as `gateswarm`.
 | `weights <method> <value>` | Set an ensemble weight (0–1) |
 | `feedback` | Show feedback buffer stats and per-tier accuracy |
 | `rag` | Show RAG index stats (total entries, active, avg tokens) |
-| `retrain` | Trigger manual retraining and hot-swap weights |
+| `retrain` | Generate a validation-gated boundary proposal for review; never hot-swaps live boundaries |
 
 ### Plan/Act Mode Commands
 
@@ -385,7 +389,7 @@ Run via `npx tsx src/gateswarm-cli.ts <command>` or alias as `gateswarm`.
 |----------|----|------------------|--------|
 | Z.AI (GLM Coding Lite) | `zai` | glm-4.7-flash, glm-4.7, glm-5, glm-5.1 | ✓ Healthy |
 | Ollama Cloud (free tier) | `ollama-cloud` | minimax-m2.7, minimax-m3, kimi-k2.6, kimi-k2.7-code, deepseek-v4-pro | ✓ Healthy |
-| Ollama (local) | `ollama` | qwen2.5:0.5b | ✓ Healthy |
+| Ollama (local, optional) | `ollama` | qwen2.5:0.5b | Optional — not a trivial/light default |
 | Alibaba Bailian | `bailian` | qwen3.5-plus, qwen3.6-plus, qwen3-coder-plus | ⚠️ Key expired (rotate to re-enable) |
 | OpenCodeGo | `opencodego` | qwen3.7-plus, qwen3.7-max, deepseek-v4-flash/pro, kimi | ⚠️ Quota exhausted (resets in 14d) |
 
@@ -439,13 +443,17 @@ cp .env.example .env
 |----------|-------------|
 | `BAILIAN_KEY` | Alibaba Bailian API key (optional; expired as of 2026-06-20) |
 | `BAILIAN_BASE` | Bailian base URL |
-| `GLM_API_KEY` / `ZAI_KEY` | Z.AI (GLM) API key — **required for moderate/heavy primary** |
+| `GLM_API_KEY` / `ZAI_KEY` | Z.AI (GLM) API key — **required for default trivial, moderate, and heavy primaries** |
 | `ZAI_BASE` | Z.AI base URL |
 | `OPENCODEGO_KEY` | OpenCodeGo API key (optional; quota exhausted, resets in 14d) |
 | `OLLAMA_CLOUD_KEY` | Ollama Cloud API key (optional) |
 | `OLLAMA_BASE` | Ollama base URL (default: `http://127.0.0.1:11434/v1`) |
+| `MOMA_ADMIN_TOKEN` | Token required for agent-management and `/v04/retrain`; when unset, those endpoints remain unauthenticated and the gateway emits a loud startup warning |
+| `MOMA_MAX_BODY_BYTES` | Maximum request-body size in bytes (default: `1048576`); larger bodies receive HTTP 413 |
 | `PORT` | Gateway port (default: 8900) |
 | `GATESWARM_ROOT` | Path to the router root (set by systemd; used by CLI health probes) |
+
+`GET /health` also reports `configReload` (last reload status/error and timestamp) and `scorerHealth` (including ordinal scorer state), alongside provider and agent status.
 
 ---
 
@@ -496,7 +504,7 @@ gateswarm-router/
 │   ├── model-matrix.ts                 # model catalog
 │   ├── rag-index.ts                    # RAG with Q* filter
 │   ├── adapters/                       # provider adapters (HTTP + CLI)
-│   ├── classifiers/                    # 25-feature heuristic
+│   ├── classifiers/                    # 34-feature heuristic + ordinal scorer
 │   └── types/                          # TypeScript type defs
 ├── cli/                                # gateswarm-bar TUI
 │   ├── src/
@@ -524,7 +532,7 @@ gateswarm-router/
 │   ├── ACCURACY_ROADMAP.md
 │   ├── TRAINING_MODE_GUIDE.md
 │   ├── REQUIREMENTS.md
-│   ├── V06_BACKPORT_PLAN.md            # v0.6.x backport roadmap
+│   ├── RELEASE_PLAN_v0.6.0.md          # 96-finding adversarial review plan
 │   ├── SAFETY.md
 │   └── research/                       # v3.x accuracy analyses
 ├── eval/                               # evaluation harness
@@ -566,11 +574,12 @@ v0.5.3 (Jun 20, 2026) — found: dotenv + debounced writes (foundational)
 v0.5.4 (Jun 20, 2026) — feat: plan/act + effort override (the feature)
 v0.5.5 (Jun 20, 2026) — fix: health-aware routing + portable paths + OSS hygiene
 v0.5.6 (Jun 20, 2026) — chore: re-shuffle + CHANGELOG + README (LATEST)
+v0.6.0 (In progress)  — security hardening, reliable fallbacks, honest evaluation, and routing-core fixes
 ```
 
 The clean 5-version sequence v0.5.3 → v0.5.6 was finalized to redistribute the work into a meaningful version progression. Each release is a coherent, semantically-correct release; no CHANGELOG-only retro-tags.
 
-The `v0.6.x` development line (kept local on the `v0.6.x-guide` branch) is used as a reference for backporting improvements. See [docs/V06_BACKPORT_PLAN.md](docs/V06_BACKPORT_PLAN.md) for the v0.6.x roadmap.
+v0.6.0 is being developed on `release/v0.6.0`, guided by the 96-finding adversarial review in [docs/RELEASE_PLAN_v0.6.0.md](docs/RELEASE_PLAN_v0.6.0.md). It hardens admin access, request-size limits, and redaction; validates streaming and provider health; protects evaluation integrity; repairs the organic training loop; and closes routing-core correctness gaps in Unicode handling, non-finite values, and signal deduplication.
 
 ---
 
