@@ -76,8 +76,8 @@
           "provider": "ollama-cloud"
         },
         {
-          "model": "deepseek-v4-flash-free",
-          "provider": "opencode-free"
+          "model": "deepseek-v4-flash",
+          "provider": "opencodego"
         }
       ]
     },
@@ -96,8 +96,8 @@
           "provider": "zai"
         },
         {
-          "model": "mimo-v2.5-free",
-          "provider": "opencode-free"
+          "model": "deepseek-v4-flash",
+          "provider": "opencodego"
         }
       ]
     },
@@ -216,8 +216,7 @@
           "provider": "ollama-cloud"
         }
       ]
-    },
-    "_low_tier_note": "2026-07-12: trivial/light moved off local ollama (host runs no local models). glm-4.7-flash judged well; mimo-v2.5-free scored 5/5 in live eval."
+    }
   },
   "feedback_loop": {
     "retrainAfterInteractions": 500,
@@ -236,5 +235,6 @@
     "ttlMs": 86400000,
     "queryMaxResults": 3
   },
-  "_tier_boundaries_note": "Phase 1.1 train-only refit; fitted_on=2026-07-12T03:34:24.672Z; split=holdout.v1.json; frozen until the scorer changes again."
+  "_tier_boundaries_note": "Phase 1.1 train-only refit; fitted_on=2026-07-12T03:34:24.672Z; split=holdout.v1.json; frozen until the scorer changes again.",
+  "_low_tier_note": "2026-07-12: trivial/light moved off local ollama (host runs no local models). glm-4.7-flash judged well; mimo-v2.5-free scored 5/5 in live eval."
 }

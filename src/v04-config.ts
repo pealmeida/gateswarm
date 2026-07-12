@@ -125,9 +125,9 @@ export const DEFAULT_V04_CONFIG: V04Config = {
     // 2026-07-12: trivial/light moved off local ollama — deployment hosts run
     // no local models, so a local primary 404s and burns the fallback chain.
     trivial:   { model: 'glm-4.7-flash',  provider: 'zai',          max_tokens: 256,  enable_thinking: false,
-                 fallback_models: [{ model: 'glm-4.5-air', provider: 'zai' }, { model: 'minimax-m2.7', provider: 'ollama-cloud' }, { model: 'deepseek-v4-flash-free', provider: 'opencode-free' }] },
+                 fallback_models: [{ model: 'glm-4.5-air', provider: 'zai' }, { model: 'minimax-m2.7', provider: 'ollama-cloud' }, { model: 'deepseek-v4-flash', provider: 'opencodego' }] },
     light:     { model: 'minimax-m2.7',   provider: 'ollama-cloud', max_tokens: 512,  enable_thinking: false,
-                 fallback_models: [{ model: 'glm-4.7', provider: 'zai' }, { model: 'glm-4.5-air', provider: 'zai' }, { model: 'mimo-v2.5-free', provider: 'opencode-free' }] },
+                 fallback_models: [{ model: 'glm-4.7', provider: 'zai' }, { model: 'glm-4.5-air', provider: 'zai' }, { model: 'deepseek-v4-flash', provider: 'opencodego' }] },
     moderate:  { model: 'glm-5',          provider: 'zai',          max_tokens: 2048, enable_thinking: false,
                  plan_model: 'glm-4.7-flash', plan_provider: 'zai', plan_max_tokens: 1024, plan_enable_thinking: false,
                  fallback_models: [{ model: 'glm-4.7', provider: 'zai' }, { model: 'minimax-m2.7', provider: 'ollama-cloud' }, { model: 'kimi-k2.6', provider: 'ollama-cloud' }, { model: 'glm-4.7-flash', provider: 'zai' }] },
