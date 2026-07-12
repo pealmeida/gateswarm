@@ -2,10 +2,10 @@
  * Phase 1.1 boundary refit.
  *
  * Fits tier cut points on the frozen train split only, reports held-out and
- * 5-fold CV metrics, and optionally writes the one-time frozen cuts to
- * v04_config.json. This is intentionally a refit-once-then-freeze workflow.
+ * 5-fold CV metrics, and writes a reviewable proposal under eval/reports.
+ * Applying a boundary change is an intentional reviewed edit to the TS source.
  */
-import { existsSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { loadEffort, loadRaw, TIERS, type EffortExample } from './lib/dataset.js';
@@ -21,9 +21,8 @@ import {
 } from '../src/classifiers/heuristic-linear.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const ROOT = join(__dirname, '..');
 const SPLIT_DIR = join(__dirname, 'splits');
-const CONFIG_PATH = join(ROOT, 'v04_config.json');
+const REPORTS_DIR = join(__dirname, 'reports');
 
 interface Manifest {
   hashes: Record<string, string>;
@@ -179,15 +178,47 @@ function tierBoundaryConfig(boundaries: number[]): Record<EffortLevel, [number, 
   };
 }
 
-function applyBoundaries(boundaries: number[], splitName: string): void {
-  const cfg = JSON.parse(readFileSync(CONFIG_PATH, 'utf-8')) as Record<string, unknown>;
-  cfg.tier_boundaries = tierBoundaryConfig(boundaries);
-  cfg._tier_boundaries_note = `Phase 1.1 train-only refit; fitted_on=${new Date().toISOString()}; split=${splitName}; frozen until the scorer changes again.`;
-  writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2) + '\n', 'utf-8');
+function proposalPath(date = new Date()): string {
+  const stamp = `${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, '0')}${String(date.getDate()).padStart(2, '0')}`;
+  return join(REPORTS_DIR, `boundary-proposal-${stamp}.json`);
+}
+
+function writeProposal(boundaries: number[], splitName: string, metrics: {
+  trainCurrent: BoundaryEval;
+  trainFitted: BoundaryEval;
+  testCurrent: BoundaryEval;
+  testFitted: BoundaryEval;
+}): string {
+  mkdirSync(REPORTS_DIR, { recursive: true });
+  const path = proposalPath();
+  const proposal = {
+    generatedAt: new Date().toISOString(),
+    split: splitName,
+    proposedCutPoints: boundaries.map((boundary) => Number(boundary.toFixed(6))),
+    proposedTierBoundaries: tierBoundaryConfig(boundaries),
+    metrics,
+    instructions: [
+      'This file is a proposal only; it does not change runtime routing.',
+      'Review held-out metrics, then make a reviewed edit to src/tier-boundaries.ts if approved.',
+      'Do not write tier boundaries into v04_config.json; config overrides require an explicit boundaries_override key and a loud runtime log.',
+    ],
+  };
+  writeFileSync(path, JSON.stringify(proposal, null, 2) + '\n', 'utf-8');
+  return path;
+}
+
+function usage(): string {
+  return 'Usage: npx tsx eval/refit-boundaries.ts\n\nWrites a proposal under eval/reports; --apply is retired and never modifies v04_config.json.';
 }
 
 export function main(argv = process.argv.slice(2)): void {
-  const apply = argv.includes('--apply');
+  if (argv.includes('--help') || argv.includes('-h')) {
+    console.log(usage());
+    return;
+  }
+  if (argv.includes('--apply')) {
+    console.warn('--apply is retired: emitting a proposal only; no configuration file will be modified.');
+  }
   const { splitName, split, folds } = loadFrozen();
   const all = scoreExamples(loadEffort());
   const byId = new Map(all.map((e) => [e.id, e]));
@@ -220,12 +251,9 @@ export function main(argv = process.argv.slice(2)): void {
   console.log(`5-fold CV fitted:  exact ${pct(cvFitted.exact.mean)} ± ${pct(cvFitted.exact.std)}  adjacent ${pct(cvFitted.adjacent.mean)} ± ${pct(cvFitted.adjacent.std)}`);
   console.log(`5-fold CV fitted recall: ${formatRecall(cvFitted.recall)}`);
 
-  if (apply) {
-    applyBoundaries(fittedBoundaries, splitName);
-    console.log(`Applied fitted tier_boundaries to ${CONFIG_PATH}`);
-  } else {
-    console.log('Dry run only. Re-run with --apply to update v04_config.json.');
-  }
+  const proposal = writeProposal(fittedBoundaries, splitName, { trainCurrent, trainFitted, testCurrent, testFitted });
+  console.log(`Wrote boundary proposal: ${proposal}`);
+  console.log('Review it, then make a reviewed edit to src/tier-boundaries.ts if approved. v04_config.json was not modified.');
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

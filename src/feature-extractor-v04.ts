@@ -138,25 +138,113 @@ function countRegex(text: string, re: RegExp): number {
   return (text.match(re) || []).length;
 }
 
-function countScaleQuantityMentions(text: string): number {
-  const hits = new Set<string>();
-  const addMatches = (re: RegExp) => {
-    for (const match of text.matchAll(re)) {
-      hits.add(`${match.index ?? 0}:${match[0]}`);
+interface TextSpan {
+  start: number;
+  end: number;
+}
+
+function spansOverlap(a: TextSpan, b: TextSpan): boolean {
+  return a.start < b.end && b.start < a.end;
+}
+
+function countMergedMatches(patterns: RegExp[], text: string): number {
+  const spans: TextSpan[] = [];
+  for (const pattern of patterns) {
+    for (const match of text.matchAll(pattern)) {
+      const start = match.index ?? 0;
+      spans.push({ start, end: start + match[0].length });
     }
-  };
+  }
+  spans.sort((a, b) => a.start - b.start || b.end - a.end);
+  const merged: TextSpan[] = [];
+  for (const span of spans) {
+    const previous = merged[merged.length - 1];
+    if (previous && span.start < previous.end) previous.end = Math.max(previous.end, span.end);
+    else merged.push({ ...span });
+  }
+  return merged.length;
+}
 
-  addMatches(/\bsub-\d+(?:\.\d+)?\s*(?:ms|milliseconds|s|sec|secs|seconds)\b/g);
-  addMatches(/\b\d+(?:\.\d+)?\s*(?:mb|gb|tb|kb|ms|milliseconds|qps|rps)\b/g);
-  addMatches(/\b\d+(?:\.\d+)?\s*(?:million|billion|thousand)\s+(?:events|requests|rows|users|services|microservices|hospitals|records|transactions)\b/g);
-  addMatches(/\b\d+(?:\.\d+)?(?:k|m|b)\s*(?:events|requests|users|rows|qps|rps)?\b/g);
-  addMatches(/\b\d+(?:\.\d+)?-(?:billion|million|thousand|row|rows|microservice|microservices|tenant|tenants|region|regions|user|users)[a-z-]*\b/g);
-  addMatches(/\bp(?:90|95|99|999)\b/g);
-  addMatches(/\b(?:qps|rps|events\/sec|events per second|requests per second|concurrent users|tail latency)\b/g);
-  addMatches(/\b(?:one|two|three|four|five|six|seven|eight|nine|ten|twelve|hundred|thousand|million|billion)\s+(?:separate\s+)?(?:regions|repos|repositories|services|microservices|hospitals|users|events|rows|product lines|years|teams)\b/g);
-  addMatches(/\b(?:hundred|thousand|million|billion)-[a-z-]*(?:microservice|microservices|user|users|row|rows|tenant|tenants|region|regions)[a-z-]*\b/g);
+function keywordSpans(text: string, keywords: Iterable<string>): TextSpan[] {
+  const spans: TextSpan[] = [];
+  for (const keyword of keywords) {
+    let start = text.indexOf(keyword);
+    while (start >= 0) {
+      const end = start + keyword.length;
+      const before = text[start - 1] ?? '';
+      const after = text[end] ?? '';
+      if (!/[a-z0-9]/i.test(before) && !/[a-z0-9]/i.test(after)) spans.push({ start, end });
+      start = text.indexOf(keyword, start + keyword.length);
+    }
+  }
+  return spans.sort((a, b) => a.start - b.start || b.end - a.end);
+}
 
-  return hits.size;
+function claimKeywordSpans(spans: TextSpan[], claimed: TextSpan[]): number {
+  let count = 0;
+  for (const span of spans) {
+    if (!claimed.some((other) => spansOverlap(span, other))) {
+      claimed.push(span);
+      count++;
+    }
+  }
+  return count;
+}
+
+function segmentText(prompt: string, granularity: 'word' | 'sentence'): string[] {
+  const Segmenter = Intl.Segmenter;
+  if (typeof Segmenter === 'function') {
+    const segmenter = new Segmenter(undefined, { granularity });
+    const segments = Array.from(segmenter.segment(prompt));
+    if (granularity === 'word') {
+      // Keep established compound technical tokens (for example async/await)
+      // together while using Segmenter everywhere else. This preserves their
+      // semantic signal and avoids changing established English scores.
+      const compounds = Array.from(prompt.matchAll(/[a-z][a-z0-9]*[-/][a-z][a-z0-9]*/gi))
+        .map((match) => ({ start: match.index ?? 0, end: (match.index ?? 0) + match[0].length, text: match[0] }));
+      const seenCompounds = new Set<number>();
+      const words = segments.flatMap((segment) => {
+        const compoundIndex = compounds.findIndex((compound) =>
+          segment.index >= compound.start && segment.index < compound.end,
+        );
+        if (compoundIndex >= 0) {
+          if (seenCompounds.has(compoundIndex)) return [];
+          seenCompounds.add(compoundIndex);
+          return [compounds[compoundIndex].text];
+        }
+        return segment.isWordLike ? [segment.segment] : [];
+      });
+      // Emoji-only prompts do not contain word-like segments, but should still
+      // contribute meaningful input size instead of looking empty.
+      if (words.length > 0) return words;
+      return segments
+        .map((segment) => segment.segment)
+        .filter((segment) => /\S/u.test(segment) && !/^\p{P}+$/u.test(segment));
+    }
+    return segments.map((segment) => segment.segment).filter((segment) => segment.trim());
+  }
+  return granularity === 'word'
+    ? prompt.split(/\s+/).filter(Boolean)
+    : prompt.split(/[.!?]+/).filter((sentence) => sentence.trim());
+}
+
+/** Unicode-aware word count shared by the heuristic and ordinal scorer. */
+export function countPromptWords(prompt: string): number {
+  return segmentText(prompt, 'word').length;
+}
+
+function countScaleQuantityMentions(text: string): number {
+  return countMergedMatches([
+    /\bsub-\d+(?:\.\d+)?\s*(?:ms|milliseconds|s|sec|secs|seconds)\b/g,
+    /\b\d+(?:\.\d+)?\s*(?:mb|gb|tb|kb|ms|milliseconds|qps|rps)\b/g,
+    /\b\d+(?:\.\d+)?\s*(?:million|billion|thousand)\s+(?:events|requests|rows|users|services|microservices|hospitals|records|transactions)\b/g,
+    /\b\d+(?:\.\d+)?(?:k|m|b)\s*(?:events|requests|users|rows|qps|rps)?\b/g,
+    /\b\d+(?:\.\d+)?-(?:billion|million|thousand|row|rows|microservice|microservices|tenant|tenants|region|regions|user|users)[a-z-]*\b/g,
+    /\bp(?:90|95|99|999)\b/g,
+    /\b(?:qps|rps|events\/sec|events per second|requests per second|concurrent users|tail latency)\b/g,
+    /\b(?:one|two|three|four|five|six|seven|eight|nine|ten|twelve|hundred|thousand|million|billion)\s+(?:separate\s+)?(?:regions|repos|repositories|services|microservices|hospitals|users|events|rows|product lines|years|teams)\b/g,
+    /\b(?:hundred|thousand|million|billion)-[a-z-]*(?:microservice|microservices|user|users|row|rows|tenant|tenants|region|regions)[a-z-]*\b/g,
+  ], text);
 }
 
 function countDiagnosticCausalMarkers(text: string): number {
@@ -186,9 +274,9 @@ export function extractFeatures(prompt: string): FeatureVector {
   if (!prompt?.trim()) return zeroFeatures();
 
   const t = prompt.toLowerCase();
-  const words = t.split(/\s+/).filter(Boolean);
+  const words = segmentText(t, 'word');
   const wc = words.length;
-  const sentences = prompt.split(/[.!?]+/).filter(s => s.trim());
+  const sentences = segmentText(prompt, 'sentence');
   const normalizedWords = t.match(/[a-z][a-z0-9-]*/g) || [];
 
   // v3.3 Heuristic Signals (binary)
@@ -199,13 +287,18 @@ export function extractFeatures(prompt: string): FeatureVector {
   const has_sequential = SIGNAL_KEYWORDS.sequentialMarkers.some(k => t.includes(k)) ? 1 : 0;
   const has_constraint = SIGNAL_KEYWORDS.constraintWords.some(k => t.includes(k)) ? 1 : 0;
   const has_context = SIGNAL_KEYWORDS.contextMarkers.some(k => t.includes(k)) ? 1 : 0;
-  const has_architecture = SIGNAL_KEYWORDS.architectureKeywords.some(k => t.includes(k)) ? 1 : 0;
-  const has_design = SIGNAL_KEYWORDS.designKeywords.some(k => t.includes(k)) ? 1 : 0;
+  const claimedKeywordSpans: TextSpan[] = [];
+  const has_architecture = claimKeywordSpans(
+    keywordSpans(t, SIGNAL_KEYWORDS.architectureKeywords), claimedKeywordSpans,
+  ) > 0 ? 1 : 0;
+  const has_design = claimKeywordSpans(
+    keywordSpans(t, SIGNAL_KEYWORDS.designKeywords), claimedKeywordSpans,
+  ) > 0 ? 1 : 0;
 
   // v3.2 Cascade
   const sentence_count = sentences.length;
   const avg_word_length = wc > 0 ? words.reduce((s, w) => s + w.length, 0) / wc : 0;
-  const techTerms = words.filter(w => TECH_KEYWORDS.has(w)).length;
+  const techTerms = claimKeywordSpans(keywordSpans(t, TECH_KEYWORDS), claimedKeywordSpans);
   const question_technical = has_question && techTerms > 0 ? 1 : 0;
   const technical_design = has_design || has_architecture ? 1 : 0;
   const technical_terms = techTerms;
@@ -262,13 +355,15 @@ export function extractFeatures(prompt: string): FeatureVector {
 
   // Phase 2: decomposition, scale, and diagnostic markers for the
   // moderate/heavy/intensive band where length alone collapses.
-  const bulletedItemCount = countRegex(prompt, /^\s*(?:[-*]|\d+[.)])\s+\S/gm);
-  const inlineNumberedCount = countRegex(prompt, /\b\d+[.)]\s+\S/g);
+  const listItemCount = countMergedMatches([
+    /^\s*(?:[-*]|\d+[.)])\s+\S/gm,
+    /\b\d+[.)]\s+\S/g,
+  ], prompt);
   const requirementPhraseCount = countRegex(
     t,
     /\b(?:must|should|shall|required|requires?|needs? to|have to|cannot|without|under|within|supports?|handles?|including|with|while|keeping|stays? under|ranked by)\b/g,
   );
-  const requirement_count = requirementPhraseCount + Math.max(bulletedItemCount, inlineNumberedCount);
+  const requirement_count = requirementPhraseCount + listItemCount;
   const distinct_imperative_verbs = new Set(
     normalizedWords.filter(w => IMPERATIVE_VERBS.has(w)),
   ).size;
@@ -279,7 +374,7 @@ export function extractFeatures(prompt: string): FeatureVector {
   }, 0);
   const conjunction_enumeration =
     countRegex(t, /\b(?:as well as|along with|and|plus)\b/g) +
-    commaEnumerationCount + inlineNumberedCount + bulletedItemCount;
+    commaEnumerationCount + listItemCount;
   const scale_quantity_mentions = countScaleQuantityMentions(t);
   const diagnostic_causal_markers = countDiagnosticCausalMarkers(t);
 

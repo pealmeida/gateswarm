@@ -1,5 +1,7 @@
 import { describe, expect, it, beforeEach } from 'vitest';
 import { join } from 'path';
+import { mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
 import type { FeatureVector } from '../src/feature-extractor-v04.js';
 import type { EffortLevel } from '../src/types.js';
 import {
@@ -92,6 +94,12 @@ function manualState(thresholds: number[], heuristicWeight: number): OrdinalMode
       learningRate: 0,
       l2: 0,
     },
+    gate: {
+      passed: true,
+      metrics: {},
+      trainedAt: new Date(0).toISOString(),
+      dataHash: 'test',
+    },
   };
 }
 
@@ -137,6 +145,23 @@ describe('ordinal logistic math', () => {
       .toBeLessThan(TIERS.indexOf(a.predictEffort(rows[rows.length - 1].prompt, rows[rows.length - 1].features).tier));
   });
 
+  it('uses zero-initialized weighted variance accumulators', () => {
+    const low = zeroFeatures();
+    const high = zeroFeatures();
+    high.sentence_count = 4;
+    const model = new OrdinalLogisticClassifier();
+    model.fit([
+      { id: 'a', prompt: 'low', tier: 'trivial', features: low, weight: 1 },
+      { id: 'b', prompt: 'high', tier: 'light', features: high, weight: 3 },
+    ], { epochs: 1 });
+
+    const sentenceIndex = ORDINAL_FEATURE_NAMES.indexOf('sentence_count');
+    // Weighted mean = (0 * 1 + 4 * 3) / 4 = 3; variance =
+    // ((0 - 3)^2 * 1 + (4 - 3)^2 * 3) / 4 = 3.
+    expect(model.toJSON().means[sentenceIndex]).toBeCloseTo(3);
+    expect(model.toJSON().stds[sentenceIndex]).toBeCloseTo(Math.sqrt(3));
+  });
+
   it('falls back to heuristic when persisted weights are missing', () => {
     const model = new OrdinalLogisticClassifier({
       autoLoad: true,
@@ -145,6 +170,38 @@ describe('ordinal logistic math', () => {
     expect(model.isAvailable()).toBe(false);
     const pred = model.predictEffort('hello');
     expect(pred.tier).toBe(scoreToEffort(pred.score ?? 0));
+  });
+
+  it.each([
+    ['gate is missing', undefined],
+    ['gate failed', { passed: false, metrics: {}, trainedAt: new Date(0).toISOString(), dataHash: 'test' }],
+  ])('refuses persisted weights when the %s', (_name, gate) => {
+    const dir = mkdtempSync(join(tmpdir(), 'ordinal-weights-'));
+    const path = join(dir, 'weights.json');
+    const state = { ...manualState([-3, -1, 1, 3, 5], 8), gate };
+    writeFileSync(path, JSON.stringify(state), 'utf-8');
+
+    try {
+      const model = new OrdinalLogisticClassifier({ autoLoad: true, weightPath: path });
+      expect(model.isAvailable()).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects non-finite values, non-positive stds, and unordered thresholds', () => {
+    const model = new OrdinalLogisticClassifier();
+    const state = manualState([-3, -1, 1, 3, 5], 8);
+    state.weights[0] = Number.NaN;
+    expect(() => model.loadState(state)).toThrow(/invalid numeric/i);
+
+    state.weights[0] = 0;
+    state.stds[0] = 0;
+    expect(() => model.loadState(state)).toThrow(/invalid numeric/i);
+
+    state.stds[0] = 1;
+    state.thresholds[2] = state.thresholds[1];
+    expect(() => model.loadState(state)).toThrow(/invalid numeric/i);
   });
 });
 
@@ -175,5 +232,17 @@ describe('ordinal cascade voter integration', () => {
     expect(vote.abstained).toBe(true);
     expect(vote.tier).toBe(scoreToEffort(0.30));
     expect(vote.escalated).toBe(false);
+  });
+
+  it('abstains when calibrated ordinal confidence is below 0.4', () => {
+    const model = new OrdinalLogisticClassifier();
+    const state = manualState([-3, -1, 1, 3, 5], 8);
+    state.calibration = { a: 1, b: -10 };
+    model.loadState(state);
+    setDefaultOrdinalClassifierForTests(model);
+
+    const vote = ensembleVote({ prompt: 'confident raw prediction', heuristicScore: 0.30 });
+    expect(vote.abstained).toBe(true);
+    expect(vote.tier).toBe(scoreToEffort(0.30));
   });
 });

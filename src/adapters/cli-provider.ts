@@ -10,6 +10,9 @@
  */
 
 import { spawn } from 'child_process';
+import { closeSync, mkdtempSync, openSync, readFileSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 
 export type CliInputFormat = 'stdin' | 'arg';
 export type CliOutputFormat = 'stdout-text' | 'stdout-json';
@@ -229,15 +232,39 @@ export class CliProviderAdapter {
       // For stdin-based CLIs, use pipe so we can feed the prompt.
       const stdinMode = this.cfg.inputFormat === 'stdin' ? 'pipe' : 'ignore';
 
+      // Capturing to descriptors is more reliable than child stdout/stderr pipes
+      // in constrained runtimes, and still preserves separate output streams.
+      const captureDir = mkdtempSync(join(tmpdir(), 'gateswarm-cli-'));
+      const stdoutPath = join(captureDir, 'stdout');
+      const stderrPath = join(captureDir, 'stderr');
+      const stdoutFd = openSync(stdoutPath, 'w');
+      const stderrFd = openSync(stderrPath, 'w');
+      let cleanedUp = false;
+      let settled = false;
+      const cleanup = (): void => {
+        if (cleanedUp) return;
+        cleanedUp = true;
+        closeSync(stdoutFd);
+        closeSync(stderrFd);
+      };
+      const readCapture = (): { stdout: string; stderr: string } => {
+        cleanup();
+        try {
+          return {
+            stdout: readFileSync(stdoutPath, 'utf-8'),
+            stderr: readFileSync(stderrPath, 'utf-8'),
+          };
+        } finally {
+          rmSync(captureDir, { recursive: true, force: true });
+        }
+      };
+
       const child = spawn(this.cfg.command, args, {
         timeout: this.cfg.timeoutMs,
         env: { ...process.env, ...(this.cfg.env ?? {}) },
         cwd: this.cfg.workingDir,
-        stdio: [stdinMode, 'pipe', 'pipe'],
+        stdio: [stdinMode, stdoutFd, stderrFd],
       });
-
-      let stdout = '';
-      let stderr = '';
 
       if (stdinPrompt && this.cfg.inputFormat === 'stdin') {
         // Write the prompt to stdin, then close
@@ -249,10 +276,10 @@ export class CliProviderAdapter {
         child.stdin?.end();
       }
 
-      child.stdout?.on('data', (d: Buffer) => { stdout += d.toString(); });
-      child.stderr?.on('data', (d: Buffer) => { stderr += d.toString(); });
-
       child.on('close', (code) => {
+        if (settled) return;
+        settled = true;
+        const { stdout, stderr } = readCapture();
         if (code !== 0 && stderr.trim()) {
           reject(new Error(`CLI exited with code ${code}: ${stderr.trim().slice(0, 500)}`));
         } else {
@@ -261,6 +288,10 @@ export class CliProviderAdapter {
       });
 
       child.on('error', (err) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        rmSync(captureDir, { recursive: true, force: true });
         reject(new Error(`CLI process error: ${err.message}`));
       });
     });

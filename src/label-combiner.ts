@@ -11,6 +11,9 @@
  *   After 100 manual votes: adjust SILVER weight based on RAG agreement rate
  */
 
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'fs';
+import { dirname, join } from 'path';
+import { fileURLToPath } from 'url';
 import type { EffortLevel } from './types.js';
 
 // ─── Types ────────────────────────────────────────────────
@@ -34,6 +37,10 @@ export interface CombinedLabel {
 const DEFAULT_GOLD_WEIGHT = 1.0;
 const DEFAULT_SILVER_WEIGHT = 0.3;  // Low until validated
 const DEFAULT_BRONZE_WEIGHT = 0.5;
+const FULL_PHASE_MIN_COMPARISONS = 30;
+const FULL_PHASE_MIN_AGREEMENT = 0.7;
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const DEFAULT_CALIBRATION_FILE = join(__dirname, '../data/training/calibration.json');
 
 let goldWeight = DEFAULT_GOLD_WEIGHT;
 let silverWeight = DEFAULT_SILVER_WEIGHT;
@@ -48,6 +55,103 @@ let silverTotalCompared = 0;
 // Phase tracking for RAG bootstrap
 let totalInteractions = 0;
 let ragPhase: 'disabled' | 'low' | 'full' = 'disabled';
+let calibrationFile = DEFAULT_CALIBRATION_FILE;
+
+interface CalibrationState {
+  bronzeAgreementCount: number;
+  bronzeTotalCompared: number;
+  silverAgreementCount: number;
+  silverTotalCompared: number;
+  bronzeWeight: number;
+  silverWeight: number;
+  totalInteractions: number;
+  ragPhase: 'disabled' | 'low' | 'full';
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function getCalibrationState(): CalibrationState {
+  return {
+    bronzeAgreementCount,
+    bronzeTotalCompared,
+    silverAgreementCount,
+    silverTotalCompared,
+    bronzeWeight,
+    silverWeight,
+    totalInteractions,
+    ragPhase,
+  };
+}
+
+function isValidState(value: unknown): value is CalibrationState {
+  if (!value || typeof value !== 'object') return false;
+  const state = value as Partial<CalibrationState>;
+  return [
+    state.bronzeAgreementCount,
+    state.bronzeTotalCompared,
+    state.silverAgreementCount,
+    state.silverTotalCompared,
+    state.bronzeWeight,
+    state.silverWeight,
+    state.totalInteractions,
+  ].every(isFiniteNumber)
+    && state.bronzeAgreementCount! >= 0
+    && state.bronzeTotalCompared! >= state.bronzeAgreementCount!
+    && state.silverAgreementCount! >= 0
+    && state.silverTotalCompared! >= state.silverAgreementCount!
+    && state.totalInteractions! >= 0
+    && state.bronzeWeight! >= 0
+    && state.silverWeight! >= 0
+    && (state.ragPhase === 'disabled' || state.ragPhase === 'low' || state.ragPhase === 'full');
+}
+
+function persistCalibrationState(): void {
+  const directory = dirname(calibrationFile);
+  if (!existsSync(directory)) mkdirSync(directory, { recursive: true });
+
+  const temporaryFile = `${calibrationFile}.${process.pid}.${Date.now()}.tmp`;
+  let descriptor: number | undefined;
+  try {
+    writeFileSync(temporaryFile, JSON.stringify(getCalibrationState(), null, 2), 'utf-8');
+    descriptor = openSync(temporaryFile, 'r');
+    fsyncSync(descriptor);
+    closeSync(descriptor);
+    descriptor = undefined;
+    renameSync(temporaryFile, calibrationFile);
+  } catch (error) {
+    if (descriptor !== undefined) closeSync(descriptor);
+    try { unlinkSync(temporaryFile); } catch { /* no temporary file to remove */ }
+    console.error(`Unable to persist calibration state: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+/** Restore durable calibration state. Invalid files leave the safe defaults intact. */
+export function loadCalibrationState(): boolean {
+  if (!existsSync(calibrationFile)) return false;
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(calibrationFile, 'utf-8'));
+    if (!isValidState(parsed)) return false;
+    bronzeAgreementCount = parsed.bronzeAgreementCount;
+    bronzeTotalCompared = parsed.bronzeTotalCompared;
+    silverAgreementCount = parsed.silverAgreementCount;
+    silverTotalCompared = parsed.silverTotalCompared;
+    bronzeWeight = parsed.bronzeWeight;
+    silverWeight = parsed.silverWeight;
+    totalInteractions = parsed.totalInteractions;
+    ragPhase = parsed.ragPhase;
+    return true;
+  } catch (error) {
+    console.error(`Unable to restore calibration state: ${error instanceof Error ? error.message : String(error)}`);
+    return false;
+  }
+}
+
+/** Test seam for isolating persistence from the application data directory. */
+export function setCalibrationStoragePath(path: string): void {
+  calibrationFile = path;
+}
 
 // ─── Combine Labels ───────────────────────────────────────
 
@@ -56,30 +160,34 @@ let ragPhase: 'disabled' | 'low' | 'full' = 'disabled';
  * Returns the weighted majority tier with confidence.
  */
 export function combineLabels(sources: LabelSource[]): CombinedLabel | null {
-  if (sources.length === 0) return null;
+  const validSources = sources.filter(source =>
+    Number.isFinite(source.weight) && Number.isFinite(source.confidence)
+  );
+  if (validSources.length === 0) return null;
 
   // If gold exists, it always wins (100% truth)
-  const gold = sources.find(s => s.source === 'gold');
+  const gold = validSources.find(s => s.source === 'gold');
   if (gold) {
+    const weight = goldWeight * gold.weight * Math.max(0, Math.min(1, gold.confidence));
     return {
       tier: gold.tier,
       confidence: 1.0,
-      totalWeight: goldWeight,
+      totalWeight: weight,
       sources: [gold],
     };
   }
 
   // Weighted vote among silver + bronze
   const tierWeights: Record<string, number> = {};
-  for (const src of sources) {
-    let w = src.weight;
+  for (const src of validSources) {
+    let w = src.weight * Math.max(0, Math.min(1, src.confidence));
     if (src.source === 'silver') w *= getSilverWeight();
     else if (src.source === 'bronze') w *= getBronzeWeight();
     tierWeights[src.tier] = (tierWeights[src.tier] || 0) + w;
   }
 
   // Find majority tier
-  let bestTier: EffortLevel = sources[0].tier;
+  let bestTier: EffortLevel = validSources[0].tier;
   let bestWeight = 0;
   let totalWeight = 0;
 
@@ -97,7 +205,7 @@ export function combineLabels(sources: LabelSource[]): CombinedLabel | null {
     tier: bestTier,
     confidence: Math.min(1, confidence),
     totalWeight,
-    sources,
+    sources: validSources,
   };
 }
 
@@ -134,6 +242,7 @@ export function calibrateBronze(agrees: boolean): void {
     // Weight = default × agreement rate (clamped 0.1–0.8)
     bronzeWeight = Math.max(0.1, Math.min(0.8, DEFAULT_BRONZE_WEIGHT * agreementRate));
   }
+  persistCalibrationState();
 }
 
 /**
@@ -144,16 +253,11 @@ export function calibrateSilver(agrees: boolean): void {
   silverTotalCompared++;
   if (agrees) silverAgreementCount++;
 
-  // After 10+ comparisons, adjust weight
-  if (silverTotalCompared >= 10) {
-    const agreementRate = silverAgreementCount / silverTotalCompared;
-    // Weight = default × agreement rate (clamped 0.1–0.9)
-    const calibrated = Math.max(0.1, Math.min(0.9, DEFAULT_SILVER_WEIGHT * agreementRate));
-    // Only increase from bootstrap low weight if validated
-    if (agreementRate > 0.7) {
-      silverWeight = calibrated;
-    }
-  }
+  const agreementRate = silverAgreementCount / silverTotalCompared;
+  // Preserve evidence from poor agreement rather than retaining the default.
+  silverWeight = Math.max(0, Math.min(0.9, DEFAULT_SILVER_WEIGHT * agreementRate));
+  updateRagPhase();
+  persistCalibrationState();
 }
 
 // ─── RAG Bootstrap Phases ────────────────────────────────
@@ -166,13 +270,20 @@ export function calibrateSilver(agrees: boolean): void {
  */
 export function incrementInteractionCount(): void {
   totalInteractions++;
+  updateRagPhase();
+  persistCalibrationState();
+}
+
+function updateRagPhase(): void {
   if (totalInteractions >= 50 && ragPhase === 'disabled') {
     ragPhase = 'low';
     console.log(`🔄 RAG bootstrap: Phase 2 (low weight) at ${totalInteractions} interactions`);
   }
   if (totalInteractions >= 200 && ragPhase === 'low') {
-    // Only transition to full if silver has been calibrated and validated
-    if (silverWeight >= DEFAULT_SILVER_WEIGHT * 0.5) {
+    const agreementRate = silverTotalCompared > 0
+      ? silverAgreementCount / silverTotalCompared
+      : 0;
+    if (silverTotalCompared >= FULL_PHASE_MIN_COMPARISONS && agreementRate >= FULL_PHASE_MIN_AGREEMENT) {
       ragPhase = 'full';
       console.log(`🔄 RAG bootstrap: Phase 3 (full weight) at ${totalInteractions} interactions`);
     }
@@ -203,7 +314,7 @@ export function getCalibrationStats(): {
   };
 }
 
-export function resetCalibration(): void {
+export function resetCalibration(options: { persist?: boolean } = {}): void {
   goldWeight = DEFAULT_GOLD_WEIGHT;
   silverWeight = DEFAULT_SILVER_WEIGHT;
   bronzeWeight = DEFAULT_BRONZE_WEIGHT;
@@ -213,4 +324,7 @@ export function resetCalibration(): void {
   silverTotalCompared = 0;
   totalInteractions = 0;
   ragPhase = 'disabled';
+  if (options.persist !== false) persistCalibrationState();
 }
+
+loadCalibrationState();

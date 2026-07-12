@@ -15,6 +15,7 @@ import { fileURLToPath } from 'url';
 import type { TierClassifier, TierPrediction, LabeledPrompt } from './types.js';
 import type { EffortLevel } from '../types.js';
 import {
+  countPromptWords,
   extractFeatures,
   heuristicScoreFromFeatures,
   type FeatureVector,
@@ -75,6 +76,13 @@ export interface PlattCalibration {
   b: number;
 }
 
+export interface OrdinalWeightsGate {
+  passed: boolean;
+  metrics: Record<string, number>;
+  trainedAt: string;
+  dataHash: string;
+}
+
 export interface OrdinalModelState {
   version: string;
   featureNames: OrdinalFeatureName[];
@@ -90,6 +98,8 @@ export interface OrdinalModelState {
     learningRate: number;
     l2: number;
   };
+  /** Present only in persisted artifacts approved by the holdout gate. */
+  gate?: OrdinalWeightsGate;
 }
 
 export interface OrdinalFitOptions {
@@ -118,7 +128,7 @@ function defaultWeightPaths(): string[] {
 }
 
 function countWords(prompt: string): number {
-  return prompt.split(/\s+/).filter(Boolean).length;
+  return countPromptWords(prompt);
 }
 
 function tierIndex(tier: EffortLevel): number {
@@ -189,7 +199,7 @@ function normalize(raw: number[], state: Pick<OrdinalModelState, 'means' | 'stds
 function stats(rows: number[][], weights: number[] = []): { means: number[]; stds: number[] } {
   const d = ORDINAL_FEATURE_NAMES.length;
   const means = Array(d).fill(0) as number[];
-  const stds = Array(d).fill(1) as number[];
+  const stds = Array(d).fill(0) as number[];
   const total = rows.reduce((sum, _row, i) => sum + (weights[i] ?? 1), 0) || 1;
   for (let i = 0; i < rows.length; i++) {
     const w = weights[i] ?? 1;
@@ -202,7 +212,7 @@ function stats(rows: number[][], weights: number[] = []): { means: number[]; std
   }
   for (let j = 0; j < d; j++) {
     stds[j] = Math.sqrt(stds[j] / total);
-    if (!Number.isFinite(stds[j]) || stds[j] < 1e-6) stds[j] = 1;
+    if (!Number.isFinite(stds[j]) || stds[j] < 1e-6) stds[j] = 1e-6;
   }
   return { means, stds };
 }
@@ -327,6 +337,9 @@ export class OrdinalLogisticClassifier implements TierClassifier {
 
   private state: OrdinalModelState | null = null;
   private loadAttempted = false;
+  private loadStatus: 'active' | 'absent' | 'invalid' = 'absent';
+  private nextLoadAttemptAt = 0;
+  private lastLoadFailureLogAt = 0;
   private readonly weightPath?: string;
   private readonly autoLoad: boolean;
   private readonly fallback = new HeuristicLinearClassifier();
@@ -407,16 +420,31 @@ export class OrdinalLogisticClassifier implements TierClassifier {
     state.training.trainedAt = new Date().toISOString();
     this.state = state;
     this.loadAttempted = true;
+    this.loadStatus = 'active';
   }
 
   loadState(state: OrdinalModelState): void {
-    if (state.featureNames.join('\n') !== ORDINAL_FEATURE_NAMES.join('\n')) {
+    if (!state || typeof state !== 'object' || !Array.isArray(state.featureNames) ||
+      state.featureNames.length !== ORDINAL_FEATURE_NAMES.length ||
+      state.featureNames.some((name, i) => name !== ORDINAL_FEATURE_NAMES[i])) {
       throw new Error('ordinal weights feature set does not match runtime feature set');
     }
-    if (state.thresholds.length !== 5 || state.weights.length !== ORDINAL_FEATURE_NAMES.length) {
+    if (!state.gate || state.gate.passed !== true) {
+      throw new Error('ordinal weights holdout gate is missing or did not pass');
+    }
+    if (!Array.isArray(state.means) || !Array.isArray(state.stds) ||
+      !Array.isArray(state.thresholds) || !Array.isArray(state.weights) ||
+      state.means.length !== ORDINAL_FEATURE_NAMES.length ||
+      state.stds.length !== ORDINAL_FEATURE_NAMES.length ||
+      state.thresholds.length !== 5 || state.weights.length !== ORDINAL_FEATURE_NAMES.length) {
       throw new Error('invalid ordinal weights shape');
     }
-    enforceOrderedThresholds(state.thresholds);
+    if (!state.means.every(Number.isFinite) || !state.stds.every((std) => Number.isFinite(std) && std > 0) ||
+      !state.weights.every(Number.isFinite) || !state.thresholds.every(Number.isFinite) ||
+      !state.thresholds.every((threshold, i) => i === 0 || threshold > state.thresholds[i - 1]) ||
+      !Number.isFinite(state.calibration?.a) || !Number.isFinite(state.calibration?.b)) {
+      throw new Error('ordinal weights contain invalid numeric values');
+    }
     this.state = {
       ...state,
       featureNames: [...state.featureNames],
@@ -428,6 +456,7 @@ export class OrdinalLogisticClassifier implements TierClassifier {
       training: { ...state.training },
     };
     this.loadAttempted = true;
+    this.loadStatus = 'active';
   }
 
   toJSON(): OrdinalModelState {
@@ -447,6 +476,11 @@ export class OrdinalLogisticClassifier implements TierClassifier {
   isAvailable(): boolean {
     this.ensureLoaded();
     return this.state !== null;
+  }
+
+  getHealth(): 'active' | 'absent' | 'invalid' {
+    this.ensureLoaded();
+    return this.state ? 'active' : this.loadStatus;
   }
 
   predictEffort(prompt: string, feats?: FeatureVector): TierPrediction {
@@ -469,13 +503,29 @@ export class OrdinalLogisticClassifier implements TierClassifier {
   }
 
   private ensureLoaded(): void {
-    if (this.state || this.loadAttempted || !this.autoLoad) return;
-    this.loadAttempted = true;
+    if (this.state || this.loadAttempted || !this.autoLoad || Date.now() < this.nextLoadAttemptAt) return;
     const paths = this.weightPath ? [this.weightPath] : defaultWeightPaths();
     const path = paths.find((p) => existsSync(p));
-    if (!path) return;
-    const parsed = JSON.parse(readFileSync(path, 'utf-8')) as OrdinalModelState;
-    this.loadState(parsed);
+    if (!path) {
+      this.loadStatus = 'absent';
+      return;
+    }
+    try {
+      const parsed = JSON.parse(readFileSync(path, 'utf-8')) as OrdinalModelState;
+      this.loadState(parsed);
+    } catch (error) {
+      this.loadStatus = 'invalid';
+      this.nextLoadAttemptAt = Date.now() + 60_000;
+      if (Date.now() - this.lastLoadFailureLogAt >= 60_000) {
+        this.lastLoadFailureLogAt = Date.now();
+        console.error({
+          event: 'ordinal.weights_load_failed',
+          path,
+          error: error instanceof Error ? error.message : 'unknown error',
+          retryAfterMs: 60_000,
+        });
+      }
+    }
   }
 }
 
@@ -488,6 +538,10 @@ export function getDefaultOrdinalClassifier(): OrdinalLogisticClassifier {
 
 export function ordinalModelAvailable(): boolean {
   return getDefaultOrdinalClassifier().isAvailable();
+}
+
+export function getOrdinalModelHealth(): 'active' | 'absent' | 'invalid' {
+  return getDefaultOrdinalClassifier().getHealth();
 }
 
 export function setDefaultOrdinalClassifierForTests(model: OrdinalLogisticClassifier | null): void {

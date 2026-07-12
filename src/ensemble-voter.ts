@@ -26,6 +26,7 @@ import {
   ordinalModelAvailable,
   type OrdinalLogisticClassifier,
 } from './classifiers/ordinal-logistic.js';
+import type { FeatureVector } from './feature-extractor-v04.js';
 
 export interface EnsembleVote {
   finalScore: number;
@@ -55,13 +56,17 @@ export interface EnsembleVote {
 // 0.0pp contribution, so defaults are heuristic + the learned cascade only.
 // Code paths remain for later re-enable if a warm ablation re-proves signal.
 let weights = {
-  heuristic: 0.50,
-  cascade: 0.50,
+  heuristic: 1.00,
+  cascade: 0.00,
   ragSignal: 0.00,
   historyBias: 0.00,
 };
 
 export function setEnsembleWeights(w: Partial<typeof weights>): void {
+  if (Object.values(w).some((value) => typeof value !== 'number' || !Number.isFinite(value) || value < 0)) {
+    console.error({ event: 'routing.invalid_ensemble_weights', weights: w });
+    return;
+  }
   weights = { ...weights, ...w };
   // Normalize ONLY the multiplicative score weights to sum=1. historyBias stays
   // an ADDITIVE term (±0.1 cap applied directly, never multiplied by its
@@ -107,10 +112,10 @@ function cascadeScore(prompt: string): number {
   return 1 / (1 + Math.exp(-score)); // sigmoid
 }
 
-function ordinalCascadeScore(prompt: string): { score: number; confidence: number; margin: number } | null {
+function ordinalCascadeScore(prompt: string, features?: FeatureVector): { score: number; confidence: number; margin: number } | null {
   const model = getDefaultOrdinalClassifier();
   if (!model.isAvailable()) return null;
-  const p = model.predictEffort(prompt);
+  const p = model.predictEffort(prompt, features);
   return { score: expectedScoreFromProbs(p.probs ?? {}), confidence: p.confidence, margin: p.margin ?? 0 };
 }
 
@@ -252,6 +257,7 @@ export function calcHistoryBias(recentCount = 50): number {
 
 export interface EnsembleInput {
   prompt: string;
+  features?: FeatureVector;
   heuristicScore: number;
   ragSignal?: number;
   enableCascade?: boolean;
@@ -278,14 +284,14 @@ function confidenceFromMargin(score: number): number {
 export function ensembleVote(input: EnsembleInput): EnsembleVote {
   const heuristic = input.heuristicScore;
 
-  const ordinal = input.enableCascade !== false ? ordinalCascadeScore(input.prompt) : null;
+  const ordinal = input.enableCascade !== false ? ordinalCascadeScore(input.prompt, input.features) : null;
   const legacyCasc = (!ordinal && input.enableCascade !== false && cascadeWeights.length > 0)
     ? cascadeScore(input.prompt)
     : -1;
   const casc = ordinal ? ordinal.score : legacyCasc;
   const cascadeMargin = ordinal?.margin;
   const cascadeAbstainMargin = input.cascadeAbstainMargin ?? 0.08;
-  const abstained = ordinal ? ordinal.margin < cascadeAbstainMargin : false;
+  const abstained = ordinal ? ordinal.confidence < 0.4 || ordinal.margin < cascadeAbstainMargin : false;
 
   // Phase 4 honesty: the default history weight is 0 after warm-store ablation
   // measured exactly 0.0pp contribution. The path remains opt-in for future proof.

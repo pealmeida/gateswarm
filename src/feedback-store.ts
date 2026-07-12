@@ -14,7 +14,8 @@
 import { randomBytes, createHash } from 'crypto';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs';
+import { redactSensitive } from './redact.js';
 
 export interface FeedbackEntry {
   id: string;
@@ -31,13 +32,16 @@ export interface FeedbackEntry {
   promptSnippet?: string;          // v0.5.7: organic gold-vote audit trail
   source?: string;                 // e.g. gold_vote
   agentId?: string;
+  /** Binds a gold label to the exact vote/request that produced it. */
+  voteId?: string;
 }
 
 // ─── Persistence Layer ──────────────────────────────────────────
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const DATA_DIR = join(__dirname, '../data/feedback');
+const DATA_DIR = process.env.MOMA_FEEDBACK_DATA_DIR ?? join(__dirname, '../data/feedback');
 const FEEDBACK_FILE = join(DATA_DIR, 'entries.json');
+const FEEDBACK_JOURNAL_FILE = join(DATA_DIR, 'entries.journal.jsonl');
 const MAX_ENTRIES = 10000;
 
 function ensureDataDir(): void {
@@ -59,7 +63,9 @@ function loadFeedbackEntries(): FeedbackEntry[] {
 
 function saveFeedbackEntries(entries: FeedbackEntry[]): void {
   ensureDataDir();
-  writeFileSync(FEEDBACK_FILE, JSON.stringify(entries, null, 2), 'utf-8');
+  const tempPath = `${FEEDBACK_FILE}.tmp-${process.pid}-${Date.now()}`;
+  writeFileSync(tempPath, JSON.stringify(entries, null, 2), 'utf-8');
+  renameSync(tempPath, FEEDBACK_FILE);
 }
 
 // ─── In-Memory Store ─────────────────────────────────────────────
@@ -68,6 +74,47 @@ const entries: FeedbackEntry[] = [];
 let _totalInteractions = 0;
 let _initialized = false;
 
+type FeedbackMutation = { type: 'upsert'; entry: FeedbackEntry } | { type: 'replace'; entries: FeedbackEntry[] };
+
+function applyFeedbackMutation(mutation: FeedbackMutation): void {
+  if (mutation.type === 'replace') {
+    entries.splice(0, entries.length, ...mutation.entries);
+    return;
+  }
+  const index = entries.findIndex(entry => entry.id === mutation.entry.id);
+  if (index >= 0) entries[index] = mutation.entry;
+  else entries.push(mutation.entry);
+}
+
+/** A synchronous write-ahead journal keeps request-path mutations durable. */
+function appendFeedbackMutation(mutation: FeedbackMutation): void {
+  ensureDataDir();
+  writeFileSync(FEEDBACK_JOURNAL_FILE, `${JSON.stringify(mutation)}\n`, { encoding: 'utf-8', flag: 'a' });
+}
+
+function replayFeedbackJournal(): void {
+  if (!existsSync(FEEDBACK_JOURNAL_FILE)) return;
+  for (const line of readFileSync(FEEDBACK_JOURNAL_FILE, 'utf-8').split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      const mutation = JSON.parse(line) as FeedbackMutation;
+      if (mutation.type === 'upsert' && mutation.entry && typeof mutation.entry.id === 'string') {
+        applyFeedbackMutation(mutation);
+      } else if (mutation.type === 'replace' && Array.isArray(mutation.entries)) {
+        applyFeedbackMutation(mutation);
+      } else {
+        console.error('\u26a0\ufe0f\u26a0\ufe0f [feedback-store] Ignoring malformed journal mutation');
+      }
+    } catch (error) {
+      console.error('\u26a0\ufe0f\u26a0\ufe0f [feedback-store] Ignoring malformed journal line', error);
+    }
+  }
+}
+
+function journalMutation(mutation: FeedbackMutation): void {
+  appendFeedbackMutation(mutation);
+}
+
 /**
  * Initialize the feedback store from disk. Call once at gateway startup.
  */
@@ -75,7 +122,9 @@ export function initFeedbackStore(): void {
   if (_initialized) return;
   const loaded = loadFeedbackEntries();
   entries.push(...loaded);
+  replayFeedbackJournal();
   _totalInteractions = loaded.length;
+  _totalInteractions += entries.filter(entry => !loaded.some(saved => saved.id === entry.id)).length;
   _initialized = true;
   console.log(`📋 Feedback store loaded: ${_totalInteractions} entries from disk`);
 }
@@ -86,6 +135,7 @@ export function initFeedbackStore(): void {
 export function flushFeedbackStore(): void {
   if (!_initialized) return;
   saveFeedbackEntries(entries.slice(-MAX_ENTRIES));
+  writeFileSync(FEEDBACK_JOURNAL_FILE, '', 'utf-8');
 }
 
 // Auto-flush every 60 seconds
@@ -95,14 +145,14 @@ export function startFeedbackAutoFlush(intervalMs = 60000): void {
   _flushInterval = setInterval(flushFeedbackStore, intervalMs);
 }
 
-export function recordFeedback(entry: Omit<FeedbackEntry, 'id' | 'timestamp' | 'promptHash'> & { prompt: string }): void {
+export function recordFeedback(entry: Omit<FeedbackEntry, 'id' | 'timestamp' | 'promptHash' | 'promptSnippet'> & { prompt: string }): void {
   if (!_initialized) initFeedbackStore();
 
   const id = randomBytes(8).toString('hex');
   const timestamp = Date.now();
   const promptHash = createHash('sha256').update(entry.prompt).digest('hex').slice(0, 16);
 
-  entries.push({
+  const stored: FeedbackEntry = {
     id, timestamp, promptHash,
     predictedTier: entry.predictedTier,
     actualTier: entry.actualTier,
@@ -112,12 +162,22 @@ export function recordFeedback(entry: Omit<FeedbackEntry, 'id' | 'timestamp' | '
     escalated: entry.escalated,
     userSatisfaction: entry.userSatisfaction,
     score: entry.score,
-  });
+    promptSnippet: redactSensitive(entry.prompt).slice(0, 100),
+    source: entry.source,
+    agentId: entry.agentId,
+    voteId: entry.voteId,
+  };
+  entries.push(stored);
 
   _totalInteractions++;
 
   // Keep last 10K entries in memory
-  if (entries.length > MAX_ENTRIES) entries.splice(0, entries.length - MAX_ENTRIES);
+  if (entries.length > MAX_ENTRIES) {
+    entries.splice(0, entries.length - MAX_ENTRIES);
+    journalMutation({ type: 'replace', entries: [...entries] });
+  } else {
+    journalMutation({ type: 'upsert', entry: stored });
+  }
 }
 
 export function getInteractionCount(): number {
@@ -131,6 +191,7 @@ export function getFeedbackEntries(): FeedbackEntry[] {
 }
 
 export function recordGoldVoteFeedback(label: {
+  voteId?: string;
   agentId: string;
   promptHash: string;
   promptSnippet: string;
@@ -140,14 +201,17 @@ export function recordGoldVoteFeedback(label: {
 }): FeedbackEntry {
   if (!_initialized) initFeedbackStore();
 
-  const existing = [...entries].reverse().find(e => e.promptHash === label.promptHash);
+  const reversed = [...entries].reverse();
+  const existing = (label.voteId === undefined ? undefined : reversed.find(e => e.voteId === label.voteId))
+    ?? reversed.find(e => e.promptHash === label.promptHash && e.agentId === label.agentId);
   if (existing) {
     existing.actualTier = label.actualTier;
     existing.source = 'gold_vote';
     existing.agentId = label.agentId;
-    existing.promptSnippet = existing.promptSnippet ?? label.promptSnippet;
+    existing.promptSnippet = existing.promptSnippet ?? redactSensitive(label.promptSnippet).slice(0, 100);
+    existing.voteId = label.voteId ?? existing.voteId;
     if (typeof label.score === 'number') existing.score = label.score;
-    saveFeedbackEntries(entries.slice(-MAX_ENTRIES));
+    journalMutation({ type: 'upsert', entry: existing });
     return existing;
   }
 
@@ -163,9 +227,10 @@ export function recordGoldVoteFeedback(label: {
     escalated: false,
     userSatisfaction: null,
     score: label.score,
-    promptSnippet: label.promptSnippet,
+    promptSnippet: redactSensitive(label.promptSnippet).slice(0, 100),
     source: 'gold_vote',
     agentId: label.agentId,
+    voteId: label.voteId,
   };
 
   entries.push(entry);
@@ -173,8 +238,10 @@ export function recordGoldVoteFeedback(label: {
 
   if (entries.length > MAX_ENTRIES) {
     entries.splice(0, entries.length - MAX_ENTRIES);
+    journalMutation({ type: 'replace', entries: [...entries] });
+  } else {
+    journalMutation({ type: 'upsert', entry });
   }
-  saveFeedbackEntries(entries.slice(-MAX_ENTRIES));
 
   return entry;
 }
@@ -190,7 +257,7 @@ export function getRecentEntries(limit = 100): FeedbackEntry[] {
  */
 export function getUnjudgedEntries(samplingRate = 0.10): FeedbackEntry[] {
   if (!_initialized) initFeedbackStore();
-  const unjudged = entries.filter(e => e.adequacyScore === null);
+  const unjudged = entries.filter(e => e.adequacyScore === null && e.source !== 'gold_vote');
   return unjudged.filter(() => Math.random() < samplingRate);
 }
 
@@ -203,7 +270,8 @@ export function updateAdequacy(id: string, adequacyScore: number, actualTier: st
   const entry = entries.find(e => e.id === id);
   if (entry) {
     entry.adequacyScore = adequacyScore;
-    entry.actualTier = actualTier;
+    if (entry.source !== 'gold_vote') entry.actualTier = actualTier;
+    journalMutation({ type: 'upsert', entry });
   }
 }
 

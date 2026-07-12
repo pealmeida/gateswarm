@@ -3,12 +3,15 @@
  * Verifies each subsystem instantiates and runs its happy path.
  */
 import { describe, it, expect } from 'vitest';
+import { mkdtempSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import { scoreIntent, scoreIntentSync } from '../src/intent-engine-v04.js';
 import { extractFeatures } from '../src/feature-extractor-v04.js';
 import { turboQuantCompress } from '../src/turboquant-compressor.js';
 import { initRagIndex, addRagEntry, queryRag } from '../src/rag-index.js';
 import { initFeedbackStore, getInteractionCount } from '../src/feedback-store.js';
-import { getCalibrationStats, calibrateBronze } from '../src/label-combiner.js';
+import { getCalibrationStats, calibrateBronze, setCalibrationStoragePath } from '../src/label-combiner.js';
 import { scoreToEffort } from '../src/intent-engine.js';
 
 describe('v0.4 subsystems', () => {
@@ -77,6 +80,7 @@ describe('v0.4 subsystems', () => {
   });
 
   it('label-combiner calibration stats', () => {
+    setCalibrationStoragePath(join(mkdtempSync(join(tmpdir(), 'gateswarm-calibration-')), 'calibration.json'));
     calibrateBronze(true);
     const stats = getCalibrationStats();
     expect(stats).toHaveProperty('ragPhase');

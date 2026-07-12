@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   getUnusableContentReason,
   getUnusableProviderBodyReason,
   ProviderHealthTracker,
+  providerFailureKindForHttp,
   runProviderFallbackChain,
 } from '../src/adapters/provider-health.js';
 
@@ -31,6 +35,89 @@ describe('provider response usability', () => {
     );
 
     expect(failure).toBeNull();
+  });
+
+  it('prefers structured provider codes and requires error-shaped free text', () => {
+    expect(getUnusableProviderBodyReason({
+      error: { code: 1305, message: 'quota exhausted' },
+    })).toMatchObject({ reason: 'provider_rate_limit_body', kind: 'rate_limit' });
+    expect(providerFailureKindForHttp(400, JSON.stringify({ error: { code: 1308 } }))).toBe('rate_limit');
+    expect(getUnusableProviderBodyReason({ error: { message: 'Invalid API key' } })?.kind).toBe('auth');
+    expect(getUnusableContentReason('API Error: 1305')?.kind).toBe('rate_limit');
+    expect(getUnusableContentReason('This guide explains why an invalid API key should be rotated.')).toBeNull();
+  });
+
+  it('accepts terminal tool and content-filter completions without text', () => {
+    for (const choice of [
+      { message: { content: null, tool_calls: [{ id: 'call_1' }] }, finish_reason: 'tool_calls' },
+      { message: { content: null, function_call: { name: 'search' } }, finish_reason: 'stop' },
+      { message: { content: null }, finish_reason: 'content_filter' },
+    ]) {
+      expect(getUnusableProviderBodyReason({ choices: [choice] })).toBeNull();
+    }
+  });
+
+  it('never flags a normal completion shape because its content resembles an error', () => {
+    expect(getUnusableProviderBodyReason({
+      choices: [{
+        message: { role: 'assistant', content: 'Failed to authenticate? Check the API key configuration.' },
+        finish_reason: 'stop',
+      }],
+    })).toBeNull();
+  });
+});
+
+describe('provider health state', () => {
+  it('keeps hard-failure streaks through non-hard failures and cools repeated server errors', () => {
+    let now = 10_000;
+    const health = new ProviderHealthTracker(() => now, () => {});
+    health.recordFailure('hard', 'auth');
+    health.recordFailure('hard', 'provider_error');
+    health.recordFailure('hard', 'transport');
+    expect(health.getSkipReason('hard')).toContain('unhealthy cooldown');
+
+    health.recordFailure('server', 'server_error');
+    now += 1;
+    health.recordFailure('server', 'server_error');
+    now += 1;
+    health.recordFailure('server', 'server_error');
+    expect(health.getSkipReason('server')).toContain('unhealthy cooldown');
+  });
+
+  it('persists only active cooldowns and restores them on boot', () => {
+    let now = 25_000;
+    const directory = mkdtempSync(join(tmpdir(), 'provider-health-'));
+    const file = join(directory, 'provider-health.json');
+    try {
+      const health = new ProviderHealthTracker(() => now, () => {}, file);
+      health.recordFailure('persisted', 'auth');
+      health.recordFailure('persisted', 'transport');
+      expect(JSON.parse(readFileSync(file, 'utf8')).cooldowns).toHaveLength(1);
+
+      const restored = new ProviderHealthTracker(() => now, () => {}, file);
+      expect(restored.getSkipReason('persisted')).toContain('unhealthy cooldown');
+
+      now += 5 * 60 * 1000 + 1;
+      const expired = new ProviderHealthTracker(() => now, () => {}, file);
+      expect(expired.getSkipReason('persisted')).toBeNull();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('does not let an older success clear a newer failure cooldown', () => {
+    let now = 50_000;
+    const health = new ProviderHealthTracker(() => now, () => {});
+    const oldSuccess = health.beginAttempt('ordered');
+    now += 1;
+    const firstFailure = health.beginAttempt('ordered');
+    health.recordFailure('ordered', 'auth', 'ordered', '', firstFailure);
+    now += 1;
+    const secondFailure = health.beginAttempt('ordered');
+    health.recordFailure('ordered', 'transport', 'ordered', '', secondFailure);
+
+    health.recordSuccess('ordered', oldSuccess);
+    expect(health.getSkipReason('ordered')).toContain('unhealthy cooldown');
   });
 });
 
@@ -80,6 +167,29 @@ describe('provider fallback traversal', () => {
       expect(result.error.message).toContain('one/m1');
       expect(result.error.message).toContain('two/m2');
     }
+  });
+
+  it('records rejected attempts as transport failures and continues the chain', async () => {
+    const health = new ProviderHealthTracker(() => 0, () => {});
+    const failures: string[] = [];
+    const result = await runProviderFallbackChain(
+      [
+        { providerId: 'rejecting', model: 'm1', label: 'rejecting/m1' },
+        { providerId: 'working', model: 'm2', label: 'working/m2' },
+      ],
+      async (target) => {
+        if (target.providerId === 'rejecting') throw new Error('socket closed');
+        return { ok: true as const, data: 'ok' };
+      },
+      {
+        health,
+        onFailure: (_target, failure) => failures.push(failure.kind),
+      },
+    );
+
+    expect(failures).toEqual(['transport']);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.tried).toEqual(['rejecting/m1', 'working/m2']);
   });
 
   it('skips an unhealthy provider during cooldown', async () => {

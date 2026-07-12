@@ -15,7 +15,7 @@
  */
 
 import { randomBytes, createHash } from 'crypto';
-import { appendFileSync, existsSync, mkdirSync } from 'fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import type { EffortLevel } from './types.js';
@@ -24,11 +24,24 @@ import { recordGoldVoteFeedback } from './feedback-store.js';
 import {
   saveVote, updateVote, getVotes, getLabeledVotes,
   getAgentConfig, updateAgentConfig, setAgentTrainingMode,
-  recordTierAccuracy, getTierAccuracy, getOverallAccuracy,
-  parseVoteReply, isVoteReply,
+  getTierAccuracy, getOverallAccuracy,
+  appendVoteWal, getUnappliedVoteWal, markVoteWalApplied, markRetrained,
+  recordVoteTierAccuracy, getLastRetrainWatermark,
+  parseVoteReply, extractVoteId, isVoteReply,
   type VoteRecord,
 } from './vote-persistence.js';
-import { getCalibrationStats, incrementInteractionCount } from './label-combiner.js';
+import {
+  getCalibrationStats,
+  getRagPhase,
+  getSilverWeight,
+  incrementInteractionCount,
+} from './label-combiner.js';
+import {
+  encodeOrganicLabel,
+  MAX_ORGANIC_PROMPT_CHARS,
+  ORGANIC_LABEL_VERSION,
+} from './organic-labels.js';
+import { redactSensitive } from './redact.js';
 
 // ─── Types ───────────────────────────────────────────────
 
@@ -68,6 +81,15 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const ORGANIC_DATA_DIR = join(__dirname, '../data/organic');
 const ORGANIC_LABELS_FILE = join(ORGANIC_DATA_DIR, 'labeled.jsonl');
 export { isVoteReply } from './vote-persistence.js';
+
+/** Restore fatigue state from durable votes so a restart cannot reset sampling pressure. */
+function restoreAgentVoteCounts(): void {
+  for (const vote of getVotes()) {
+    agentVoteCounts.set(vote.agentId, (agentVoteCounts.get(vote.agentId) ?? 0) + 1);
+  }
+}
+
+restoreAgentVoteCounts();
 
 // ─── Mode Control ────────────────────────────────────────
 
@@ -132,10 +154,11 @@ export function createVoteRequest(
 
   const config = getAgentConfig(agentId);
   const id = 'v' + randomBytes(6).toString('hex');
+  const redactedPrompt = redactSensitive(prompt);
   const vote: VoteRequest = {
     id,
     agentId,
-    prompt: prompt.slice(0, 200),
+    prompt: redactedPrompt.slice(0, 200),
     predictedTier,
     confidence,
     timestamp: Date.now(),
@@ -150,7 +173,8 @@ export function createVoteRequest(
     id,
     agentId,
     promptHash: hashPrompt(prompt),
-    promptSnippet: prompt.slice(0, 100),
+    prompt: redactedPrompt.slice(0, MAX_ORGANIC_PROMPT_CHARS),
+    promptSnippet: redactedPrompt.slice(0, 100),
     predictedTier,
     actualTier: null,
     source: 'gold',
@@ -175,7 +199,7 @@ export function createVoteRequest(
  */
 export function formatVotePrompt(vote: VoteRequest): string {
   const tiers = 'trivial|light|moderate|heavy|intensive|extreme';
-  return `\n\n🎯 [${vote.id}] Router chose: ${vote.predictedTier} (${(vote.confidence * 100).toFixed(0)}% confidence). Reply: ✅ correct | ❌ ${tiers}`;
+  return `\n\n🎯 [vote:${vote.id}] Router chose: ${vote.predictedTier} (${(vote.confidence * 100).toFixed(0)}% confidence). Reply: ✅ correct | ❌ ${tiers}`;
 }
 
 export interface VoteDecoration {
@@ -224,6 +248,15 @@ export function appendVotePromptToCompletion<T extends Record<string, any>>(
   return decorated;
 }
 
+/**
+ * Build the delta payload used to append a training vote to an SSE response.
+ * Keeping this separate from the HTTP response decorator avoids buffering a
+ * streamed completion merely to add the final vote request.
+ */
+export function appendVotePromptToStream(vote: VoteRequest): { content: string } {
+  return { content: formatVotePrompt(vote) };
+}
+
 // ─── Vote Recording ──────────────────────────────────────
 
 export interface ProcessedVoteReply {
@@ -236,82 +269,135 @@ export interface ProcessedVoteReply {
   agreed: boolean;
 }
 
-function persistOrganicGoldLabel(vote: VoteRecord, actualTier: EffortLevel, agreed: boolean): void {
-  if (!existsSync(ORGANIC_DATA_DIR)) {
-    mkdirSync(ORGANIC_DATA_DIR, { recursive: true });
+export interface VoteClarification {
+  voteId: string;
+  agentId: string;
+  clarification: string;
+}
+
+export type VoteReplyResult = ProcessedVoteReply | VoteClarification;
+
+export function isVoteClarification(result: VoteReplyResult): result is VoteClarification {
+  return 'clarification' in result;
+}
+
+export function persistOrganicGoldLabel(
+  vote: VoteRecord,
+  actualTier: EffortLevel,
+  agreed: boolean,
+  labelsFile = ORGANIC_LABELS_FILE,
+): void {
+  if (typeof vote.prompt !== 'string' || !vote.prompt) {
+    console.error(`organic label skipped for vote ${vote.id}: persisted vote has no full prompt`);
+    return;
+  }
+  const labelsDir = dirname(labelsFile);
+  if (!existsSync(labelsDir)) {
+    mkdirSync(labelsDir, { recursive: true });
   }
 
-  appendFileSync(ORGANIC_LABELS_FILE, JSON.stringify({
+  appendFileSync(labelsFile, encodeOrganicLabel({
+    version: ORGANIC_LABEL_VERSION,
     ts: Date.now(),
+    promptHash: vote.promptHash,
+    prompt: redactSensitive(vote.prompt).slice(0, MAX_ORGANIC_PROMPT_CHARS),
+    promptSnippet: redactSensitive(vote.promptSnippet).slice(0, 100),
+    predictedTier: vote.predictedTier,
+    actualTier,
+    agreed,
+    agentId: vote.agentId,
+    voteId: vote.id,
+  }) + '\n', 'utf-8');
+}
+
+function organicLabelAlreadyPersisted(voteId: string, labelsFile: string): boolean {
+  if (!existsSync(labelsFile)) return false;
+  return readFileSync(labelsFile, 'utf-8').split('\n').some(line => {
+    try { return JSON.parse(line).voteId === voteId; } catch { return false; }
+  });
+}
+
+function persistOrganicGoldLabelOnce(vote: VoteRecord, actualTier: EffortLevel, agreed: boolean): void {
+  if (!organicLabelAlreadyPersisted(vote.id, ORGANIC_LABELS_FILE)) {
+    persistOrganicGoldLabel(vote, actualTier, agreed);
+  }
+}
+
+function consumeVote(vote: VoteRecord, actualTier: EffortLevel, agreed: boolean): ProcessedVoteReply {
+  const isCorrect = actualTier === vote.predictedTier;
+  updateVote(vote.id, {
+    voted: true,
+    userAgreed: agreed,
+    userCorrectTier: agreed ? null : actualTier,
+    actualTier,
+  });
+  recordGoldVoteFeedback({
+    voteId: vote.id,
+    agentId: vote.agentId,
+    promptHash: vote.promptHash,
+    promptSnippet: vote.promptSnippet,
+    predictedTier: vote.predictedTier,
+    actualTier,
+    score: vote.score,
+  });
+  persistOrganicGoldLabelOnce(vote, actualTier, agreed);
+  recordVoteTierAccuracy(vote.id, vote.agentId, vote.predictedTier, isCorrect);
+  markVoteWalApplied(vote.id);
+
+  return {
+    voteId: vote.id,
+    agentId: vote.agentId,
     promptHash: vote.promptHash,
     promptSnippet: vote.promptSnippet,
     predictedTier: vote.predictedTier,
     actualTier,
     agreed,
-    agentId: vote.agentId,
-  }) + '\n', 'utf-8');
+  };
+}
+
+/** Replay write-ahead vote records left incomplete by a prior process crash. */
+export function replayVoteWal(): void {
+  for (const record of getUnappliedVoteWal()) {
+    const vote = getVotes().find(candidate => candidate.id === record.voteId);
+    if (!vote) {
+      console.warn(`Vote WAL replay skipped unknown vote ${record.voteId}`);
+      continue;
+    }
+    consumeVote(vote, record.actualTier, record.agreed);
+  }
 }
 
 export function processVoteReplyDetailed(
   voteId: string,
   agentId: string,
   replyText: string
-): ProcessedVoteReply | null {
+): VoteReplyResult | null {
   const parsed = parseVoteReply(replyText);
   if (!parsed) return null;
+
+  const explicitVoteId = extractVoteId(replyText);
+  if (explicitVoteId && explicitVoteId !== voteId) {
+    console.warn(`Ignoring vote reply bound to ${explicitVoteId}; endpoint supplied ${voteId}`);
+    return null;
+  }
 
   // Find the pending vote
   const votes = getVotes({ agentId });
   const pendingVote = votes.find(v => v.id === voteId && !v.voted);
   if (!pendingVote) return null;
 
-  // Record the vote
-  const actualTier = parsed.agreed
-    ? pendingVote.predictedTier
-    : (parsed.correctTier || pendingVote.predictedTier);
+  if (!parsed.agreed && !parsed.correctTier) {
+    return {
+      voteId,
+      agentId,
+      clarification: `Please reply with the corrected tier for vote ${voteId}: trivial, light, moderate, heavy, intensive, or extreme.`,
+    };
+  }
 
-  const isCorrect = parsed.agreed || (parsed.correctTier === pendingVote.predictedTier);
-  const agreed = Boolean(isCorrect);
-
-  // Update in-memory state
-  pendingVote.voted = true;
-  pendingVote.userAgreed = parsed.agreed;
-  pendingVote.userCorrectTier = parsed.correctTier;
-  pendingVote.actualTier = actualTier;
-
-  // Update in persistence
-  updateVote(pendingVote.id, {
-    voted: true,
-    userAgreed: parsed.agreed,
-    userCorrectTier: parsed.correctTier,
-    actualTier,
-  });
-
-  recordGoldVoteFeedback({
-    agentId,
-    promptHash: pendingVote.promptHash,
-    promptSnippet: pendingVote.promptSnippet,
-    predictedTier: pendingVote.predictedTier,
-    actualTier,
-    score: pendingVote.score,
-  });
-  persistOrganicGoldLabel(pendingVote, actualTier, agreed);
-
-  // Track per-tier accuracy
-  recordTierAccuracy(agentId, pendingVote.predictedTier, isCorrect);
-
-  // Calibrate silver/bronze if we have comparison data
-  // (this would be called after LLM judge completes)
-
-  return {
-    voteId,
-    agentId,
-    promptHash: pendingVote.promptHash,
-    promptSnippet: pendingVote.promptSnippet,
-    predictedTier: pendingVote.predictedTier,
-    actualTier,
-    agreed,
-  };
+  const actualTier = parsed.agreed ? pendingVote.predictedTier : parsed.correctTier!;
+  const agreed = parsed.agreed;
+  appendVoteWal({ voteId: pendingVote.id, actualTier, agreed, ts: Date.now() });
+  return consumeVote(pendingVote, actualTier, agreed);
 }
 
 /**
@@ -323,7 +409,8 @@ export function processVoteReply(
   agentId: string,
   replyText: string
 ): boolean {
-  return processVoteReplyDetailed(voteId, agentId, replyText) !== null;
+  const result = processVoteReplyDetailed(voteId, agentId, replyText);
+  return result !== null && !isVoteClarification(result);
 }
 
 /**
@@ -339,34 +426,38 @@ export function detectVoteReply(
   const parsed = parseVoteReply(messageText);
   if (!parsed || !parsed.isVote) return null;
 
-  // Find most recent unvoted request for this agent
+  const explicitVoteId = extractVoteId(messageText);
   const now = Date.now();
   const votes = getVotes({ agentId });
-  const recent = votes
+  const pending = votes
     .filter(v => !v.voted && v.expiresAt > now)
     .sort((a, b) => b.timestamp - a.timestamp);
 
-  if (recent.length === 0) return null;
+  if (explicitVoteId) {
+    const vote = pending.find(candidate => candidate.id === explicitVoteId);
+    if (!vote) {
+      console.warn(`Ignoring vote reply for unknown, expired, or foreign vote ${explicitVoteId}`);
+      return null;
+    }
+    return { voteId: vote.id, isVote: true };
+  }
+
+  const recent = pending.filter(vote => now - vote.timestamp <= BARE_REPLY_WINDOW_MS);
+  if (recent.length !== 1) {
+    console.warn(`Ignoring unbound vote reply for ${agentId}: ${recent.length} pending votes in reply window`);
+    return null;
+  }
 
   return { voteId: recent[0].id, isVote: true };
 }
 
-// A bare "yes"/"no"/"correct" hours after the vote prompt is far more likely a
-// reply to something else than late router feedback — with the 24h expiry it
-// would be swallowed and misrecorded. Only explicit forms (✅/❌/👍 or a tier
-// word) count for the full window; bare words count within this grace period.
+// An unbound reply can only be associated with a vote during this short window.
 const BARE_REPLY_WINDOW_MS = 10 * 60 * 1000;
-const EXPLICIT_VOTE_RE = /✅|❌|👍|trivial|light|moderate|heavy|intensive|extreme/i;
 
-export function recordDetectedVoteReply(agentId: string, messageText: string): ProcessedVoteReply | null {
+export function recordDetectedVoteReply(agentId: string, messageText: string): VoteReplyResult | null {
   if (!isTrainingMode(agentId) || !isVoteReply(messageText)) return null;
   const detected = detectVoteReply(agentId, messageText);
   if (!detected) return null;
-  if (!EXPLICIT_VOTE_RE.test(messageText)) {
-    const votes = getVotes({ agentId });
-    const vote = votes.find(v => v.id === detected.voteId);
-    if (!vote || Date.now() - vote.timestamp > BARE_REPLY_WINDOW_MS) return null;
-  }
   return processVoteReplyDetailed(detected.voteId, agentId, messageText);
 }
 
@@ -381,11 +472,22 @@ export function inferRagConsensus(
   prompt: string,
   minAgreement: number = 3
 ): EffortLevel | null {
-  // Phase check handled by label-combiner (returns null if disabled)
+  // Every completed routing interaction advances bootstrap exactly once, even
+  // when it has no matching history.
+  incrementInteractionCount();
+
+  if (getRagPhase() === 'disabled' || getSilverWeight() <= 0) return null;
+
   const keywords = prompt.toLowerCase().split(/\s+/)
     .filter(w => w.length > 4 && !/^(the|and|for|with|this|that|from|have|been)/.test(w));
 
-  const entries = queryRag(keywords.slice(0, 10), 10);
+  const effortLevels: readonly EffortLevel[] = [
+    'trivial', 'light', 'moderate', 'heavy', 'intensive', 'extreme',
+  ];
+  const entries = queryRag(keywords.slice(0, 10), 10).filter(entry =>
+    effortLevels.includes(entry.tier as EffortLevel)
+      && (entry.provenance === 'gold' || entry.provenance === 'judged')
+  );
   if (entries.length < minAgreement) return null;
 
   // Count tier agreement
@@ -406,11 +508,9 @@ export function inferRagConsensus(
 
   // Only return if strong agreement (>60% of retrieved)
   if (maxCount >= minAgreement && maxCount / entries.length > 0.6) {
-    incrementInteractionCount();
     return majorityTier;
   }
 
-  incrementInteractionCount();
   return null;
 }
 
@@ -426,23 +526,26 @@ export function shouldRetrain(agentId: string): { should: boolean; reason: strin
   const labeledVotes = getLabeledVotes(agentId, 0.5);
   const goldVotes = labeledVotes.filter(v => v.source === 'gold');
 
-  if (goldVotes.length >= config.retrainAfterVotes) {
+  const watermark = getLastRetrainWatermark(agentId);
+  const newGoldVotes = goldVotes.slice(watermark);
+
+  if (newGoldVotes.length >= config.retrainAfterVotes) {
     // Check per-tier minimum
     const tierCounts: Record<string, number> = {};
-    for (const v of goldVotes) {
-      tierCounts[v.predictedTier] = (tierCounts[v.predictedTier] || 0) + 1;
+    for (const v of newGoldVotes) {
+      if (v.actualTier !== null) tierCounts[v.actualTier] = (tierCounts[v.actualTier] || 0) + 1;
     }
     const tiersWithMin = Object.values(tierCounts).filter(c => c >= 3).length;
     if (tiersWithMin >= 2) {
-      return { should: true, reason: `${goldVotes.length} gold votes, ${tiersWithMin} tiers with ≥3 votes` };
+      return { should: true, reason: `${newGoldVotes.length} new gold votes, ${tiersWithMin} actual tiers with ≥3 votes` };
     }
   }
 
-  if (labeledVotes.length >= 100) {
-    return { should: true, reason: `${labeledVotes.length} total labeled interactions` };
-  }
+  return { should: false, reason: `${newGoldVotes.length} new gold votes since watermark ${watermark}, ${labeledVotes.length} total labeled` };
+}
 
-  return { should: false, reason: `${goldVotes.length} gold votes, ${labeledVotes.length} total labeled` };
+export function markTrainingRetrained(agentId?: string): number {
+  return markRetrained(agentId);
 }
 
 // ─── Stats ───────────────────────────────────────────────
@@ -480,3 +583,5 @@ export function getTrainingStats(agentId: string): TrainingStats {
 function hashPrompt(prompt: string): string {
   return createHash('sha256').update(prompt).digest('hex').slice(0, 16);
 }
+
+replayVoteWal();

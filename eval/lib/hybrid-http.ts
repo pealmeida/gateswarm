@@ -124,13 +124,13 @@ export async function judgeAdequacy(
   port: number,
   prompt: string,
   answer: string,
-  goldTier: string,
-): Promise<{ adequacy: number; on_tier: boolean; reason: string; available: boolean }> {
+): Promise<{ adequacy: number; minimumTier: string; reason: string; available: boolean }> {
   try {
     const judgePrompt =
       `You are a strict grading JSON API. Score the assistant answer for the user prompt.\n` +
-      `Gold effort tier (expected sophistication): ${goldTier}\n` +
-      `Return ONLY JSON: {"adequacy":1-5,"on_tier":true|false,"reason":"<=200 chars"}\n\n` +
+      `Independently determine the minimum effort tier the user prompt needs.\n` +
+      `Valid tiers: trivial, light, moderate, heavy, intensive, extreme.\n` +
+      `Return ONLY JSON: {"adequacy":1-5,"minimum_tier":"one valid tier","reason":"<=200 chars"}\n\n` +
       `USER PROMPT:\n${prompt}\n\nASSISTANT ANSWER:\n${answer.slice(0, 4000)}`;
     const { status, json } = await requestJson(
       port,
@@ -144,28 +144,33 @@ export async function judgeAdequacy(
       {},
       60_000,
     );
-    if (status !== 200) return { adequacy: 0, on_tier: false, reason: `judge_http_${status}`, available: false };
+    if (status !== 200) return { adequacy: 0, minimumTier: '', reason: `judge_http_${status}`, available: false };
     const raw = json as { choices?: Array<{ message?: { content?: string } }> };
     const text = raw?.choices?.[0]?.message?.content || '';
     const m = text.match(/\{[\s\S]*\}/);
-    if (!m) return { adequacy: 0, on_tier: false, reason: 'judge_parse_fail', available: false };
+    if (!m) return { adequacy: 0, minimumTier: '', reason: 'judge_parse_fail', available: false };
     try {
-      const parsed = JSON.parse(m[0]) as { adequacy?: unknown; on_tier?: unknown; reason?: unknown };
+      const parsed = JSON.parse(m[0]) as { adequacy?: unknown; minimum_tier?: unknown; reason?: unknown };
+      const adequacy = Number(parsed.adequacy);
+      const minimumTier = typeof parsed.minimum_tier === 'string' ? parsed.minimum_tier.trim() : '';
+      if (!Number.isInteger(adequacy) || adequacy < 1 || adequacy > 5 || !minimumTier) {
+        return { adequacy: 0, minimumTier: '', reason: 'judge_invalid_response', available: false };
+      }
       return {
-        adequacy: Number(parsed.adequacy) || 0,
-        on_tier: Boolean(parsed.on_tier),
+        adequacy,
+        minimumTier,
         reason: String(parsed.reason || '').slice(0, 200),
         available: true,
       };
     } catch {
-      return { adequacy: 0, on_tier: false, reason: 'judge_json_fail', available: false };
+      return { adequacy: 0, minimumTier: '', reason: 'judge_json_fail', available: false };
     }
   } catch (e: unknown) {
     if (e && typeof e === 'object' && 'timedOut' in e && (e as { timedOut?: boolean }).timedOut) {
-      return { adequacy: 0, on_tier: false, reason: 'judge_timeout', available: false };
+      return { adequacy: 0, minimumTier: '', reason: 'judge_timeout', available: false };
     }
     const message = e instanceof Error ? e.message : String(e);
-    return { adequacy: 0, on_tier: false, reason: message.slice(0, 200), available: false };
+    return { adequacy: 0, minimumTier: '', reason: message.slice(0, 200), available: false };
   }
 }
 

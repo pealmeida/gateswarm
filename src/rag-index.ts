@@ -16,7 +16,10 @@
 import { createHash } from 'crypto';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs';
+import { redactSensitive } from './redact.js';
+
+export type RagProvenance = 'routing' | 'gold' | 'judged';
 
 export interface RagEntry {
   id: string;
@@ -30,12 +33,14 @@ export interface RagEntry {
   summary: string;
   originalTokens: number;
   compressedTokens: number;
+  /** Origin of the tier; legacy entries without this field are routing history. */
+  provenance: RagProvenance;
 }
 
 // ─── Persistence Layer ──────────────────────────────────────────
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const DATA_DIR = join(__dirname, '../data/rag');
+const DATA_DIR = process.env.MOMA_RAG_DATA_DIR ?? join(__dirname, '../data/rag');
 const RAG_FILE = join(DATA_DIR, 'index.json');
 const MAX_ENTRIES = 10000;
 const TTL_MS = 86400000; // 24 hours
@@ -46,20 +51,38 @@ function ensureDataDir(): void {
   }
 }
 
+function normalizeProvenance(provenance: unknown): RagProvenance {
+  return provenance === 'gold' || provenance === 'judged' ? provenance : 'routing';
+}
+
 function loadRagIndex(): RagEntry[] {
   ensureDataDir();
   if (!existsSync(RAG_FILE)) return [];
   try {
     const raw = readFileSync(RAG_FILE, 'utf-8');
-    return JSON.parse(raw) as RagEntry[];
-  } catch {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) throw new Error('RAG index is not an array');
+    return parsed.map(entry => ({
+      ...(entry as RagEntry),
+      provenance: normalizeProvenance((entry as Partial<RagEntry>).provenance),
+    }));
+  } catch (error) {
+    const corruptPath = `${RAG_FILE}.corrupt-${Date.now()}`;
+    try {
+      renameSync(RAG_FILE, corruptPath);
+      console.error(`\u26a0\ufe0f\u26a0\ufe0f [rag-index] Corrupt index preserved at ${corruptPath}; starting with an empty index.`, error);
+    } catch (renameError) {
+      console.error('\u26a0\ufe0f\u26a0\ufe0f [rag-index] Failed to parse and preserve corrupt index; starting with an empty index.', error, renameError);
+    }
     return [];
   }
 }
 
 function saveRagIndex(entries: RagEntry[]): void {
   ensureDataDir();
-  writeFileSync(RAG_FILE, JSON.stringify(entries, null, 2), 'utf-8');
+  const tempPath = `${RAG_FILE}.tmp-${process.pid}-${Date.now()}`;
+  writeFileSync(tempPath, JSON.stringify(entries, null, 2), 'utf-8');
+  renameSync(tempPath, RAG_FILE);
 }
 
 // ─── In-Memory Index (loaded from disk at init) ─────────────────
@@ -101,7 +124,10 @@ export function startRagAutoFlush(intervalMs = 60000): void {
 /**
  * Add a gateway interaction entry (after request completion).
  */
-export function addRagEntry(entry: Omit<RagEntry, 'id' | 'timestamp' | 'tags' | 'originalRole'> & { tags?: string[]; originalRole?: string }): string {
+export function addRagEntry(
+  entry: Omit<RagEntry, 'id' | 'timestamp' | 'tags' | 'originalRole' | 'provenance'>
+    & { tags?: string[]; originalRole?: string; provenance?: RagProvenance },
+): string {
   if (!_initialized) initRagIndex();
 
   const id = createHash('sha256')
@@ -111,10 +137,12 @@ export function addRagEntry(entry: Omit<RagEntry, 'id' | 'timestamp' | 'tags' | 
 
   ragIndex.push({
     ...entry,
+    summary: redactSensitive(entry.summary),
     id,
     timestamp: Date.now(),
     tags: entry.tags ?? [],
     originalRole: entry.originalRole ?? '',
+    provenance: entry.provenance ?? 'routing',
   });
 
   if (ragIndex.length > MAX_ENTRIES) ragIndex.shift();
@@ -147,9 +175,10 @@ export function storeToRag(entry: {
     modelUsed: '',
     originalRole: entry.originalRole,
     adequacyScore: 1.0,  // compressor entries default to adequate
-    summary: entry.summary,
+    summary: redactSensitive(entry.summary),
     originalTokens: 0,
     compressedTokens: 0,
+    provenance: 'routing',
   });
 }
 

@@ -377,14 +377,13 @@ async function cmdRag() {
 }
 
 async function cmdRetrain() {
-  console.log('🔄 Triggering manual retraining...');
+  console.log('🔄 Generating a boundary retraining proposal...');
   const result = await retrainIfNeeded();
-  if (result.retrained) {
-    console.log(`✅ Retraining complete. Accuracy: ${((result.accuracyBefore ?? 0) * 100).toFixed(1)}% → ${((result.accuracyAfter ?? 0) * 100).toFixed(1)}%`);
-    console.log(`   Recalibrated tier boundaries: ${JSON.stringify(result.boundaries)} (live, no restart needed).`);
+  if (result.proposal) {
+    console.log(`✅ Proposal written. Validation accuracy: ${(result.proposal.accuracyBefore * 100).toFixed(1)}% → ${(result.proposal.accuracyAfter * 100).toFixed(1)}%`);
+    console.log(`   Proposed boundaries: ${JSON.stringify(result.proposal.boundaries)} (not applied).`);
   } else {
-    console.log('⏭️  Not enough data for retraining yet.');
-    console.log('   Need min 50 samples per tier with LLM-judged ground truth.');
+    console.log(`⏭️  No proposal generated: ${result.reason ?? 'not enough data'}.`);
   }
 }
 
