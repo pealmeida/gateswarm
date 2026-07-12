@@ -28,6 +28,9 @@ export interface FeedbackEntry {
   escalated: boolean;
   userSatisfaction: number | null; // 1-5, null = not rated
   score?: number;                  // v0.5.2: routing complexity score (enables boundary recalibration)
+  promptSnippet?: string;          // v0.5.7: organic gold-vote audit trail
+  source?: string;                 // e.g. gold_vote
+  agentId?: string;
 }
 
 // ─── Persistence Layer ──────────────────────────────────────────
@@ -125,6 +128,55 @@ export function getInteractionCount(): number {
 export function getFeedbackEntries(): FeedbackEntry[] {
   if (!_initialized) initFeedbackStore();
   return [...entries];
+}
+
+export function recordGoldVoteFeedback(label: {
+  agentId: string;
+  promptHash: string;
+  promptSnippet: string;
+  predictedTier: string;
+  actualTier: string;
+  score?: number;
+}): FeedbackEntry {
+  if (!_initialized) initFeedbackStore();
+
+  const existing = [...entries].reverse().find(e => e.promptHash === label.promptHash);
+  if (existing) {
+    existing.actualTier = label.actualTier;
+    existing.source = 'gold_vote';
+    existing.agentId = label.agentId;
+    existing.promptSnippet = existing.promptSnippet ?? label.promptSnippet;
+    if (typeof label.score === 'number') existing.score = label.score;
+    saveFeedbackEntries(entries.slice(-MAX_ENTRIES));
+    return existing;
+  }
+
+  const entry: FeedbackEntry = {
+    id: randomBytes(8).toString('hex'),
+    timestamp: Date.now(),
+    promptHash: label.promptHash,
+    predictedTier: label.predictedTier,
+    actualTier: label.actualTier,
+    modelUsed: 'gold_vote',
+    responseTokens: 0,
+    adequacyScore: null,
+    escalated: false,
+    userSatisfaction: null,
+    score: label.score,
+    promptSnippet: label.promptSnippet,
+    source: 'gold_vote',
+    agentId: label.agentId,
+  };
+
+  entries.push(entry);
+  _totalInteractions++;
+
+  if (entries.length > MAX_ENTRIES) {
+    entries.splice(0, entries.length - MAX_ENTRIES);
+  }
+  saveFeedbackEntries(entries.slice(-MAX_ENTRIES));
+
+  return entry;
 }
 
 export function getRecentEntries(limit = 100): FeedbackEntry[] {

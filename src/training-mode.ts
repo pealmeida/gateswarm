@@ -15,13 +15,18 @@
  */
 
 import { randomBytes, createHash } from 'crypto';
+import { appendFileSync, existsSync, mkdirSync } from 'fs';
+import { dirname, join } from 'path';
+import { fileURLToPath } from 'url';
 import type { EffortLevel } from './types.js';
 import { queryRag } from './rag-index.js';
+import { recordGoldVoteFeedback } from './feedback-store.js';
 import {
   saveVote, updateVote, getVotes, getLabeledVotes,
   getAgentConfig, updateAgentConfig, setAgentTrainingMode,
   recordTierAccuracy, getTierAccuracy, getOverallAccuracy,
   parseVoteReply, isVoteReply,
+  type VoteRecord,
 } from './vote-persistence.js';
 import { getCalibrationStats, incrementInteractionCount } from './label-combiner.js';
 
@@ -37,6 +42,7 @@ export interface VoteRequest {
   voted: boolean;
   userAgreed: boolean | null;
   userCorrectTier: EffortLevel | null;
+  score?: number;
 }
 
 export interface TrainingStats {
@@ -58,6 +64,10 @@ export interface TrainingStats {
 
 // Track vote counts per agent for fatigue decay
 const agentVoteCounts = new Map<string, number>();
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const ORGANIC_DATA_DIR = join(__dirname, '../data/organic');
+const ORGANIC_LABELS_FILE = join(ORGANIC_DATA_DIR, 'labeled.jsonl');
+export { isVoteReply } from './vote-persistence.js';
 
 // ─── Mode Control ────────────────────────────────────────
 
@@ -115,10 +125,12 @@ export function createVoteRequest(
   agentId: string,
   prompt: string,
   predictedTier: EffortLevel,
-  confidence: number
+  confidence: number,
+  score?: number
 ): VoteRequest | null {
   if (!shouldAskForVote(agentId, predictedTier, confidence)) return null;
 
+  const config = getAgentConfig(agentId);
   const id = 'v' + randomBytes(6).toString('hex');
   const vote: VoteRequest = {
     id,
@@ -130,10 +142,12 @@ export function createVoteRequest(
     voted: false,
     userAgreed: null,
     userCorrectTier: null,
+    score,
   };
 
   // Persist to disk
   saveVote({
+    id,
     agentId,
     promptHash: hashPrompt(prompt),
     promptSnippet: prompt.slice(0, 100),
@@ -142,10 +156,11 @@ export function createVoteRequest(
     source: 'gold',
     weight: 1.0,
     timestamp: Date.now(),
-    expiresAt: Date.now() + 5 * 60 * 1000, // 5 min expiry
+    expiresAt: Date.now() + config.voteExpiryMs,
     voted: false,
     userAgreed: null,
     userCorrectTier: null,
+    score,
   });
 
   // Track for fatigue
@@ -163,7 +178,141 @@ export function formatVotePrompt(vote: VoteRequest): string {
   return `\n\n🎯 [${vote.id}] Router chose: ${vote.predictedTier} (${(vote.confidence * 100).toFixed(0)}% confidence). Reply: ✅ correct | ❌ ${tiers}`;
 }
 
+export interface VoteDecoration {
+  _voteRequest: {
+    id: string;
+    prompt: string;
+    predictedTier: EffortLevel;
+    confidence: number;
+  };
+}
+
+export function appendVotePromptToCompletion<T extends Record<string, any>>(
+  data: T,
+  vote: VoteRequest,
+): T & VoteDecoration {
+  const votePrompt = formatVotePrompt(vote);
+  const decorated: any = { ...data };
+  const choices = Array.isArray(data?.choices) ? [...data.choices] : [];
+
+  if (choices.length > 0) {
+    const idx = choices.length - 1;
+    const choice = { ...choices[idx] };
+    const message = { ...(choice.message || { role: 'assistant' }) };
+    const content = message.content;
+
+    if (typeof content === 'string') {
+      message.content = content + votePrompt;
+    } else if (Array.isArray(content)) {
+      message.content = [...content, { type: 'text', text: votePrompt.trimStart() }];
+    } else {
+      message.content = votePrompt.trimStart();
+    }
+
+    choice.message = message;
+    choices[idx] = choice;
+    decorated.choices = choices;
+  }
+
+  decorated._voteRequest = {
+    id: vote.id,
+    prompt: votePrompt.trimStart(),
+    predictedTier: vote.predictedTier,
+    confidence: vote.confidence,
+  };
+
+  return decorated;
+}
+
 // ─── Vote Recording ──────────────────────────────────────
+
+export interface ProcessedVoteReply {
+  voteId: string;
+  agentId: string;
+  promptHash: string;
+  promptSnippet: string;
+  predictedTier: EffortLevel;
+  actualTier: EffortLevel;
+  agreed: boolean;
+}
+
+function persistOrganicGoldLabel(vote: VoteRecord, actualTier: EffortLevel, agreed: boolean): void {
+  if (!existsSync(ORGANIC_DATA_DIR)) {
+    mkdirSync(ORGANIC_DATA_DIR, { recursive: true });
+  }
+
+  appendFileSync(ORGANIC_LABELS_FILE, JSON.stringify({
+    ts: Date.now(),
+    promptHash: vote.promptHash,
+    promptSnippet: vote.promptSnippet,
+    predictedTier: vote.predictedTier,
+    actualTier,
+    agreed,
+    agentId: vote.agentId,
+  }) + '\n', 'utf-8');
+}
+
+export function processVoteReplyDetailed(
+  voteId: string,
+  agentId: string,
+  replyText: string
+): ProcessedVoteReply | null {
+  const parsed = parseVoteReply(replyText);
+  if (!parsed) return null;
+
+  // Find the pending vote
+  const votes = getVotes({ agentId });
+  const pendingVote = votes.find(v => v.id === voteId && !v.voted);
+  if (!pendingVote) return null;
+
+  // Record the vote
+  const actualTier = parsed.agreed
+    ? pendingVote.predictedTier
+    : (parsed.correctTier || pendingVote.predictedTier);
+
+  const isCorrect = parsed.agreed || (parsed.correctTier === pendingVote.predictedTier);
+  const agreed = Boolean(isCorrect);
+
+  // Update in-memory state
+  pendingVote.voted = true;
+  pendingVote.userAgreed = parsed.agreed;
+  pendingVote.userCorrectTier = parsed.correctTier;
+  pendingVote.actualTier = actualTier;
+
+  // Update in persistence
+  updateVote(pendingVote.id, {
+    voted: true,
+    userAgreed: parsed.agreed,
+    userCorrectTier: parsed.correctTier,
+    actualTier,
+  });
+
+  recordGoldVoteFeedback({
+    agentId,
+    promptHash: pendingVote.promptHash,
+    promptSnippet: pendingVote.promptSnippet,
+    predictedTier: pendingVote.predictedTier,
+    actualTier,
+    score: pendingVote.score,
+  });
+  persistOrganicGoldLabel(pendingVote, actualTier, agreed);
+
+  // Track per-tier accuracy
+  recordTierAccuracy(agentId, pendingVote.predictedTier, isCorrect);
+
+  // Calibrate silver/bronze if we have comparison data
+  // (this would be called after LLM judge completes)
+
+  return {
+    voteId,
+    agentId,
+    promptHash: pendingVote.promptHash,
+    promptSnippet: pendingVote.promptSnippet,
+    predictedTier: pendingVote.predictedTier,
+    actualTier,
+    agreed,
+  };
+}
 
 /**
  * Process a vote reply from the user.
@@ -174,41 +323,7 @@ export function processVoteReply(
   agentId: string,
   replyText: string
 ): boolean {
-  const parsed = parseVoteReply(replyText);
-  if (!parsed) return false;
-
-  // Find the pending vote
-  const votes = getVotes({ agentId });
-  const pendingVote = votes.find(v => v.id === voteId && !v.voted);
-  if (!pendingVote) return false;
-
-  // Record the vote
-  const actualTier = parsed.agreed
-    ? pendingVote.predictedTier
-    : (parsed.correctTier || pendingVote.predictedTier);
-
-  const isCorrect = parsed.agreed || (parsed.correctTier === pendingVote.predictedTier);
-
-  // Update in-memory state
-  pendingVote.voted = true;
-  pendingVote.userAgreed = parsed.agreed;
-  pendingVote.userCorrectTier = parsed.correctTier;
-
-  // Update in persistence
-  updateVote(pendingVote.id, {
-    voted: true,
-    userAgreed: parsed.agreed,
-    userCorrectTier: parsed.correctTier,
-    actualTier,
-  });
-
-  // Track per-tier accuracy
-  recordTierAccuracy(agentId, pendingVote.predictedTier, isCorrect);
-
-  // Calibrate silver/bronze if we have comparison data
-  // (this would be called after LLM judge completes)
-
-  return true;
+  return processVoteReplyDetailed(voteId, agentId, replyText) !== null;
 }
 
 /**
@@ -225,14 +340,34 @@ export function detectVoteReply(
   if (!parsed || !parsed.isVote) return null;
 
   // Find most recent unvoted request for this agent
+  const now = Date.now();
   const votes = getVotes({ agentId });
   const recent = votes
-    .filter(v => !v.voted && Date.now() - v.timestamp < 5 * 60 * 1000)
+    .filter(v => !v.voted && v.expiresAt > now)
     .sort((a, b) => b.timestamp - a.timestamp);
 
   if (recent.length === 0) return null;
 
   return { voteId: recent[0].id, isVote: true };
+}
+
+// A bare "yes"/"no"/"correct" hours after the vote prompt is far more likely a
+// reply to something else than late router feedback — with the 24h expiry it
+// would be swallowed and misrecorded. Only explicit forms (✅/❌/👍 or a tier
+// word) count for the full window; bare words count within this grace period.
+const BARE_REPLY_WINDOW_MS = 10 * 60 * 1000;
+const EXPLICIT_VOTE_RE = /✅|❌|👍|trivial|light|moderate|heavy|intensive|extreme/i;
+
+export function recordDetectedVoteReply(agentId: string, messageText: string): ProcessedVoteReply | null {
+  if (!isTrainingMode(agentId) || !isVoteReply(messageText)) return null;
+  const detected = detectVoteReply(agentId, messageText);
+  if (!detected) return null;
+  if (!EXPLICIT_VOTE_RE.test(messageText)) {
+    const votes = getVotes({ agentId });
+    const vote = votes.find(v => v.id === detected.voteId);
+    if (!vote || Date.now() - vote.timestamp > BARE_REPLY_WINDOW_MS) return null;
+  }
+  return processVoteReplyDetailed(detected.voteId, agentId, messageText);
 }
 
 // ─── SILVER Labels (RAG Consensus) ──────────────────────
@@ -319,7 +454,8 @@ export function getTrainingStats(agentId: string): TrainingStats {
   const goldVotes = labeled.filter(v => v.source === 'gold');
   const silverVotes = labeled.filter(v => v.source === 'silver');
   const bronzeVotes = labeled.filter(v => v.source === 'bronze');
-  const pending = votes.filter(v => !v.voted && Date.now() - v.timestamp < 5 * 60 * 1000);
+  const now = Date.now();
+  const pending = votes.filter(v => !v.voted && v.expiresAt > now);
   const voteCount = agentVoteCounts.get(agentId) || 0;
   const fatigueDecay = Math.exp(-voteCount / 50);
 

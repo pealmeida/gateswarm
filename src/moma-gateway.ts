@@ -89,9 +89,9 @@ import { getUnusableProviderBodyReason, providerFailureKindForHttp, providerHeal
 import { turboQuantCompress, MODEL_CONTEXT_WINDOWS } from './turboquant-compressor.js';
 import { ragIndex, queryRag } from './rag-index.js';
 import {
-  setTrainingMode, isTrainingMode, createVoteRequest, processVoteReply,
+  setTrainingMode, createVoteRequest, processVoteReply,
   detectVoteReply, inferRagConsensus, shouldRetrain as shouldRetrainTraining,
-  getTrainingStats,
+  getTrainingStats, appendVotePromptToCompletion, recordDetectedVoteReply,
 } from './training-mode.js';
 import { getCalibrationStats, calibrateBronze, calibrateSilver } from './label-combiner.js';
 import { join, dirname } from 'path';
@@ -977,6 +977,24 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
   const lastUserMessage = messages.filter((m: any) => m.role === 'user').pop();
   const promptText = messageContentToText(lastUserMessage?.content) || JSON.stringify(messages.map(normalizeMessageContent));
 
+  const recordedVote = recordDetectedVoteReply(agent.id, promptText);
+  if (recordedVote) {
+    res.setHeader('X-Training-Vote', 'recorded');
+    return jsonResponse(res, 200, {
+      id: `chatcmpl-vote-${Date.now()}`,
+      object: 'chat.completion',
+      created: Math.floor(Date.now() / 1000),
+      model: body.model || 'gateswarm-training-mode',
+      choices: [{
+        index: 0,
+        message: { role: 'assistant', content: `Recorded your router feedback: actual tier is ${recordedVote.actualTier}. Thank you.` },
+        finish_reason: 'stop',
+      }],
+      usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+      _voteRecorded: recordedVote,
+    });
+  }
+
 
 
 // Mode override: body.mode or X-Mode header; else auto-detect
@@ -1851,11 +1869,8 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
       const voteRequest = createVoteRequest(agent.id, promptText, effort, v04Score.confidence ?? 0.7);
       if (voteRequest) {
         console.log(`🎯 [${agent.name}] Training vote: ${voteRequest.id} (${effort})`);
-        const votePrompt = voteRequest.prompt;
-        const responseData = { ...data, _voteRequest: { id: voteRequest.id, prompt: votePrompt } };
-        return jsonResponse(res, 200, responseData);
+        data = appendVotePromptToCompletion(data, voteRequest);
       }
-
       const keywords: string[] = promptText.toLowerCase().split(/\s+/)
         .filter((w: string) => w.length > 4 && !/^(the|and|for|with|this|that|from|have|been)/.test(w));
       addRagEntry({

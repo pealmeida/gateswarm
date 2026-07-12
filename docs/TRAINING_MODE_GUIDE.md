@@ -126,6 +126,8 @@ Reply: ✅ correct | ❌ trivial|light|moderate|heavy|intensive|extreme
 
 ### 4.2 Vote Reply Format
 
+For non-streaming chat completions, the vote request is appended to the assistant message. Reply in the same conversation; the gateway records the vote before routing and returns a short acknowledgement without dispatching to an LLM. Vote requests stay pending for 24 hours by default (`voteExpiryMs` in the per-agent training config).
+
 User replies in one of these formats:
 
 | Reply | Meaning |
@@ -234,6 +236,7 @@ When triggered:
 | File | Content |
 |---|---|
 | `data/training/votes.json` | All votes (gold/silver/bronze) |
+| `data/organic/labeled.jsonl` | Append-only organic gold labels from user vote replies |
 | `data/training/agent-configs.json` | Per-agent training config |
 | `data/training/tier-accuracy.json` | Per-tier accuracy cache |
 

@@ -27,6 +27,7 @@ export interface VoteRecord {
   voted: boolean;
   userAgreed: boolean | null;
   userCorrectTier: EffortLevel | null;
+  score?: number;
 }
 
 export interface AgentTrainingConfig {
@@ -38,6 +39,7 @@ export interface AgentTrainingConfig {
   weightedTiers: EffortLevel[];
   weightedRateMultiplier: number;
   retrainAfterVotes: number;
+  voteExpiryMs: number;
 }
 
 export interface TierAccuracy {
@@ -80,8 +82,8 @@ function saveJSON<T>(filename: string, data: T): void {
 let votes: VoteRecord[] = loadJSON<VoteRecord[]>('votes.json', []);
 const MAX_VOTES = 5000;
 
-export function saveVote(vote: Omit<VoteRecord, 'id'>): VoteRecord {
-  const id = randomBytes(8).toString('hex');
+export function saveVote(vote: Omit<VoteRecord, 'id'> & { id?: string }): VoteRecord {
+  const id = vote.id ?? randomBytes(8).toString('hex');
   const record: VoteRecord = { ...vote, id };
   votes.push(record);
   // Trim oldest if over limit
@@ -138,6 +140,7 @@ const DEFAULT_AGENT_CONFIG: AgentTrainingConfig = {
   weightedTiers: ['moderate', 'heavy', 'intensive'],
   weightedRateMultiplier: 2.0,
   retrainAfterVotes: 10,
+  voteExpiryMs: 24 * 60 * 60 * 1000,
 };
 
 let agentConfigs = loadJSON<Record<string, AgentTrainingConfig>>('agent-configs.json', {});
@@ -146,8 +149,16 @@ export function getAgentConfig(agentId: string): AgentTrainingConfig {
   if (!agentConfigs[agentId]) {
     agentConfigs[agentId] = { ...DEFAULT_AGENT_CONFIG, agentId };
     saveJSON('agent-configs.json', agentConfigs);
+    return { ...agentConfigs[agentId] };
   }
-  return { ...agentConfigs[agentId] };
+
+  const merged = { ...DEFAULT_AGENT_CONFIG, ...agentConfigs[agentId], agentId };
+  if (JSON.stringify(merged) !== JSON.stringify(agentConfigs[agentId])) {
+    agentConfigs[agentId] = merged;
+    saveJSON('agent-configs.json', agentConfigs);
+  }
+
+  return { ...merged };
 }
 
 export function updateAgentConfig(agentId: string, patch: Partial<AgentTrainingConfig>): AgentTrainingConfig {
