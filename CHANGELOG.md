@@ -4,6 +4,56 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [Unreleased] — Routing Accuracy, Reliability & Organic Training
+
+Evidence-driven overhaul of the tier-routing pipeline: 5-fold CV exact
+accuracy 48.9% → 61.1% (adjacent 95.6%), provider failures now fall back
+instead of surfacing as answers, and training mode finally collects real
+user feedback into a growing organic dataset.
+
+### Added
+- **Phase 2 mid-band features.** `requirement_count`,
+  `distinct_imperative_verbs`, `question_count`, `conjunction_enumeration`,
+  `scale_quantity_mentions` (50MB / 2M events/sec / sub-100ms / p99) and
+  `diagnostic_causal_markers` separate moderate/heavy/intensive prompts
+  that length alone collapsed; 10 dead-MI features keep their fields but
+  carry zero weight.
+- **Ordinal-logistic cascade model** (`src/classifiers/ordinal-logistic.ts`
+  + `eval/train-ordinal.ts`): proportional-odds, Platt-calibrated,
+  abstention falls back to the heuristic tier. **Ships unwired** — it
+  failed its accuracy gate at n=60 train rows (CV 54.4% vs heuristic
+  61.1%); retrain as organic gold votes accrue, then flip
+  `feedback_loop.cascadeRetraining` and ship the weights file.
+- **Organic training loop.** Vote prompts are appended to responses,
+  chat-path replies ("✅" / "❌ heavy") are intercepted and recorded at
+  zero cost, gold votes land in the feedback store and
+  `data/organic/labeled.jsonl`; vote expiry 5 min → 24 h.
+- **Provider health & fallback** (`src/adapters/provider-health.ts`):
+  unusable bodies (empty, auth-error text) advance the fallback chain;
+  exhausted chain → 502, never an error string served as an answer; two
+  hard failures → 5-min provider cooldown.
+- **Hybrid eval harness** (`eval/hybrid-routing-eval.ts` + libs): offline
+  scoring, cold+warm ablation, live spot-check with infra-aware rubric,
+  provider skip, per-tier routed-model cost table, judge retry/JUDGE_DOWN.
+- **Boundary refit harness** (`eval/refit-boundaries.ts`): train-only DP
+  fit with 5-fold CV report; `--apply` writes config.
+- **Score-drift guard test**: CI fails when a scorer change shifts
+  golden-set tier medians out of their configured bands.
+
+### Changed
+- **Single source of truth for tier cut points** (`src/tier-boundaries.ts`)
+  — five previously divergent hardcoded copies (routing matrix, config
+  defaults, cascade thresholds, RAG tier maps, effort-override scores)
+  now derive from it. One-time sanctioned post-Phase-2 refit:
+  `[0.2089, 0.2642, 0.3250, 0.3659, 0.4854]`.
+- **Browser and server score with the same formula** — `v33Score`
+  delegates to the canonical 34-feature extractor.
+- **Ensemble weights are honest**: RAG/history at 0 (warm-vs-cold
+  ablation measured 0.0pp contribution), cascade at 0 until the ordinal
+  model passes its gate; code paths retained for re-enable.
+- Non-streaming CLI-provider requests go through the validated retry
+  loop (body checks + fallback); early dispatch stays for streaming.
+
 ## [Unreleased] — Multimodal Routing + Security Hardening
 
 The "M" in MoMA becomes real: requests carrying image/audio/video parts
