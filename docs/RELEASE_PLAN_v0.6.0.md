@@ -182,6 +182,36 @@ Deferred (LOW/cleanup): #15 renormalization over present components, #17 history
 
 **Activation gate (preregistered):** a J1/J3 policy ships default-on only when its off-policy estimate on ≥30 days of propensity-logged history beats the static policy's realized reward with a bootstrap CI lower bound > 0.
 
+## 9d. Bias mitigation across the pipeline (Workstream K — evaluation)
+
+**Approach: measure per-slice first, correct verified biases at their source, reweight structural ones, constrain the decision layer, monitor drift.** Blanket "debiasing" without slice measurement is cargo cult; every item below ties to observed evidence.
+
+**Measured bias evidence (golden bank, n=90):**
+- Length-tier confound: median words 5→28 monotonic with tier — "long = complex" is partly an artifact of dataset construction, so verbose-trivial prompts over-route and terse-expert prompts under-route.
+- Language bias: 0/90 non-Latin prompts, while the tokenizer verifiably collapses CJK/emoji/minified input (pass 1 #9) — the bank cannot even see the router's worst slice.
+- Distribution mismatch: bank balanced 15/tier; live traffic skews trivial/light; only ~14% software-domain prompts despite coding-heavy real usage.
+
+### Pre-processing (data & features)
+- **K1 — Slice-stratified eval bank.** Extend the bank with labeled slices: non-Latin (CJK/Cyrillic/Arabic), emoji/minified, length-decorrelated pairs (verbose-trivial, terse-extreme), domain strata (code/general/analysis). Report per-slice exact/adjacent — per-slice floors join the eval verdict. Bank version bump per C5.
+- **K2 — Length deconfounding.** Report partial correlation of score with word count controlling for tier; add counterfactual test pairs (same task, padded vs terse — tier must not change). Feature-weight refits must not increase length dependence.
+- **K3 — Selection-bias control on organic labels.** Vote solicitation is deliberately non-uniform (2× on weak tiers, always-on at low confidence) and replies are voluntary — the labeled set will never match traffic. Log solicitation propensity + reply stratum with every gold label; apply inverse-propensity weights when training on organic data; J2 active learning must record acquisition probability or it poisons the ordinal retrain.
+
+### Modeling / training
+- **K4 — Class priors.** Train/refit with per-tier weights reflecting *deployment* priors, not bank balance; per-tier recall floors (C8) stay as the guardrail against majority-tier collapse.
+- **K5 — Label-source honesty.** Gold-only for boundary-defining decisions; silver/bronze confidence-weighted (H14) and provenance-gated (H12) — self-training is confirmation bias by construction.
+- **K6 — Estimator correctness.** Variance-init fix (I2) and normalize-after-split (pass 1 #8 — promote from deferred: Platt calibration currently fits on leaked holdout statistics, inflating confidence).
+- **K7 — Feedback-loop bias.** The router only observes outcomes of its own choices — labels derived from them systematically confirm the current policy. Counter: J0 propensity logging + J3 capped counterfactual exploration + IPS/doubly-robust corrections when training on outcome-derived labels.
+
+### Post-processing (decision layer)
+- **K8 — Cost-sensitive boundaries.** Refit objective uses an asymmetric misroute-cost matrix (under-routing extreme ≫ over-routing trivial) instead of raw exact accuracy — pure accuracy on skewed data squeezes rare expensive tiers (matches heavy's observed 40% recall).
+- **K9 — Uncertainty-aware escalation.** Within ±ε of a cut with low confidence, round UP one tier (bounded extra cost, insures against the costlier error). Log every escalation for J3 to later learn ε.
+- **K10 — Judge bias audit.** Blinded judge (C4) plus: track judge-vs-gold-vote agreement (calibration store already holds it) and adequacy-vs-response-length correlation — LLM judges reward verbosity, which silently rewards over-routing.
+
+### Monitoring
+- **K11 — Drift monitor.** Population-stability index between live traffic feature distribution (benchmark logs) and the eval bank per release; alert when the bank stops representing traffic. Publish per-slice metrics in every eval report.
+
+**Sequencing:** K6 lands in v0.6.0 (wave 12 adjacency); K1/K2 next (they change what "accuracy" means — before any further boundary refit); K3 before the first organic-data retrain; K4/K8/K9 with that retrain; K7/K10/K11 alongside Workstream J.
+
 ## 10. Release sequencing
 
 1. **A1–A4** (safety chain) — first; nothing else is safe to ship around a live footgun.
