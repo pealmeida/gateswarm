@@ -129,7 +129,39 @@ Pass 2 delivered 25 findings (registry: `adv-review/pass2.out`). v0.6.0 subset, 
 
 ## 9. Training-loop correctness (Workstream H)
 
-_Pending pass 3 findings — placeholder._
+Pass 3 delivered 25 findings (registry: `adv-review/pass3.out`). CRITICALs verified: #1 vote misattribution, #18/#19 runtime boundary mutation via unauthenticated endpoint + multi-million-combo grid on the request path, #23 LLM judge overwrites human gold labels.
+
+**H-label-integrity (release-blocking):**
+- H1/#1 (CRITICAL). Bare vote replies attribute to the newest pending vote regardless of which conversation answered. Fix: bind replies to vote ID + session identity; reject bare replies when >1 vote pending.
+- H2/#2. "❌" without a corrected tier records actualTier = predictedTier with agreed=false — self-contradictory row. Fix: reject, ask for the tier, don't consume the vote.
+- H3/#23 (CRITICAL). Gold entries enter the judge queue (adequacyScore null) and `updateAdequacy` overwrites human actualTier unconditionally. Fix: exclude source=gold_vote from judging; gold actualTier immutable to lower-trust paths.
+- H4/#22. Gold feedback joins to newest entry by truncated promptHash only — repeated prompts across agents overwrite the wrong interaction. Fix: join by vote/request ID + agent.
+- H5/#11. Retrain coverage grouped by predictedTier, not actualTier. H6/#12. shouldRetrain has no completed-retrain watermark — true forever once reached. H7/#21. Admission accepts NaN/Inf scores and absent tiers.
+- H8/#4. Raw prompt text persisted to three stores with no secret/PII redaction. Fix: centralized redaction pass (API-key-shaped substrings, emails, long digit runs) before any persistence.
+- H9/#6. Vote consumption spans 4 non-atomic writes. Fix: write-ahead record keyed by vote ID; idempotent replay.
+
+**H-silver/calibration:**
+- H10/#7. `ragPhase: disabled` never actually checked — SILVER emitted during bootstrap. H11/#8. Q0/Q1/Q2 tiers cast into EffortLevel. H12/#9. SILVER consensus consumes router's own predictions (no provenance) — self-training loop. H13/#10. Interaction counter increments only on retrieval success. H14/#15. LabelSource.confidence ignored — low-confidence labels vote at full weight. H15/#16. Failed silver calibration keeps default weight and passes "validated" gate. H16/#17. All calibration state memory-only, resets on restart.
+
+**H-persistence/retraining:**
+- H17/#13. votes.json non-atomic whole-file writes + catch-and-default = silent history loss. H18/#14. Every vote rewrites 5k records synchronously on request path. H19/#24. Feedback mutations memory-only until periodic flush. H20/#25. RAG index parse failure → silent empty index, then overwritten. H21/#5. Fatigue counts in-memory only.
+- H22/#18+#19+#20 (CRITICAL). `retrainIfNeeded` (exposed via unauthenticated POST /v04/retrain) grid-searches ~millions of boundary combos on-thread and mutates live boundaries, no holdout validation — bypasses the frozen single source of truth and every gate. Fix: endpoint becomes proposal-only (report file, admin-gated), boundary changes go through the C6 reviewed path; grid replaced by sorted quantile/DP optimizer offline.
+
+## 9b. Routing core correctness (Workstream I — pass 1, 21 findings)
+
+CRITICAL/HIGH verified subset (registry: `adv-review/pass1.out`):
+
+- I1/#1 (CRITICAL, VERIFIED). `setTierBoundaries` accepts `NaN` (`typeof NaN === 'number'`; both range comparisons false) and `scoreToEffort` sends non-finite scores to `extreme`. Fix: `Number.isFinite` on every boundary and score; non-finite score → `moderate` + loud log (fail-closed to the middle, not the most expensive tier).
+- I2/#7 (HIGH, VERIFIED). Ordinal variance accumulators initialize to 1, not 0 — every fitted std inflated by 1/total; distorts coefficients worst on small gold sets (may have contributed to the gate failure). Fix: zero-init + regression test vs hand-computed stats.
+- I3/#3+#4+#6. Weights-file activation: three implicit search paths, weak `loadState` validation (accepts non-finite coefficients, missing stds, unordered thresholds), and `loadAttempted` set before validation (transient read failure disables loading until restart). Fix: single configured path, strict schema validation, gate-passed marker (ties into A4), mark attempted only after successful validation.
+- I4/#5. Ensemble/weights load failures swallowed silently. Fix: structured sanitized error + degraded flag on `/health`.
+- I5/#9 (HIGH). Whitespace/ASCII tokenization collapses CJK, emoji-only, and minified-code prompts to ~1 word → severe under-routing. Fix: Unicode-aware segmentation (Intl.Segmenter), char-class signals, fixtures for multilingual/emoji/minified inputs.
+- I6/#10+#12+#13 (HIGH/MEDIUM). Keyword evidence double-counted across overlapping families ("consensus" alone reaches moderate; `100 qps` counts twice; numbered lists counted by two patterns). Fix: dedup by matched span/signal family. **Any scorer change requires a CV re-run ≥ current baseline before merge.**
+- I7/#11 (PLAUSIBLE — needs regression test). `Explain async/await` may score below the light boundary offline (live probe passed, possibly via warm RAG). Fix: regression test at the extractor level; recalibrate imperative contribution if confirmed.
+- I8/#14+#16. `setEnsembleWeights` accepts negative/non-finite values; ordinal abstention ignores calibrated confidence. Fix: validate weights; abstain on low calibrated confidence OR low margin.
+- I9/#18 (MEDIUM). Ordinal path re-extracts and re-tokenizes the full prompt after scoreIntent already did. Fix: pass the existing feature vector; cap prompt size before extraction.
+
+Deferred (LOW/cleanup): #15 renormalization over present components, #17 history lazy-init merge, #19 substring false positives, #20 range representation, #21 dead code/35th feature.
 
 ## 10. Release sequencing
 
