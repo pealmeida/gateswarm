@@ -82,3 +82,4 @@ eval/reports/
 
 # Git worktrees
 .worktrees/
+data/organic/
