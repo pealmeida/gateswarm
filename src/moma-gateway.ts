@@ -89,7 +89,7 @@ import { getUnusableProviderBodyReason, providerFailureKindForHttp, providerHeal
 import { turboQuantCompress, MODEL_CONTEXT_WINDOWS } from './turboquant-compressor.js';
 import { ragIndex, queryRag } from './rag-index.js';
 import {
-  setTrainingMode, createVoteRequest, processVoteReply,
+  setTrainingMode, isTrainingMode, createVoteRequest, processVoteReply,
   detectVoteReply, inferRagConsensus, shouldRetrain as shouldRetrainTraining,
   getTrainingStats, appendVotePromptToCompletion, recordDetectedVoteReply,
 } from './training-mode.js';
@@ -2204,9 +2204,14 @@ async function init() {
   console.log(`📊 Providers: ${agentRegistry.getProviders().map(p => p.id).join(', ')}`);
   console.log(`🤖 Registered agents: ${agents.map(a => a.name).join(', ')}`);
 
-  // v0.4.4: Training mode default — off (enable via API)
+  // v0.5.7: Training mode restores persisted per-agent state from
+  // data/training/agent-configs.json (toggle via POST /v04/training/enable).
+  // Boot must NOT force-disable: doing so silently killed organic gold-label
+  // collection on every restart, starving the ordinal-model retrain gate.
   for (const agent of agents) {
-    setTrainingMode(agent.id, false);
+    if (isTrainingMode(agent.id)) {
+      console.log(`🎯 [${agent.id}] Training mode restored: ON`);
+    }
   }
 
   const server = createServer(async (req, res) => {
