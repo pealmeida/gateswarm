@@ -188,6 +188,27 @@ With warm-store ablation (0.4) as the instrument: keep RAG/history only if each 
 - Increase live sample to ≥ 10/tier so per-tier judge floors have power.
 - Track over-route cost: signed bias × tier-cost delta (already proposed in roadmap §7.1).
 
+### Executed 2026-07-12 — Graph SSL / Label Propagation experiment (verdict: SHELVED behind gate)
+
+`eval/ssl/` pipeline: 66,198-row real-chat corpus (Dolly-15k + Alpaca-52k +
+golden + organic), router-feature and TF-IDF/SVD graph views, sparse cosine
+kNN label spreading, grid over k/alpha, silver-label emitter, ordinal
+retrain with `--silver` mix. **Honest results** (after fixing a test-label
+leakage bug that produced a fake 100% grid): best propagation scores
+50.0% exact / 83.3% adjacent on golden TEST vs the heuristic's
+60.0% / 96.7% — 61 seeds wash out in a 66k-node graph. High-confidence
+silver labels (n=2,404) HURT the ordinal model: gold+silver 50.0% vs
+gold-only 60.0% held-out. Do NOT integrate into training mode yet.
+
+**Activation gate** (re-run `npm run ssl:pipeline` when organic gold votes
+push seeds ≥ ~300): (1) propagation beats the heuristic baseline on golden
+TEST by ≥5pp exact with adjacent ≥ 90%; (2) ordinal trained gold+silver
+beats gold-only by ≥3pp. Only then wire propagation into training mode as
+the SILVER label source (replacing naive RAG consensus), keeping per-run
+validation against golden TEST. Known selection flaw to fix first: the
+silver-config selector optimizes seed agreement/coverage, which does not
+track test accuracy — select on held-out fold accuracy instead.
+
 ### Ongoing — Dataset growth (roadmap §6)
 
 ≥ 50 prompts/tier stratified, hard negatives seeded from this run's misroutes

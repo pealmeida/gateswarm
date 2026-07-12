@@ -34,6 +34,7 @@ export interface LabeledPrompt {
   prompt: string;
   tier?: EffortLevel;
   features?: FV;
+  weight?: number;
 }
 
 export interface TierClassifier {

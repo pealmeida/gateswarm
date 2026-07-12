@@ -84,3 +84,7 @@ eval/reports/
 .worktrees/
 data/organic/
 v05_ordinal_weights.json
+
+# SSL experiment artifacts (regenerated) + downloaded corpora
+eval/ssl/out/
+eval/ssl/data/

@@ -186,39 +186,46 @@ function normalize(raw: number[], state: Pick<OrdinalModelState, 'means' | 'stds
   return raw.map((v, i) => (v - state.means[i]) / (state.stds[i] || 1));
 }
 
-function stats(rows: number[][]): { means: number[]; stds: number[] } {
+function stats(rows: number[][], weights: number[] = []): { means: number[]; stds: number[] } {
   const d = ORDINAL_FEATURE_NAMES.length;
   const means = Array(d).fill(0) as number[];
   const stds = Array(d).fill(1) as number[];
-  for (const row of rows) for (let j = 0; j < d; j++) means[j] += row[j];
-  for (let j = 0; j < d; j++) means[j] /= Math.max(rows.length, 1);
-  for (const row of rows) for (let j = 0; j < d; j++) stds[j] += (row[j] - means[j]) ** 2;
+  const total = rows.reduce((sum, _row, i) => sum + (weights[i] ?? 1), 0) || 1;
+  for (let i = 0; i < rows.length; i++) {
+    const w = weights[i] ?? 1;
+    for (let j = 0; j < d; j++) means[j] += rows[i][j] * w;
+  }
+  for (let j = 0; j < d; j++) means[j] /= total;
+  for (let i = 0; i < rows.length; i++) {
+    const w = weights[i] ?? 1;
+    for (let j = 0; j < d; j++) stds[j] += ((rows[i][j] - means[j]) ** 2) * w;
+  }
   for (let j = 0; j < d; j++) {
-    stds[j] = Math.sqrt(stds[j] / Math.max(rows.length, 1));
+    stds[j] = Math.sqrt(stds[j] / total);
     if (!Number.isFinite(stds[j]) || stds[j] < 1e-6) stds[j] = 1;
   }
   return { means, stds };
 }
 
-function initialThresholds(labels: number[]): number[] {
-  const n = labels.length;
+function initialThresholds(labels: number[], weights: number[]): number[] {
+  const n = weights.reduce((a, b) => a + b, 0) || labels.length || 1;
   const thresholds: number[] = [];
   for (let k = 0; k < 5; k++) {
-    const le = labels.filter((y) => y <= k).length;
+    const le = labels.reduce((sum, y, i) => sum + (y <= k ? weights[i] ?? 1 : 0), 0);
     thresholds.push(logit((le + 0.5) / (n + 1)));
   }
   enforceOrderedThresholds(thresholds);
   return thresholds;
 }
 
-function trainCore(x: number[][], y: number[], opts: Required<OrdinalFitOptions>): {
+function trainCore(x: number[][], y: number[], opts: Required<OrdinalFitOptions>, sampleWeights: number[] = []): {
   thresholds: number[];
   weights: number[];
 } {
   const d = ORDINAL_FEATURE_NAMES.length;
   const weights = Array(d).fill(0) as number[];
-  const thresholds = initialThresholds(y);
-  const n = Math.max(x.length, 1);
+  const thresholds = initialThresholds(y, sampleWeights.length ? sampleWeights : Array(y.length).fill(1));
+  const n = Math.max(sampleWeights.reduce((a, b) => a + b, 0), x.length, 1);
 
   for (let epoch = 0; epoch < opts.epochs; epoch++) {
     const gradW = Array(d).fill(0) as number[];
@@ -226,6 +233,7 @@ function trainCore(x: number[][], y: number[], opts: Required<OrdinalFitOptions>
 
     for (let i = 0; i < x.length; i++) {
       const eta = dot(weights, x[i]);
+      const sampleWeight = sampleWeights[i] ?? 1;
       const c = thresholds.map((t) => sigmoid(t - eta));
       const deriv = c.map((v) => v * (1 - v));
       const yi = y[i];
@@ -235,10 +243,10 @@ function trainCore(x: number[][], y: number[], opts: Required<OrdinalFitOptions>
       const dUpper = yi <= 4 ? deriv[yi] : 0;
       const dLower = yi > 0 ? deriv[yi - 1] : 0;
 
-      if (yi <= 4) gradT[yi] += -dUpper / p;
-      if (yi > 0) gradT[yi - 1] += dLower / p;
+      if (yi <= 4) gradT[yi] += sampleWeight * (-dUpper / p);
+      if (yi > 0) gradT[yi - 1] += sampleWeight * (dLower / p);
 
-      const coeff = (dUpper - dLower) / p;
+      const coeff = sampleWeight * ((dUpper - dLower) / p);
       for (let j = 0; j < d; j++) gradW[j] += coeff * x[i][j];
     }
 
@@ -253,7 +261,7 @@ function trainCore(x: number[][], y: number[], opts: Required<OrdinalFitOptions>
   return { thresholds, weights };
 }
 
-function fitCalibration(rawConf: number[], correct: boolean[]): PlattCalibration {
+function fitCalibration(rawConf: number[], correct: boolean[], weights: number[] = []): PlattCalibration {
   if (!rawConf.length) return { a: 1, b: 0 };
   let a = 1;
   let b = 0;
@@ -261,15 +269,18 @@ function fitCalibration(rawConf: number[], correct: boolean[]): PlattCalibration
   for (let epoch = 0; epoch < 500; epoch++) {
     let ga = 0;
     let gb = 0;
+    let total = 0;
     for (let i = 0; i < rawConf.length; i++) {
+      const w = weights[i] ?? 1;
       const x = logit(rawConf[i]);
       const y = correct[i] ? 1 : 0;
       const p = sigmoid(a * x + b);
-      ga += (p - y) * x;
-      gb += p - y;
+      ga += w * (p - y) * x;
+      gb += w * (p - y);
+      total += w;
     }
-    a -= lr * (ga / rawConf.length + 0.001 * (a - 1));
-    b -= lr * (gb / rawConf.length);
+    a -= lr * (ga / Math.max(total, 1) + 0.001 * (a - 1));
+    b -= lr * (gb / Math.max(total, 1));
   }
   return { a, b };
 }
@@ -333,31 +344,37 @@ export class OrdinalLogisticClassifier implements TierClassifier {
       .sort((a, b) => a.id.localeCompare(b.id));
     if (!clean.length) return;
 
+    const sampleWeights = clean.map((r) => Number.isFinite(r.weight) && (r.weight ?? 0) > 0 ? r.weight! : 1);
     const rawRows = clean.map((r) => featureVectorForOrdinal(r.prompt, r.features));
     const labels = clean.map((r) => tierIndex(r.tier!));
-    const { means, stds } = stats(rawRows);
+    const { means, stds } = stats(rawRows, sampleWeights);
     const rows = rawRows.map((r) => normalize(r, { means, stds }));
 
     const useHoldout = clean.length >= 20;
     const trainRows: number[][] = [];
     const trainLabels: number[] = [];
+    const trainWeights: number[] = [];
     const valRows: number[][] = [];
     const valLabels: number[] = [];
+    const valWeights: number[] = [];
     for (let i = 0; i < rows.length; i++) {
       if (useHoldout && i % 5 === 0) {
         valRows.push(rows[i]);
         valLabels.push(labels[i]);
+        valWeights.push(sampleWeights[i]);
       } else {
         trainRows.push(rows[i]);
         trainLabels.push(labels[i]);
+        trainWeights.push(sampleWeights[i]);
       }
     }
     if (!trainRows.length) {
       trainRows.push(...rows);
       trainLabels.push(...labels);
+      trainWeights.push(...sampleWeights);
     }
 
-    const fitted = trainCore(trainRows, trainLabels, opts);
+    const fitted = trainCore(trainRows, trainLabels, opts, trainWeights);
     const state: OrdinalModelState = {
       version: ORDINAL_MODEL_VERSION,
       featureNames: [...ORDINAL_FEATURE_NAMES],
@@ -377,6 +394,7 @@ export class OrdinalLogisticClassifier implements TierClassifier {
 
     const calibrationRows = valRows.length ? valRows : rows;
     const calibrationLabels = valRows.length ? valLabels : labels;
+    const calibrationWeights = valRows.length ? valWeights : sampleWeights;
     const rawConf: number[] = [];
     const correct: boolean[] = [];
     for (let i = 0; i < calibrationRows.length; i++) {
@@ -385,7 +403,7 @@ export class OrdinalLogisticClassifier implements TierClassifier {
       rawConf.push(top.max);
       correct.push(top.index === calibrationLabels[i]);
     }
-    state.calibration = fitCalibration(rawConf, correct);
+    state.calibration = fitCalibration(rawConf, correct, calibrationWeights);
     state.training.trainedAt = new Date().toISOString();
     this.state = state;
     this.loadAttempted = true;
