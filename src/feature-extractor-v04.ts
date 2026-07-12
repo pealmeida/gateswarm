@@ -38,6 +38,13 @@ export interface FeatureVector {
   multi_domain: number;
   user_expertise_level: number;
   compound_tech: number;
+  // Phase 2 mid-band separation features
+  requirement_count: number;
+  distinct_imperative_verbs: number;
+  question_count: number;
+  conjunction_enumeration: number;
+  scale_quantity_mentions: number;
+  diagnostic_causal_markers: number;
 }
 
 // ─── Domain Keywords ──────────────────────────────────────
@@ -116,6 +123,58 @@ const SIGNAL_KEYWORDS = {
     'consensus', 'eventual consistency', 'payment system', 'multi-region'],
 };
 
+const IMPERATIVE_VERBS = new Set([
+  ...SIGNAL_KEYWORDS.imperativeVerbs,
+  'add', 'audit', 'change', 'compare', 'consolidate', 'convert', 'deduplicate',
+  'deploy', 'diagnose', 'emit', 'evaluate', 'export', 'find', 'generate',
+  'group', 'help', 'isolate', 'lay', 'map', 'merge', 'migrate', 'model',
+  'outline', 'plan', 'profile', 'propose', 'rank', 'recommend', 'redesign',
+  'refactor', 'replace', 'resolve', 'restructure', 'retry', 'rewrite',
+  'sequence', 'shard', 'ship', 'sketch', 'split', 'stage', 'summarize',
+  'synthesize', 'test', 'untangle', 'update', 'validate', 'walk', 'work',
+]);
+
+function countRegex(text: string, re: RegExp): number {
+  return (text.match(re) || []).length;
+}
+
+function countScaleQuantityMentions(text: string): number {
+  const hits = new Set<string>();
+  const addMatches = (re: RegExp) => {
+    for (const match of text.matchAll(re)) {
+      hits.add(`${match.index ?? 0}:${match[0]}`);
+    }
+  };
+
+  addMatches(/\bsub-\d+(?:\.\d+)?\s*(?:ms|milliseconds|s|sec|secs|seconds)\b/g);
+  addMatches(/\b\d+(?:\.\d+)?\s*(?:mb|gb|tb|kb|ms|milliseconds|qps|rps)\b/g);
+  addMatches(/\b\d+(?:\.\d+)?\s*(?:million|billion|thousand)\s+(?:events|requests|rows|users|services|microservices|hospitals|records|transactions)\b/g);
+  addMatches(/\b\d+(?:\.\d+)?(?:k|m|b)\s*(?:events|requests|users|rows|qps|rps)?\b/g);
+  addMatches(/\b\d+(?:\.\d+)?-(?:billion|million|thousand|row|rows|microservice|microservices|tenant|tenants|region|regions|user|users)[a-z-]*\b/g);
+  addMatches(/\bp(?:90|95|99|999)\b/g);
+  addMatches(/\b(?:qps|rps|events\/sec|events per second|requests per second|concurrent users|tail latency)\b/g);
+  addMatches(/\b(?:one|two|three|four|five|six|seven|eight|nine|ten|twelve|hundred|thousand|million|billion)\s+(?:separate\s+)?(?:regions|repos|repositories|services|microservices|hospitals|users|events|rows|product lines|years|teams)\b/g);
+  addMatches(/\b(?:hundred|thousand|million|billion)-[a-z-]*(?:microservice|microservices|user|users|row|rows|tenant|tenants|region|regions)[a-z-]*\b/g);
+
+  return hits.size;
+}
+
+function countDiagnosticCausalMarkers(text: string): number {
+  const patterns = [
+    /\bfigure out (?:which|why|whether|what)\b/g,
+    /\bnot sure if\b[^.?!]*\bor\b/g,
+    /\bspiked from\b[^.?!]*\bto\b/g,
+    /\bafter the last (?:deploy|deployment|release)\b/g,
+    /\bregress(?:ed|ion|ions)?\b/g,
+    /\broot cause\b/g,
+    /\bisolate the cause\b/g,
+    /\bdiagnos(?:e|ing|is)\b/g,
+    /\bprofile why\b/g,
+    /\bintermittent data corruption\b/g,
+  ];
+  return patterns.reduce((sum, re) => sum + countRegex(text, re), 0);
+}
+
 const NAMED_ENTITY_PATTERNS = [
   /[A-Z][a-z]+ (Inc|Corp|LLC|Ltd|Co|GmbH|SA|PLC)/g,
   /\b[A-Z]{2,}\b/g,
@@ -130,6 +189,7 @@ export function extractFeatures(prompt: string): FeatureVector {
   const words = t.split(/\s+/).filter(Boolean);
   const wc = words.length;
   const sentences = prompt.split(/[.!?]+/).filter(s => s.trim());
+  const normalizedWords = t.match(/[a-z][a-z0-9-]*/g) || [];
 
   // v3.3 Heuristic Signals (binary)
   const has_question = prompt.includes('?') ? 1 : 0;
@@ -200,6 +260,29 @@ export function extractFeatures(prompt: string): FeatureVector {
     COMPOUND_TECH_PATTERNS.some(p => p.test(w)) && w.length >= 6
   ).length;
 
+  // Phase 2: decomposition, scale, and diagnostic markers for the
+  // moderate/heavy/intensive band where length alone collapses.
+  const bulletedItemCount = countRegex(prompt, /^\s*(?:[-*]|\d+[.)])\s+\S/gm);
+  const inlineNumberedCount = countRegex(prompt, /\b\d+[.)]\s+\S/g);
+  const requirementPhraseCount = countRegex(
+    t,
+    /\b(?:must|should|shall|required|requires?|needs? to|have to|cannot|without|under|within|supports?|handles?|including|with|while|keeping|stays? under|ranked by)\b/g,
+  );
+  const requirement_count = requirementPhraseCount + Math.max(bulletedItemCount, inlineNumberedCount);
+  const distinct_imperative_verbs = new Set(
+    normalizedWords.filter(w => IMPERATIVE_VERBS.has(w)),
+  ).size;
+  const question_count = countRegex(prompt, /[^?]+\?/g);
+  const commaEnumerationCount = sentences.reduce((sum, sentence) => {
+    const commas = countRegex(sentence, /,/g);
+    return sum + (commas >= 2 ? commas : 0);
+  }, 0);
+  const conjunction_enumeration =
+    countRegex(t, /\b(?:as well as|along with|and|plus)\b/g) +
+    commaEnumerationCount + inlineNumberedCount + bulletedItemCount;
+  const scale_quantity_mentions = countScaleQuantityMentions(t);
+  const diagnostic_causal_markers = countDiagnosticCausalMarkers(t);
+
   return {
     has_question, has_code, has_imperative, has_arithmetic,
     has_sequential, has_constraint, has_context, has_architecture, has_design,
@@ -209,6 +292,8 @@ export function extractFeatures(prompt: string): FeatureVector {
     domain_finance, domain_legal, domain_medical, domain_engineering,
     temporal_references: temporal_refs, output_format_spec, prior_context_needed,
     novelty_score, multi_domain, user_expertise_level, compound_tech,
+    requirement_count, distinct_imperative_verbs, question_count,
+    conjunction_enumeration, scale_quantity_mentions, diagnostic_causal_markers,
   };
 }
 
@@ -222,6 +307,9 @@ function zeroFeatures(): FeatureVector {
     domain_finance: 0, domain_legal: 0, domain_medical: 0, domain_engineering: 0,
     temporal_references: 0, output_format_spec: 0, prior_context_needed: 0,
     novelty_score: 0, multi_domain: 0, user_expertise_level: 0, compound_tech: 0,
+    requirement_count: 0, distinct_imperative_verbs: 0, question_count: 0,
+    conjunction_enumeration: 0, scale_quantity_mentions: 0,
+    diagnostic_causal_markers: 0,
   };
 }
 
@@ -242,44 +330,57 @@ function zeroFeatures(): FeatureVector {
 export function heuristicScoreFromFeatures(features: FeatureVector, wordCount: number): number {
   const t = features;
 
-  // Length: dominant complexity signal, saturating (log1p, ~45 words → full weight)
-  const lengthScore = Math.min(Math.log1p(wordCount) / Math.log1p(45), 1) * 0.34;
-  // Structure: multiple sentences/clauses indicate compound requests
-  const structScore = (Math.min(t.sentence_count, 5) / 5) * 0.10;
+  // Length remains the anchor, but Phase 2 makes room for decomposition signals
+  // that separate heavy implementation tasks from intensive diagnostic tasks.
+  const lengthScore = Math.min(Math.log1p(wordCount) / Math.log1p(45), 1) * 0.30;
+  const structScore = (Math.min(t.sentence_count + Math.floor(t.conjunction_enumeration / 4), 5) / 5) * 0.08;
   // Architecture & design lexicon (max 0.20)
-  const archScore = Math.min((t.has_architecture + t.has_design) * 0.10, 0.20);
-  // Technical terms, saturating (max 0.12)
-  const techScore = Math.min(t.technical_terms * 0.025, 0.12);
-  // Code presence (inline + fenced block)
-  const codeScore = t.has_code * 0.05 + (t.code_block_size > 0 ? 0.05 : 0);
+  const archScore = Math.min((t.has_architecture + t.has_design) * 0.09, 0.18);
+  // Technical terms, saturating. Keep lexical density secondary; it was flat
+  // across the mid-band and over-rewarded implementation-keyword prompts.
+  const techScore = Math.min(t.technical_terms * 0.020, 0.10);
+  // Code presence only. code_block_size is intentionally zero-weighted as dead MI.
+  const codeScore = t.has_code * 0.04;
   // Reasoning / constraint signals
   const reasonScore =
-    t.has_constraint * 0.04 + t.has_context * 0.03 + t.multi_step * 0.04 +
+    t.has_constraint * 0.04 + t.has_context * 0.03 + t.multi_step * 0.03 +
     t.has_negation * 0.02 + t.has_sequential * 0.02;
-  // Domain specificity & user expertise
-  const domainScore = t.multi_domain * 0.05 + t.user_expertise_level * 0.03 +
-    ((t.domain_finance + t.domain_legal + t.domain_medical + t.domain_engineering) > 0 ? 0.03 : 0);
+  const decompositionScore = Math.min(
+    t.requirement_count * 0.012 +
+    t.distinct_imperative_verbs * 0.014 +
+    t.question_count * 0.014 +
+    t.conjunction_enumeration * 0.005,
+    0.12,
+  );
+  const scaleScore = Math.min(t.scale_quantity_mentions * 0.035, 0.14);
+  const diagnosticScore = Math.min(t.diagnostic_causal_markers * 0.050, 0.13);
+  // Keep the only non-dead domain signal; the legal/medical/engineering,
+  // multi_domain, and user_expertise_level fields remain for compatibility only.
+  const domainScore = t.domain_finance * 0.02;
   // v0.5.6-bug6: compound technical tokens (async/await, event-loop, etc.) signal
   // that the user is asking about a named concept worth at least a light-tier
-  // explanation. Without this, a 2-word prompt like 'Explain async/await' lands
-  // in trivial (0.198 < 0.21 boundary) and the 0.5B model can't write a coherent
+  // explanation. Without this, a 2-word prompt like 'Explain async/await' can land
+  // below the light boundary, and the 0.5B model can't write a coherent
   // technical explanation. Each compound term adds a small, capped boost.
-  const compoundScore = Math.min(t.compound_tech * 0.04, 0.12);
-  // System-design bonus: compound complexity (architecture + many tech terms + length)
+  const compoundScore = Math.min(t.compound_tech * 0.035, 0.10);
+  // System-design bonus: compound complexity using live Phase 2 signals.
   const sysCount = t.has_architecture + t.technical_design +
-    (t.technical_terms > 3 ? 1 : 0) + t.multi_domain;
-  const systemBonus = wordCount >= 12 && sysCount >= 3 ? 0.12
-    : wordCount >= 10 && sysCount >= 2 ? 0.06 : 0;
+    (t.technical_terms > 3 ? 1 : 0) + (t.requirement_count >= 3 ? 1 : 0) +
+    (t.scale_quantity_mentions > 0 ? 1 : 0) + (t.diagnostic_causal_markers > 0 ? 1 : 0);
+  const systemBonus = wordCount >= 12 && sysCount >= 4 ? 0.10
+    : wordCount >= 10 && sysCount >= 3 ? 0.05 : 0;
 
   const score = lengthScore + structScore + archScore + techScore + codeScore +
-    reasonScore + domainScore + compoundScore + systemBonus;
+    reasonScore + decompositionScore + scaleScore + diagnosticScore +
+    domainScore + compoundScore + systemBonus;
 
   return Math.min(Math.max(score, 0), 1);
 }
 
 function calcSystemBonus(wc: number, f: FeatureVector): number {
   const sysCount = f.has_architecture + f.technical_design +
-    (f.technical_terms > 3 ? 1 : 0) + f.multi_domain;
+    (f.technical_terms > 3 ? 1 : 0) + (f.requirement_count >= 3 ? 1 : 0) +
+    (f.scale_quantity_mentions > 0 ? 1 : 0) + (f.diagnostic_causal_markers > 0 ? 1 : 0);
   if (wc >= 15 && sysCount >= 5) return 0.35;
   if (wc >= 15 && sysCount >= 4) return 0.25;
   if (wc >= 12 && sysCount >= 3) return 0.15;

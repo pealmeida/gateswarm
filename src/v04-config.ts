@@ -11,7 +11,7 @@ import { promises as fs } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import type { EffortLevel, IntentMode } from './types.js';
-import { setTierBoundaries } from './intent-engine.js';
+import { DEFAULT_BOUNDARIES, getEffortRanges, setTierBoundaries } from './tier-boundaries.js';
 import { setEnsembleWeights as setVoterWeights, getEnsembleWeights as getVoterWeights } from './ensemble-voter.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -104,20 +104,12 @@ export const DEFAULT_V04_CONFIG: V04Config = {
       'context markers', 'architecture keywords', 'design keywords',
     ],
   },
-  // v0.5.2: unified with v04_config.json + intent-engine DEFAULT_BOUNDARIES.
-  // These were stale (old [0.1557…] cut points), so a config-load failure would
-  // silently fall back to divergent boundaries and misroute every tier.
-  // Phase 1.1 is the one permitted train-only refit after the b57e59b score-scale
-  // shift. After running `npm run eval:refit-boundaries -- --apply`, mirror the
-  // fitted frozen cuts here and in intent-engine DEFAULT_BOUNDARIES.
-  tier_boundaries: {
-    trivial: [0.00, 0.21],
-    light: [0.21, 0.28],
-    moderate: [0.28, 0.32],
-    heavy: [0.32, 0.37],
-    intensive: [0.37, 0.46],
-    extreme: [0.46, 1.00],
-  },
+  // v0.5.2: unified with v04_config.json + tier-boundaries DEFAULT_BOUNDARIES.
+  // Phase 2 (2026-07-12): one-time sanctioned refit after the mid-band feature
+  // work changed the score distribution (train-only fit, 5-fold CV 58.9% ± 11.4
+  // vs 57.8% at the old cuts). Frozen until the scorer changes again.
+  // Derived here so config-load fallback cannot drift from scoreToEffort().
+  tier_boundaries: getEffortRanges(DEFAULT_BOUNDARIES),
   // v0.5.7: mirrors the committed v04_config.json (the validated source of truth).
   // A config-load failure must not re-route traffic to providers/models the
   // catalogs don't serve — the old defaults pointed at retired bailian models.

@@ -12,6 +12,7 @@
 
 import type { ComplexityScore, EffortLevel } from './types.js';
 import { extractFeatures, heuristicScoreFromFeatures, type FeatureVector } from './feature-extractor-v04.js';
+import { scoreToEffort as scoreToEffortFromScore } from './tier-boundaries.js';
 
 export interface V33ScoreResult {
   tier: EffortLevel;
@@ -88,7 +89,7 @@ export function v33Score(prompt: string): V33ScoreResult {
   const signals = signalKeys.reduce((sum, key) => sum + (features[key] > 0 ? 1 : 0), 0);
 
   return {
-    tier: scoreToEffort(score),
+    tier: scoreToEffortFromScore(score),
     score,
     signals,
     wordCount,
@@ -96,56 +97,12 @@ export function v33Score(prompt: string): V33ScoreResult {
   };
 }
 
-// Canonical tier-boundary mapping. Matches v04_config.json tier_boundaries.
-// v0.5.2: recalibrated for the length/structure-aware heuristic (see eval/),
-// and made CONFIG-DRIVEN so the training loop can recalibrate boundaries from
-// real labels without a code change. The 5 cut points are kept in a module-level
-// cache with a validated setter; defaults are the calibrated values.
-// Phase 1.1 is the one permitted train-only refit after the b57e59b score-scale
-// shift. After running `npm run eval:refit-boundaries -- --apply`, mirror the
-// fitted frozen cuts here and in DEFAULT_V04_CONFIG.tier_boundaries.
-const DEFAULT_BOUNDARIES: [number, number, number, number, number] = [0.21, 0.28, 0.32, 0.37, 0.46];
-let _boundaries: [number, number, number, number, number] = [...DEFAULT_BOUNDARIES];
-
-/** Update tier cut points (e.g. after retraining). Ignores invalid/non-monotonic input. */
-export function setTierBoundaries(b: number[]): boolean {
-  if (!Array.isArray(b) || b.length !== 5) return false;
-  for (let i = 0; i < 5; i++) {
-    if (typeof b[i] !== 'number' || b[i] <= 0 || b[i] >= 1) return false;
-    if (i > 0 && b[i] <= b[i - 1]) return false; // must be strictly increasing
-  }
-  _boundaries = [b[0], b[1], b[2], b[3], b[4]];
-  return true;
-}
-
-export function getTierBoundaries(): number[] {
-  return [..._boundaries];
-}
-
-function midpoint(lo: number, hi: number): number {
-  return (lo + hi) / 2;
-}
-
-/**
- * Representative score for each effort tier, derived live from the configured
- * boundaries. Used by RAG/history priors so tier labels never imply scores on
- * the retired pre-v0.5.2 scale.
- */
-export function tierMidpoints(): Record<EffortLevel, number> {
-  const [b0, b1, b2, b3, b4] = _boundaries;
-  const extremeUpper = Math.min(1, b4 + 2 * (b4 - b3));
-  return {
-    trivial: midpoint(0, b0), light: midpoint(b0, b1), moderate: midpoint(b1, b2),
-    heavy: midpoint(b2, b3), intensive: midpoint(b3, b4), extreme: midpoint(b4, extremeUpper),
-  };
-}
-
-export function scoreToEffort(score: number): EffortLevel {
-  const [b0, b1, b2, b3, b4] = _boundaries;
-  if (score < b0) return 'trivial';
-  if (score < b1) return 'light';
-  if (score < b2) return 'moderate';
-  if (score < b3) return 'heavy';
-  if (score < b4) return 'intensive';
-  return 'extreme';
-}
+export {
+  DEFAULT_BOUNDARIES,
+  EFFORT_RANGES,
+  getEffortRanges,
+  getTierBoundaries,
+  scoreToEffort,
+  setTierBoundaries,
+  tierMidpoints,
+} from './tier-boundaries.js';

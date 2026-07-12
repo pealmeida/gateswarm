@@ -35,26 +35,26 @@
   "tier_boundaries": {
     "trivial": [
       0,
-      0.21
+      0.208938
     ],
     "light": [
-      0.21,
-      0.28
+      0.208938,
+      0.264209
     ],
     "moderate": [
-      0.28,
-      0.32
+      0.264209,
+      0.32502
     ],
     "heavy": [
-      0.32,
-      0.37
+      0.32502,
+      0.36585
     ],
     "intensive": [
-      0.37,
-      0.46
+      0.36585,
+      0.485382
     ],
     "extreme": [
-      0.46,
+      0.485382,
       1
     ]
   },
@@ -240,5 +240,6 @@
     "maxEntries": 10000,
     "ttlMs": 86400000,
     "queryMaxResults": 3
-  }
+  },
+  "_tier_boundaries_note": "Phase 1.1 train-only refit; fitted_on=2026-07-12T03:34:24.672Z; split=holdout.v1.json; frozen until the scorer changes again."
 }

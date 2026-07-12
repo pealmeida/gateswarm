@@ -66,7 +66,7 @@ import { loadVaultEnv } from './secrets/vault-env.js';
 
 import { createServer, IncomingMessage, ServerResponse } from 'http';
 import { BenchmarkLogger } from './benchmark-logger.js';
-import { heuristicScore, scoreToEffort } from './intent-engine.js';
+import { heuristicScore, scoreToEffort, tierMidpoints } from './intent-engine.js';
 import { scoreIntent as scoreIntentV04 } from './intent-engine-v04.js';
 import { recordFeedback, getInteractionCount, getFeedbackEntries, getTierAccuracy, shouldRetrain, initFeedbackStore, startFeedbackAutoFlush, updateAdequacy } from './feedback-store.js';
 import { selfEvaluate } from './self-eval.js';
@@ -1201,7 +1201,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
 
   // v0.5.7: effort_override bypasses ensemble scoring; jump straight to the named tier.
   if (effortOverride) {
-    score = ({ trivial: 0.05, light: 0.15, moderate: 0.28, heavy: 0.38, intensive: 0.45, extreme: 0.55 } as Record<string, number>)[effortOverride];
+    score = tierMidpoints()[effortOverride as EffortLevel];
     rawScore = score;
     effort = effortOverride as EffortLevel;
   }

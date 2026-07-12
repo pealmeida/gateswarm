@@ -6,30 +6,22 @@ export type { EffortLevel, DeviceProfileName } from './types.js';
  * against available models, producing optimal routing decisions
  * that account for device capability, cost, and latency.
  *
- * v3.6: TIER BOUNDARIES UNIFIED — now matches v04_config.json boundaries.
- * Previously had conflicting ranges vs v04-config.ts, causing same score
- * to route to different tiers depending on which file was read.
- * Canonical boundaries: v04_config.json → tier_boundaries.
+ * v3.6: TIER BOUNDARIES UNIFIED.
+ * Cut points live in tier-boundaries.ts and are synced from v04_config.json.
  */
 
 // ─── Effort Levels ──────────────────────────────────────
 
+import type { EffortLevel, ModelTier, DeviceProfileName } from './types.js';
+
 /**
  * Effort levels represent the computational complexity required.
  * Derived from the Intent Engine's complexity score (0–1).
+ *
+ * EFFORT_RANGES is getter-backed and live: config hot-reloads and boundary
+ * retraining update the same source used by scoreToEffort().
  */
-import type { EffortLevel, ModelTier, DeviceProfileName } from './types.js';
-
-export const EFFORT_RANGES: Record<EffortLevel, [number, number]> = {
-  // v0.5.2: recalibrated for the length/structure-aware heuristic (see eval/).
-  // Unified with v04_config.json tier_boundaries and scoreToEffort().
-  trivial:   [0.00, 0.21],
-  light:     [0.21, 0.28],
-  moderate:  [0.28, 0.32],
-  heavy:     [0.32, 0.37],
-  intensive: [0.37, 0.46],
-  extreme:   [0.46, 1.00],
-};
+export { EFFORT_RANGES, getEffortRanges, scoreToEffort } from './tier-boundaries.js';
 
 export const EFFORT_LABELS: Record<EffortLevel, string> = {
   trivial:   'Trivial',
@@ -245,14 +237,6 @@ export function classifyDevice(
   if (memoryGB >= 4) return 'desktop-mid';
   return 'lowend';
 }
-
-/**
- * Convert complexity score (0-1) to effort level.
- * v3.6: UNIFIED boundaries matching v04_config.json tier_boundaries.
- */
-// scoreToEffort is now imported from intent-engine.js (canonical, config-driven).
-// Re-export for backward compatibility with any consumer that imported it from here.
-export { scoreToEffort } from './intent-engine.js';
 
 /**
  * Look up the matrix cell for a given effort × device combination.

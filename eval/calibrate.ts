@@ -5,42 +5,17 @@
 import { readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { extractFeatures, type FeatureVector } from '../src/feature-extractor-v04.js';
+import { extractFeatures, heuristicScoreFromFeatures } from '../src/feature-extractor-v04.js';
 import type { EffortLevel } from '../src/types.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TIERS: EffortLevel[] = ['trivial', 'light', 'moderate', 'heavy', 'intensive', 'extreme'];
 const dataset = JSON.parse(readFileSync(join(__dirname, 'dataset.json'), 'utf-8'));
 
-// ── Candidate improved scoring function ──────────────────────────────
 function scoreV2(prompt: string): number {
-  const f: FeatureVector = extractFeatures(prompt);
+  const f = extractFeatures(prompt);
   const wc = prompt.split(/\s+/).filter(Boolean).length;
-
-  // Length: dominant complexity signal, saturating. log1p(wc)/log1p(45) → 0..1
-  const lengthScore = Math.min(Math.log1p(wc) / Math.log1p(45), 1) * 0.34;
-  // Structure: multiple sentences/clauses
-  const structScore = Math.min(f.sentence_count, 5) / 5 * 0.10;
-  // Architecture & design lexicon
-  const archScore = Math.min((f.has_architecture + f.has_design) * 0.10, 0.20);
-  // Technical terms (saturating)
-  const techScore = Math.min(f.technical_terms * 0.025, 0.12);
-  // Code presence
-  const codeScore = f.has_code * 0.05 + (f.code_block_size > 0 ? 0.05 : 0);
-  // Reasoning / constraint signals
-  const reasonScore =
-    f.has_constraint * 0.04 + f.has_context * 0.03 + f.multi_step * 0.04 +
-    f.has_negation * 0.02 + f.has_sequential * 0.02;
-  // Domain & expertise
-  const domainScore = f.multi_domain * 0.05 + f.user_expertise_level * 0.03 +
-    (f.domain_finance + f.domain_legal + f.domain_medical + f.domain_engineering > 0 ? 0.03 : 0);
-  // System-design bonus (compound complexity)
-  const sysCount = f.has_architecture + f.technical_design + (f.technical_terms > 3 ? 1 : 0) + f.multi_domain;
-  const sysBonus = wc >= 12 && sysCount >= 3 ? 0.12 : wc >= 10 && sysCount >= 2 ? 0.06 : 0;
-
-  const score = lengthScore + structScore + archScore + techScore + codeScore +
-    reasonScore + domainScore + sysBonus;
-  return Math.min(Math.max(score, 0), 1);
+  return heuristicScoreFromFeatures(f, wc);
 }
 
 const scoresByTier: Record<string, number[]> = {};

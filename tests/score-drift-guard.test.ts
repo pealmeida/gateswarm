@@ -10,9 +10,9 @@ const EDGE_TOLERANCE: Partial<Record<EffortLevel, number>> = {
   light: 0.02,
 };
 
-// Current committed scorer medians, measured from eval/dataset.json:
-// trivial 0.179, light 0.281, moderate 0.311, heavy 0.326,
-// intensive 0.398, extreme 0.516.
+// Expected T6 Phase 2 scorer medians, measured/locked against eval/dataset.json:
+// trivial ~0.16, light ~0.27, moderate ~0.31, heavy ~0.35,
+// intensive ~0.43, extreme ~0.56.
 //
 // The Phase 1.1 eval note documents a heavy/intensive ordering problem in the
 // dirty eval scorer. This branch's committed scorer no longer has a high-tier

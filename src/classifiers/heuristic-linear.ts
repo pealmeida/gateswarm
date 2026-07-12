@@ -11,10 +11,11 @@
 import type { TierClassifier, TierPrediction, ModePrediction, LabeledPrompt } from './types.js';
 import type { EffortLevel } from '../types.js';
 import { extractFeatures, heuristicScoreFromFeatures, type FeatureVector } from '../feature-extractor-v04.js';
+import { DEFAULT_BOUNDARIES } from '../tier-boundaries.js';
 import { detectIntentMode } from '../v04-config.js';
 
 export const HEURISTIC_TIERS: EffortLevel[] = ['trivial', 'light', 'moderate', 'heavy', 'intensive', 'extreme'];
-export const DEFAULT_HEURISTIC_BOUNDARIES = [0.21, 0.28, 0.32, 0.37, 0.46];
+export const DEFAULT_HEURISTIC_BOUNDARIES = [...DEFAULT_BOUNDARIES];
 
 export interface ScoredTier {
   score: number;
@@ -150,7 +151,7 @@ export class HeuristicLinearClassifier implements TierClassifier {
   kind = 'rule' as const;
   version = 'v0.5.2';
   requiresTraining = true; // fits boundaries; still runs without (defaults)
-  private boundaries = DEFAULT_HEURISTIC_BOUNDARIES;
+  private boundaries = [...DEFAULT_HEURISTIC_BOUNDARIES];
 
   fit(train: LabeledPrompt[]): void {
     const pairs = train

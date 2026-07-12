@@ -139,6 +139,12 @@ learned model + more data.**
 
 ### Phase 2 — Features that break the heavy↔intensive inversion (2–3 days)
 
+> **T6 status:** PATCHED, runner validation pending. `FeatureVector` now includes
+> decomposition, scale/quantity, and diagnostic/causal markers; the 10 low-MI
+> compatibility fields are no longer paid production scorer weight. Expected
+> scorer medians under the frozen bands: trivial ~0.16, light ~0.27,
+> moderate ~0.31, heavy ~0.35, intensive ~0.43, extreme ~0.56.
+
 Targeted at the A2 signature (implement-one-thing vs diagnose/redesign-under-constraints):
 
 - **Decomposition:** `requirement_count` (musts/bullets/numbered items), `distinct_imperative_verbs`, `question_count`, `conjunction/enumeration count` (roadmap §4.2).
@@ -184,7 +190,7 @@ splits, labels never from the same LLM family being evaluated.
 |---|---|---|
 | Today | 44.4% (this run) / 44.4% ± 6.1% (CV) | — |
 | Phase 1 recalibration | ~55–60% | boundaries match current score scale |
-| Phase 2 features | ~62–68% | heavy↔intensive separable |
+| Phase 2 features | PATCHED; gate is CV exact ≥52%, adjacent ≥84%, moderate/heavy/intensive recall all ≥30% | decomposition + scale/quantity + diagnostic signals |
 | Phase 3 ordinal model | +3–5pp, calibrated confidence | interactions + abstention |
 | Phase 5 | live per-tier judge ≥ 3.0 everywhere | infra, not ML |
 
