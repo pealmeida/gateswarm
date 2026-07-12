@@ -16,6 +16,7 @@ export interface TierPrediction {
   probs?: Partial<Record<EffortLevel, number>>; // probabilistic models
   score?: number;                                // scalar models (0..1)
   confidence: number;
+  margin?: number;                               // top1 - top2 prob for abstention
   latencyMs: number;
   costUsd?: number;                              // LLM backends
 }

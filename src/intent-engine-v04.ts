@@ -72,6 +72,7 @@ export async function scoreIntent(prompt: string): Promise<ComplexityScore> {
       prompt,
       heuristicScore,
       ragSignal,
+      cascadeAbstainMargin: config.ensemble.ordinalAbstainMargin,
       enableCascade: config.feedback_loop.cascadeRetraining,
     });
 

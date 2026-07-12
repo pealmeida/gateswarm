@@ -70,6 +70,7 @@ export interface V04Config {
     weights: EnsembleWeightsConfig;
     confidenceThresholds: { high: number; low: number };
     lowConfidenceAction: string;
+    ordinalAbstainMargin: number;
   };
   scoring: {
     formula: string;
@@ -90,9 +91,16 @@ export const DEFAULT_V04_CONFIG: V04Config = {
   trained: new Date().toISOString(),
   method: 'ensemble-voter-with-feedback-loop',
   ensemble: {
-    weights: { heuristic: 0.55, cascade: 0.00, ragSignal: 0.25, historyBias: 0.20 },
+    // Phase 4 ensemble honesty: warm-store ablation measured RAG/history at
+    // exactly 0.0pp contribution — their weights stay 0 (paths kept for
+    // re-enable). Phase 3 ordinal cascade FAILED its gate on 2026-07-12
+    // (CV 54.4% vs heuristic 61.1%, ECE 0.156, n=60 train — data-starved);
+    // cascade stays 0 and v05_ordinal_weights.json is unshipped until an
+    // organic-data retrain passes the gate (eval/train-ordinal.ts).
+    weights: { heuristic: 1.00, cascade: 0.00, ragSignal: 0.00, historyBias: 0.00 },
     confidenceThresholds: { high: 0.8, low: 0.5 },
-    lowConfidenceAction: 'escalateOneTier',
+    lowConfidenceAction: 'conservativeHeuristicFallback',
+    ordinalAbstainMargin: 0.08,
   },
   scoring: {
     formula: 'signals * 0.15 + log1p(word_count) * 0.08 + has_context * 0.1',
@@ -137,7 +145,7 @@ export const DEFAULT_V04_CONFIG: V04Config = {
     maxWeightChangePct: 0.20,
     llmJudgeModel: 'zai/glm-4.7',
     llmJudgeSamplingRate: 0.10,
-    cascadeRetraining: true,
+    cascadeRetraining: false, // ordinal cascade gate-failed 2026-07-12; see ensemble._weights_note
     cascadeRetrainingSource: 'real_feedback_labels',
     abTestHoldoutPct: 0.10,
   },

@@ -157,6 +157,18 @@ Gate: heavy & intensive recall ≥ 40% each on CV, adjacent ≥ 80%, no other ti
 
 ### Phase 3 — Learned ordinal model in the cascade slot (2 days, roadmap §5)
 
+> **Phase 3 executed 2026-07-12 — verdict: SHIPPED UNWIRED (gate failed).**
+> Ordinal-logistic (proportional-odds, pure TS, Platt-calibrated) landed with
+> the full train/eval pipeline (`eval/train-ordinal.ts`, leaderboard + CV
+> integration). On the frozen n=60 train split it scores CV 54.4% ± 5.4 vs
+> the heuristic's 61.1% ± 9.3 (gate: +3pp) with ECE 0.156 (gate ≤0.10) —
+> data-starved, as §9 of the roadmap predicted. It DOES fix heavy recall
+> (33.3%, first classifier over the 30% gate) with half the variance.
+> Production stays heuristic-only (cascade weight 0, weights file
+> unshipped, `cascadeRetraining: false`). Re-run the train script + gate as
+> `data/organic/labeled.jsonl` grows past ~150 gold votes; Phase 4 weight
+> honesty (RAG/history → 0) is applied and kept.
+
 Ordinal logistic regression over the (pruned + Phase 2) features; isotonic/Platt
 calibration; confidence = calibrated max-prob (replaces margin proxy, current ECE 0.232);
 abstention → conservative neighbor on near-ties. Boundaries retire from the hot path.

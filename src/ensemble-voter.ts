@@ -2,10 +2,10 @@
  * GateSwarm MoMA Router v0.4.4 — Ensemble Voter
  *
  * Combines scoring methods into a weighted ensemble:
- *   - Heuristic (55%): v3.3 9-signal formula (boosted from cascade redistribution)
- *   - Cascade (0%):  DISABLED — no trained cascade weights (was 30%, dead code)
- *   - RAG signal (25%): prior context complexity (was 15%)
- *   - History bias (20%): user interaction patterns (was 15%)
+ *   - Heuristic: current frozen-boundary score
+ *   - Cascade: ordinal logistic model when v05_ordinal_weights.json is present
+ *   - RAG signal: kept, but default weight 0 after 0.0pp warm-store ablation
+ *   - History bias: kept, but default weight 0 after 0.0pp warm-store ablation
  *
  * v0.4.4: History bias wired from persistent feedback store (was inert).
  * v3.6: Cascade weight redistributed because cascade weights were NEVER loaded
@@ -20,6 +20,12 @@
 import type { EffortLevel } from './types.js';
 import { getRecentEntries } from './feedback-store.js';
 import { scoreToEffort as _scoreToEffort, getTierBoundaries, tierMidpoints } from './intent-engine.js';
+import {
+  expectedScoreFromProbs,
+  getDefaultOrdinalClassifier,
+  ordinalModelAvailable,
+  type OrdinalLogisticClassifier,
+} from './classifiers/ordinal-logistic.js';
 
 export interface EnsembleVote {
   finalScore: number;
@@ -37,22 +43,27 @@ export interface EnsembleVote {
     ragSignal: number;         // 0.0–1.0
     historyBias: number;       // -0.1 to +0.1
   };
+  cascadeMargin?: number;
+  abstained?: boolean;
   method: 'ensemble-v0.4' | 'heuristic-fallback';
   escalated: boolean;
 }
 
 // ─── Configurable Weights ───────────────────────────────
 
+// Phase 4 ensemble honesty: warm-store ablation measured RAG/history at exactly
+// 0.0pp contribution, so defaults are heuristic + the learned cascade only.
+// Code paths remain for later re-enable if a warm ablation re-proves signal.
 let weights = {
-  heuristic: 0.55,
-  cascade: 0.00,  // v3.6: cascade disabled — no trained weights available
-  ragSignal: 0.25,
-  historyBias: 0.20,
+  heuristic: 0.50,
+  cascade: 0.50,
+  ragSignal: 0.00,
+  historyBias: 0.00,
 };
 
 export function setEnsembleWeights(w: Partial<typeof weights>): void {
   weights = { ...weights, ...w };
-  // Normalize ONLY the multiplicative score weights to sum=1. historyBias is
+  // Normalize ONLY the multiplicative score weights to sum=1. historyBias stays
   // an ADDITIVE term (±0.1 cap applied directly, never multiplied by its
   // weight) — including it in the normalization compressed the score scale
   // to ~0.8× and systematically under-routed everything in the ensemble path.
@@ -94,6 +105,13 @@ function cascadeScore(prompt: string): number {
     score += features[i] * cascadeWeights[i];
   }
   return 1 / (1 + Math.exp(-score)); // sigmoid
+}
+
+function ordinalCascadeScore(prompt: string): { score: number; confidence: number; margin: number } | null {
+  const model = getDefaultOrdinalClassifier();
+  if (!model.isAvailable()) return null;
+  const p = model.predictEffort(prompt);
+  return { score: expectedScoreFromProbs(p.probs ?? {}), confidence: p.confidence, margin: p.margin ?? 0 };
 }
 
 function extractCascadeFeatures(text: string): number[] {
@@ -237,6 +255,7 @@ export interface EnsembleInput {
   heuristicScore: number;
   ragSignal?: number;
   enableCascade?: boolean;
+  cascadeAbstainMargin?: number;
 }
 
 /**
@@ -259,28 +278,37 @@ function confidenceFromMargin(score: number): number {
 export function ensembleVote(input: EnsembleInput): EnsembleVote {
   const heuristic = input.heuristicScore;
 
-  // Cascade score (if enabled and weights loaded)
-  const casc = (input.enableCascade !== false && cascadeWeights.length > 0)
+  const ordinal = input.enableCascade !== false ? ordinalCascadeScore(input.prompt) : null;
+  const legacyCasc = (!ordinal && input.enableCascade !== false && cascadeWeights.length > 0)
     ? cascadeScore(input.prompt)
     : -1;
+  const casc = ordinal ? ordinal.score : legacyCasc;
+  const cascadeMargin = ordinal?.margin;
+  const cascadeAbstainMargin = input.cascadeAbstainMargin ?? 0.08;
+  const abstained = ordinal ? ordinal.margin < cascadeAbstainMargin : false;
 
-  // RAG signal is OPTIONAL. When absent (no prior context), it must NOT be
+  // Phase 4 honesty: the default history weight is 0 after warm-store ablation
+  // measured exactly 0.0pp contribution. The path remains opt-in for future proof.
+  const bias = weights.historyBias > 0 ? calcHistoryBias() : 0;
+
+  // RAG signal is OPTIONAL and default-weighted to 0. When absent (no prior
+  // context), it must NOT be
   // injected as a neutral 0.5 — doing so added a flat bias to every score.
   const ragPresent = typeof input.ragSignal === 'number';
   const rag = ragPresent ? (input.ragSignal as number) : null;
-
-  // History bias (additive, −0.1..+0.1)
-  const bias = calcHistoryBias();
 
   let rawScore: number;
   let finalScore: number;
   let confidence: number;
   let method: 'ensemble-v0.4' | 'heuristic-fallback';
 
-  if (casc < 0 || casc === undefined) {
+  if (casc < 0 || casc === undefined || abstained) {
     // Active default path (no trained cascade).
-    method = 'heuristic-fallback';
-    if (ragPresent) {
+    // Ordinal near-ties abstain to the heuristic tier. This is conservative and
+    // never escalates; the removed v0.5.2 escalation hack measurably hurt exact
+    // accuracy by adding upward bias.
+    method = abstained ? 'ensemble-v0.4' : 'heuristic-fallback';
+    if (ragPresent && weights.ragSignal > 0 && !abstained) {
       // Heuristic primary, RAG as a light nudge.
       rawScore = heuristic * 0.8 + (rag as number) * 0.2;
     } else {
@@ -289,7 +317,9 @@ export function ensembleVote(input: EnsembleInput): EnsembleVote {
     }
     rawScore = Math.max(0, Math.min(1, rawScore));
     finalScore = Math.max(0, Math.min(1, rawScore + bias));
-    confidence = confidenceFromMargin(finalScore);
+    confidence = abstained && ordinal
+      ? Math.min(confidenceFromMargin(heuristic), Math.max(0.5, ordinal.confidence * 0.8))
+      : confidenceFromMargin(finalScore);
     if (ragPresent) {
       // Lower confidence when heuristic and RAG disagree.
       const agreement = 1 - Math.min(Math.abs(heuristic - (rag as number)), 1);
@@ -308,11 +338,16 @@ export function ensembleVote(input: EnsembleInput): EnsembleVote {
     rawScore = Math.max(0, Math.min(1, heuristic * wH + casc * wC + ragVal * wR));
     finalScore = Math.max(0, Math.min(1, rawScore + bias));
 
-    // Confidence = agreement between methods (genuine variance-based).
-    const methods = ragPresent ? [heuristic, casc, rag as number] : [heuristic, casc];
-    const mean = methods.reduce((a, b) => a + b, 0) / methods.length;
-    const variance = methods.reduce((s, m) => s + (m - mean) ** 2, 0) / methods.length;
-    confidence = Math.max(0, 1 - Math.sqrt(variance) * 3);
+    if (ordinal) {
+      const agreement = 1 - Math.min(Math.abs(heuristic - casc), 1);
+      confidence = Math.max(0, Math.min(1, ordinal.confidence * (0.8 + 0.2 * agreement)));
+    } else {
+      // Legacy cascade confidence = agreement between methods.
+      const methods = ragPresent ? [heuristic, casc, rag as number] : [heuristic, casc];
+      const mean = methods.reduce((a, b) => a + b, 0) / methods.length;
+      const variance = methods.reduce((s, m) => s + (m - mean) ** 2, 0) / methods.length;
+      confidence = Math.max(0, 1 - Math.sqrt(variance) * 3);
+    }
   }
 
   // Tier from score. v0.5.2: the previous "escalate up one tier on confidence
@@ -321,7 +356,7 @@ export function ensembleVote(input: EnsembleInput): EnsembleVote {
   // over-routing bias (paying for bigger models on simple prompts). Near a
   // boundary the score is already a coin-flip; bumping up is pure upward bias,
   // not signal. Trust the calibrated band the score lands in.
-  const tier = scoreToEffort(finalScore);
+  const tier = abstained ? scoreToEffort(heuristic) : scoreToEffort(finalScore);
   const escalated = false;
 
   return {
@@ -335,6 +370,8 @@ export function ensembleVote(input: EnsembleInput): EnsembleVote {
       ragSignal: ragPresent ? (rag as number) : 0,
       historyBias: bias,
     },
+    cascadeMargin,
+    abstained,
     method,
     escalated,
   };
@@ -342,7 +379,12 @@ export function ensembleVote(input: EnsembleInput): EnsembleVote {
 
 /** True when trained cascade weights are loaded (full ensemble path active). */
 export function cascadeAvailable(): boolean {
-  return cascadeWeights.length > 0;
+  return ordinalModelAvailable() || cascadeWeights.length > 0;
+}
+
+export function setOrdinalCascadeForTests(model: OrdinalLogisticClassifier | null): void {
+  const { setDefaultOrdinalClassifierForTests } = require('./classifiers/ordinal-logistic.js');
+  setDefaultOrdinalClassifierForTests(model);
 }
 
 export const scoreToEffort = _scoreToEffort;

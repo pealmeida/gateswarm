@@ -13,10 +13,12 @@ import { runCv, type CvResult } from './lib/runner.js';
 import { pct } from './lib/metrics.js';
 import type { TierClassifier } from '../src/classifiers/types.js';
 import { HeuristicLinearClassifier } from '../src/classifiers/heuristic-linear.js';
+import { OrdinalLogisticClassifier } from '../src/classifiers/ordinal-logistic.js';
 
-// Register candidates here. Future: OrdinalLogistic, Gbdt, EmbedKnn, LlmClassifier(provider).
+// Register candidates here. Future: Gbdt, EmbedKnn, LlmClassifier(provider).
 const REGISTRY: TierClassifier[] = [
   new HeuristicLinearClassifier(),
+  new OrdinalLogisticClassifier(),
 ];
 
 function pad(s: string, n: number) { return s.padEnd(n).slice(0, n); }

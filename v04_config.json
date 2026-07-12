@@ -5,16 +5,18 @@
   "method": "ensemble-voter-with-feedback-loop",
   "ensemble": {
     "weights": {
-      "heuristic": 0.55,
-      "cascade": 0,
-      "ragSignal": 0.25,
-      "historyBias": 0.2
+      "heuristic": 1.0,
+      "cascade": 0.0,
+      "ragSignal": 0.0,
+      "historyBias": 0.0
     },
+    "_weights_note": "Phase 4 honesty: RAG/history measured 0.0pp in warm ablation. Phase 3 ordinal model FAILED its gate on 2026-07-12 (CV 54.4% vs heuristic 61.1%, ECE 0.156) \u2014 cascade stays 0 and weights file unshipped until an organic-data retrain passes the gate (eval/train-ordinal.ts, gate in docs/ROUTING_IMPROVEMENT_PLAN.md Phase 3).",
     "confidenceThresholds": {
       "high": 0.8,
       "low": 0.5
     },
-    "lowConfidenceAction": "escalateOneTier"
+    "lowConfidenceAction": "conservativeHeuristicFallback",
+    "ordinalAbstainMargin": 0.08
   },
   "scoring": {
     "formula": "signals * 0.15 + log1p(word_count) * 0.08 + has_context * 0.1",
@@ -230,7 +232,7 @@
     "maxWeightChangePct": 0.2,
     "llmJudgeModel": "zai/glm-4.7",
     "llmJudgeSamplingRate": 0.1,
-    "cascadeRetraining": true,
+    "cascadeRetraining": false,
     "cascadeRetrainingSource": "real_feedback_labels",
     "abTestHoldoutPct": 0.1
   },

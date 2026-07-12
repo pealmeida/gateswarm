@@ -47,6 +47,7 @@
     "test:watch": "vitest",
     "eval:split": "tsx eval/split.ts",
     "eval:cv": "tsx eval/cv.ts",
+    "eval:train-ordinal": "tsx eval/train-ordinal.ts",
     "eval:leaderboard": "tsx eval/leaderboard.ts",
     "eval:features": "tsx eval/feature-report.ts",
     "eval:refit-boundaries": "tsx eval/refit-boundaries.ts",

@@ -83,3 +83,4 @@ eval/reports/
 # Git worktrees
 .worktrees/
 data/organic/
+v05_ordinal_weights.json

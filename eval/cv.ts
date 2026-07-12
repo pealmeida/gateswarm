@@ -10,12 +10,19 @@ import { runCv } from './lib/runner.js';
 import { pct } from './lib/metrics.js';
 import { TIERS } from './lib/dataset.js';
 import { HeuristicLinearClassifier } from '../src/classifiers/heuristic-linear.js';
+import { OrdinalLogisticClassifier } from '../src/classifiers/ordinal-logistic.js';
+
+function modelFromArg(id: string) {
+  if (id === 'heuristic-linear') return new HeuristicLinearClassifier();
+  if (id === 'ordinal-logistic') return new OrdinalLogisticClassifier();
+  throw new Error(`unknown classifier "${id}"`);
+}
 
 async function main() {
-  const model = new HeuristicLinearClassifier();
+  const model = modelFromArg(process.argv[2] ?? 'heuristic-linear');
   const r = await runCv(model);
 
-  console.log(`\n=== CV baseline: ${r.id} (${model.kind}, ${model.version}) ===`);
+  console.log(`\n=== CV: ${r.id} (${model.kind}, ${model.version}) ===`);
   console.log(`Effort exact:    ${pct(r.effort.exact.mean)} ± ${pct(r.effort.exact.std)}`);
   console.log(`Effort adjacent: ${pct(r.effort.adjacent.mean)} ± ${pct(r.effort.adjacent.std)}`);
   console.log(`Signed bias:     ${r.effort.signedBias >= 0 ? '+' : ''}${r.effort.signedBias.toFixed(2)}`);
