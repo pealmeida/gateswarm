@@ -62,43 +62,31 @@
   },
   "tier_models": {
     "trivial": {
-      "model": "qwen2.5:0.5b",
-      "provider": "ollama",
+      "model": "glm-4.7-flash",
+      "provider": "zai",
       "max_tokens": 256,
       "enable_thinking": false,
       "fallback_models": [
         {
-          "model": "qwen2.5:1.5b",
-          "provider": "ollama"
-        },
-        {
-          "model": "glm-4.7-flash",
-          "provider": "zai"
-        },
-        {
-          "model": "glm-4.7",
-          "provider": "zai"
-        },
-        {
           "model": "glm-4.5-air",
           "provider": "zai"
+        },
+        {
+          "model": "minimax-m2.7",
+          "provider": "ollama-cloud"
+        },
+        {
+          "model": "deepseek-v4-flash-free",
+          "provider": "opencode-free"
         }
       ]
     },
     "light": {
-      "model": "qwen2.5:1.5b",
-      "provider": "ollama",
+      "model": "minimax-m2.7",
+      "provider": "ollama-cloud",
       "max_tokens": 512,
       "enable_thinking": false,
       "fallback_models": [
-        {
-          "model": "qwen2.5:0.5b",
-          "provider": "ollama"
-        },
-        {
-          "model": "glm-4.7-flash",
-          "provider": "zai"
-        },
         {
           "model": "glm-4.7",
           "provider": "zai"
@@ -106,6 +94,10 @@
         {
           "model": "glm-4.5-air",
           "provider": "zai"
+        },
+        {
+          "model": "mimo-v2.5-free",
+          "provider": "opencode-free"
         }
       ]
     },
@@ -224,7 +216,8 @@
           "provider": "ollama-cloud"
         }
       ]
-    }
+    },
+    "_low_tier_note": "2026-07-12: trivial/light moved off local ollama (host runs no local models). glm-4.7-flash judged well; mimo-v2.5-free scored 5/5 in live eval."
   },
   "feedback_loop": {
     "retrainAfterInteractions": 500,
