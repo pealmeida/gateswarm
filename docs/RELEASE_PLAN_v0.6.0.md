@@ -163,6 +163,25 @@ CRITICAL/HIGH verified subset (registry: `adv-review/pass1.out`):
 
 Deferred (LOW/cleanup): #15 renormalization over present components, #17 history lazy-init merge, #19 substring false positives, #20 range representation, #21 dead code/35th feature.
 
+## 9c. Multi-armed bandits in the learning architecture (Workstream J — evaluation)
+
+**Question:** can MAB improve complexity-evaluation accuracy? **Answer: yes, but as a complement to the supervised path, not a replacement — and only after v0.6.0's reward-integrity fixes land.** Supervised gold labels teach *label imitation* ("what tier would a human assign"); bandit feedback answers the counterfactual the labels can never give: *"would the cheaper tier have sufficed for this request?"* That counterfactual defines the cost-optimal routing frontier, which is the router's actual objective.
+
+**Feasibility grounding (measured):** ~60–120 requests/day (13 benchmark-log days, 828 rows). Benchmark logs already carry `tier, routed_model, latency_ms, cost_usd` per request — most of a reward function. Missing: adequacy outcome and action propensity.
+
+**Where bandits fit, ranked by convergence speed at this traffic volume:**
+
+- **J1 — Within-tier model selection (fast, weeks).** Arms = models in a tier's chain; reward = success − λ·norm(latency) − μ·norm(cost); observable on *every* request, no judge needed. Sliding-window Thompson sampling per tier (nonstationary providers). Supersedes static primary/fallback ordering; provider-health cooldowns remain as hard constraints. Can be validated **offline today** by replaying the 828 logged rows. Improves reliability/cost, not tier accuracy directly.
+- **J2 — Uncertainty-directed vote solicitation (active learning, immediate).** Replace part of the aleatory vote sampling with an acquisition rule: solicit votes where |score − nearest cut| is small or scorers disagree. Each gold label buys maximum boundary information → directly accelerates the ordinal path (F2). Not strictly a bandit, but the same explore/exploit machinery.
+- **J3 — Boundary-zone tier exploration (the accuracy play, months).** Contextual bandit restricted to requests whose score falls within ±ε of a cut point (~25–30% of traffic per the confusion matrix — nearly all misroutes are adjacent). Arms = {stay, one-tier-up, one-tier-down}; reward = judged adequacy − λ·cost. Exploration budget capped (≤5% of eligible traffic; down-exploration ≤3% and never on `alwaysAskBelowConfidence` requests). Logged decisions + propensities accumulate a counterfactual dataset that later trains the ordinal model on *outcomes*, not just labels. Full 6-arm tier bandit over all traffic is **rejected**: at this volume it would need years to beat a decent supervised scorer.
+- **J4 — Exp4-style ensemble weighting (later).** Experts = heuristic, ordinal, RAG signal; bandit learns weights from realized rewards instead of hand-frozen constants. Only meaningful once ≥2 scorers independently pass gates; revisit after F2.
+
+**Hard dependencies (why not before v0.6.0):** the reward channel is currently corrupted in ways a bandit would *learn from* — F05 counts HTTP-200 error bodies as success (bandit would learn to prefer broken providers), C4's judge sees the gold label, H3 lets the judge overwrite gold, H12's silver consensus is self-training. Bandits amplify reward bugs into policy; every one of these must land first.
+
+**J0 — the only v0.6.0 item:** extend the benchmark log schema with `propensity` (probability the current policy assigned to the chosen tier/model; 1.0 for deterministic routing) and `adequacy` (filled async by the blinded judge when sampled). Costs two fields now; enables off-policy evaluation (IPS/doubly-robust) of *any* future bandit policy against accumulated history before it ever touches live traffic — the same evidence-gate philosophy as the ordinal model.
+
+**Activation gate (preregistered):** a J1/J3 policy ships default-on only when its off-policy estimate on ≥30 days of propensity-logged history beats the static policy's realized reward with a bootstrap CI lower bound > 0.
+
 ## 10. Release sequencing
 
 1. **A1–A4** (safety chain) — first; nothing else is safe to ship around a live footgun.
