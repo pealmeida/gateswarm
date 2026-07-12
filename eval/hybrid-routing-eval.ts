@@ -13,6 +13,7 @@ import { effortMetrics, pct } from './lib/metrics.js';
 import type { EffortMetrics } from './lib/metrics.js';
 import { samplePerTier } from './lib/hybrid-sample.js';
 import { healthOrThrow, postScore, postChatAuto, judgeAdequacy } from './lib/hybrid-http.js';
+import { loadEvalRuntimeConfig, rubricPassFloor } from './lib/hybrid-eval-helpers.js';
 import type { ScoreResp } from './lib/hybrid-http.js';
 import { rubricHardFail } from './lib/hybrid-rubric.js';
 import {
@@ -26,6 +27,9 @@ import { runAblation } from './lib/hybrid-ablation.js';
 import type { AblationMode } from './lib/hybrid-ablation.js';
 import { selectWarmAblationExamples } from './lib/hybrid-warm-fixtures.js';
 
+const DEFAULT_TIMEOUT_FAST_MS = 120_000;
+const DEFAULT_TIMEOUT_SLOW_MS = 180_000;
+
 const FLOORS = {
   exact: 0.48,
   adjacent: 0.75,
@@ -36,15 +40,6 @@ const FLOORS = {
   judgePerTier: 3.0,
   judgeDegradedFrac: 0.2,
 } as const;
-
-const MAX_TOKENS: Record<EffortLevel, number> = {
-  trivial: 256,
-  light: 512,
-  moderate: 1024,
-  heavy: 2048,
-  intensive: 4096,
-  extreme: 4096,
-};
 
 const FREE_PROVIDERS = new Set(['opencode-free', 'zai']);
 
@@ -89,6 +84,7 @@ interface LiveRow {
   policyViolation: boolean;
   routedModel: string;
   skipped?: boolean;
+  elapsedMs: number;
   reason?: string;
 }
 
@@ -100,6 +96,21 @@ interface AblationReport {
   warmInvalidReason?: string;
 }
 
+interface Args {
+  port: number;
+  seed: number;
+  outDir: string;
+  liveN: number;
+  timeoutFastMs: number;
+  timeoutSlowMs: number;
+  help: boolean;
+}
+
+interface TimeoutBudgets {
+  fastMs: number;
+  slowMs: number;
+}
+
 function usage(): string {
   return `Usage: npx tsx eval/hybrid-routing-eval.ts [options]
 
@@ -107,6 +118,9 @@ Options:
   --port <n>     Gateway port (default: 8900)
   --seed <n>     Stratified sample seed (default: 42)
   --out <dir>    Output directory (default: eval/reports/routing-hybrid-<YYYYMMDD-HHMM>)
+  --live-n <n>   Live samples per tier (default: 10)
+  --timeout-fast <ms>  Timeout for trivial/light/moderate/heavy chats (default: 120000)
+  --timeout-slow <ms>  Timeout for intensive/extreme chats (default: 180000)
   --help         Show this help and exit
 `;
 }
@@ -120,29 +134,43 @@ function defaultOutDir(): string {
   return `eval/reports/routing-hybrid-${stamp}`;
 }
 
-function parseArgs(argv: string[]): { port: number; seed: number; outDir: string; help: boolean } {
+function parsePositiveNumber(raw: string | undefined, flag: string): number {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) throw new Error(`invalid ${flag}`);
+  return n;
+}
+
+function parseArgs(argv: string[]): Args {
   let port = 8900;
   let seed = 42;
   let outDir = defaultOutDir();
+  let liveN = 10;
+  let timeoutFastMs = DEFAULT_TIMEOUT_FAST_MS;
+  let timeoutSlowMs = DEFAULT_TIMEOUT_SLOW_MS;
   let help = false;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--help' || a === '-h') {
       help = true;
     } else if (a === '--port') {
-      port = Number(argv[++i]);
-      if (!Number.isFinite(port)) throw new Error(`invalid --port`);
+      port = parsePositiveNumber(argv[++i], '--port');
     } else if (a === '--seed') {
       seed = Number(argv[++i]);
       if (!Number.isFinite(seed)) throw new Error(`invalid --seed`);
     } else if (a === '--out') {
       outDir = argv[++i];
       if (!outDir) throw new Error(`missing --out value`);
+    } else if (a === '--live-n') {
+      liveN = parsePositiveNumber(argv[++i], '--live-n');
+    } else if (a === '--timeout-fast') {
+      timeoutFastMs = parsePositiveNumber(argv[++i], '--timeout-fast');
+    } else if (a === '--timeout-slow') {
+      timeoutSlowMs = parsePositiveNumber(argv[++i], '--timeout-slow');
     } else {
       throw new Error(`unknown arg: ${a}`);
     }
   }
-  return { port, seed, outDir, help };
+  return { port, seed, outDir, liveN, timeoutFastMs, timeoutSlowMs, help };
 }
 
 function sleep(ms: number): Promise<void> {
@@ -176,6 +204,48 @@ function compactConfusion(confusion: EffortMetrics['confusion']): string {
   return lines.join('\n');
 }
 
+function routedProviderModel(routedModel: string): { provider: string; model: string } {
+  const routed = routedModel.trim();
+  if (!routed) return { provider: '(none)', model: '(none)' };
+  const slash = routed.indexOf('/');
+  if (slash > 0) {
+    return {
+      provider: routed.slice(0, slash),
+      model: routed.slice(slash + 1) || '(none)',
+    };
+  }
+  return {
+    provider: providerFromRouted(routed) || '(unknown)',
+    model: routed,
+  };
+}
+
+function routedCountsByTier(live: LiveRow[]): Array<{ tier: EffortLevel; provider: string; model: string; count: number }> {
+  const counts = new Map<string, { tier: EffortLevel; provider: string; model: string; count: number }>();
+  for (const row of live) {
+    const routed = routedProviderModel(row.routedModel);
+    const key = `${row.goldTier}\t${routed.provider}\t${routed.model}`;
+    const existing = counts.get(key);
+    if (existing) {
+      existing.count++;
+    } else {
+      counts.set(key, { tier: row.goldTier, provider: routed.provider, model: routed.model, count: 1 });
+    }
+  }
+  return Array.from(counts.values()).sort(
+    (a, b) =>
+      tierIdx(a.tier) - tierIdx(b.tier) ||
+      a.provider.localeCompare(b.provider) ||
+      a.model.localeCompare(b.model),
+  );
+}
+
+function judgeUnavailable5xx(judge: LiveRow['judge']): boolean {
+  if (judge.available) return false;
+  const reason = judge.reason.toLowerCase();
+  return /\b5\d\d\b/.test(reason) || reason.includes('server error') || reason.includes('bad gateway') || reason.includes('service unavailable') || reason.includes('gateway timeout');
+}
+
 function writeSummary(opts: {
   outDir: string;
   metrics: EffortMetrics;
@@ -184,8 +254,9 @@ function writeSummary(opts: {
   ablation: AblationReport;
   live: LiveRow[];
   worst: ScoreRow[];
+  judgeProvider: string;
 }): string {
-  const { metrics, offline, probes, ablation, live, worst } = opts;
+  const { metrics, offline, probes, ablation, live, worst, judgeProvider } = opts;
   const scoredLive = rowsForLiveScoring(live);
   const skippedSummary = summarizeSkippedRows(live);
   const rubricPass = scoredLive.filter((r) => !r.rubricFail).length;
@@ -202,7 +273,11 @@ function writeSummary(opts: {
   }
   const unavailableFrac = scoredLive.length ? (scoredLive.length - judgeAvail.length) / scoredLive.length : 0;
   const skippedCount = live.length - scoredLive.length;
+  const rubricFloor = rubricPassFloor(scoredLive.length);
+  const judge5xxCount = scoredLive.filter((r) => judgeUnavailable5xx(r.judge)).length;
+  const judge5xxFrac = scoredLive.length ? judge5xxCount / scoredLive.length : 0;
   const modes: AblationMode[] = ['heuristic', 'heuristic+rag', 'heuristic+history', 'full'];
+  const routedCounts = routedCountsByTier(live);
 
   const pushAblationTable = (lines: string[], table: AblationTable): void => {
     lines.push(`| Mode | Exact | Adjacent |`);
@@ -274,7 +349,7 @@ function writeSummary(opts: {
   lines.push(`## Live spot-check (n=${scoredLive.length}, skipped=${skippedCount}, sampled=${live.length})`);
   lines.push('');
   lines.push(
-    `| Rubric pass | ${rubricPass}/${scoredLive.length} | floor ${FLOORS.rubricPass}/${FLOORS.rubricTotal} | ${rubricPass >= FLOORS.rubricPass ? 'PASS' : 'FAIL'} |`,
+    `| Rubric pass | ${rubricPass}/${scoredLive.length} | floor ${rubricFloor}/${scoredLive.length} | ${rubricPass >= rubricFloor ? 'PASS' : 'FAIL'} |`,
   );
   lines.push(
     `| Judge mean overall | ${isNaN(judgeMean) ? 'n/a' : judgeMean.toFixed(2)} | floor ${FLOORS.judgeOverall} | ${!isNaN(judgeMean) && judgeMean >= FLOORS.judgeOverall ? 'PASS' : 'n/a or FAIL'} |`,
@@ -289,6 +364,18 @@ function writeSummary(opts: {
     const n = judgeAvail.filter((r) => r.goldTier === t).length;
     const status = isNaN(m) ? 'n/a' : m >= FLOORS.judgePerTier ? 'PASS' : 'FAIL';
     lines.push(`| ${t} | ${isNaN(m) ? 'n/a' : m.toFixed(2)} | ${n} | ${status} |`);
+  }
+  lines.push('');
+  lines.push(`### Routed provider/model counts`);
+  lines.push('');
+  if (!routedCounts.length) {
+    lines.push('_None._');
+  } else {
+    lines.push(`| Tier | Provider | Model | Count |`);
+    lines.push(`|------|----------|-------|-------|`);
+    for (const r of routedCounts) {
+      lines.push(`| ${r.tier} | ${r.provider} | ${r.model} | ${r.count} |`);
+    }
   }
   lines.push('');
   lines.push(`### Skipped (infra)`);
@@ -308,6 +395,12 @@ function writeSummary(opts: {
     lines.push('');
     lines.push(
       `JUDGE_DEGRADED: judge unavailable on ${(100 * unavailableFrac).toFixed(0)}% of live rows (>${100 * FLOORS.judgeDegradedFrac}%).`,
+    );
+  }
+  if (judge5xxFrac > 0.5) {
+    lines.push('');
+    lines.push(
+      `JUDGE_DOWN: ${judgeProvider} judge returned 5xx on ${(100 * judge5xxFrac).toFixed(0)}% of live rows.`,
     );
   }
   const policyHits = live.filter((r) => r.policyViolation);
@@ -367,8 +460,8 @@ async function runCriticalProbes(port: number): Promise<CriticalProbeResult[]> {
   return out;
 }
 
-function chatTimeoutMs(tier: EffortLevel): number {
-  return tier === 'intensive' || tier === 'extreme' ? 180_000 : 120_000;
+function chatTimeoutMs(tier: EffortLevel, budgets: TimeoutBudgets): number {
+  return tier === 'intensive' || tier === 'extreme' ? budgets.slowMs : budgets.fastMs;
 }
 
 async function postChatWithRetry(
@@ -383,6 +476,31 @@ async function postChatWithRetry(
     res = await postChatAuto(port, prompt, maxTokens, timeoutMs);
   }
   return res;
+}
+
+async function judgeAdequacyWithRetry(
+  port: number,
+  prompt: string,
+  answer: string,
+  tier: EffortLevel,
+): Promise<LiveRow['judge']> {
+  const once = async (): Promise<LiveRow['judge']> => {
+    try {
+      return await judgeAdequacy(port, prompt, answer, tier);
+    } catch (e) {
+      return {
+        adequacy: 0,
+        on_tier: false,
+        reason: e instanceof Error ? e.message : String(e),
+        available: false,
+      };
+    }
+  };
+
+  const first = await once();
+  if (first.available) return first;
+  await sleep(3000);
+  return once();
 }
 
 async function phase1(
@@ -407,14 +525,19 @@ async function phase1(
   return { rows, metrics, probes };
 }
 
-async function phase3(port: number, sample: EffortExample[]): Promise<LiveRow[]> {
+async function phase3(
+  port: number,
+  sample: EffortExample[],
+  opts: { maxTokens: Record<EffortLevel, number>; timeouts: TimeoutBudgets },
+): Promise<LiveRow[]> {
   const live: LiveRow[] = [];
   const unhealthyProviders = new Map<string, string>();
   for (let i = 0; i < sample.length; i++) {
+    const startedAt = Date.now();
     const ex = sample[i];
     try {
-      const maxTokens = MAX_TOKENS[ex.tier];
-      const timeoutMs = chatTimeoutMs(ex.tier);
+      const maxTokens = opts.maxTokens[ex.tier];
+      const timeoutMs = chatTimeoutMs(ex.tier, opts.timeouts);
       const chat = await postChatWithRetry(port, ex.prompt, maxTokens, timeoutMs);
       const routedModel = chat.headers['x-routed-model'] || chat.headers['X-Routed-Model'] || '';
       const provider = providerFromRouted(routedModel);
@@ -438,6 +561,7 @@ async function phase3(port: number, sample: EffortExample[]): Promise<LiveRow[]>
           policyViolation,
           routedModel,
           skipped: true,
+          elapsedMs: Date.now() - startedAt,
           reason: skipReason,
         });
         if (i < sample.length - 1) await sleep(500);
@@ -463,7 +587,7 @@ async function phase3(port: number, sample: EffortExample[]): Promise<LiveRow[]>
           ? { adequacy: 0, on_tier: false, reason: 'chat_timeout', available: false }
           : rubric.fail
             ? { adequacy: 0, on_tier: false, reason: rubric.reasons[0] || 'rubric_hard_fail', available: false }
-          : await judgeAdequacy(port, ex.prompt, answer, ex.tier);
+          : await judgeAdequacyWithRetry(port, ex.prompt, answer, ex.tier);
 
       live.push({
         id: ex.id,
@@ -478,6 +602,7 @@ async function phase3(port: number, sample: EffortExample[]): Promise<LiveRow[]>
         judge,
         policyViolation,
         routedModel,
+        elapsedMs: Date.now() - startedAt,
       });
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : String(e);
@@ -496,6 +621,7 @@ async function phase3(port: number, sample: EffortExample[]): Promise<LiveRow[]>
         judge: { adequacy: 0, on_tier: false, reason: message.slice(0, 200), available: false },
         policyViolation: false,
         routedModel: '',
+        elapsedMs: Date.now() - startedAt,
         skipped: false,
         reason: undefined,
       });
@@ -523,7 +649,8 @@ async function main(): Promise<void> {
     return;
   }
 
-  const { port, seed, outDir } = args;
+  const { port, seed, outDir, liveN, timeoutFastMs, timeoutSlowMs } = args;
+  const runtime = loadEvalRuntimeConfig();
 
   try {
     await healthOrThrow(port);
@@ -535,6 +662,7 @@ async function main(): Promise<void> {
 
   mkdirSync(outDir, { recursive: true });
   console.log(`Out: ${outDir}`);
+  console.log(`Runtime config: ${runtime.configPath ?? 'defaults'}; judge=${runtime.judgeProvider}`);
 
   const all = loadEffort();
   console.log(`Phase 1 — Offline score (n=${all.length})…`);
@@ -560,10 +688,20 @@ async function main(): Promise<void> {
   }
   writeFileSync(join(outDir, 'ablation.json'), JSON.stringify(ablation, null, 2));
 
-  console.log(`Phase 3 — Live spot-check (5×6=30, seed=${seed})…`);
-  const sample = samplePerTier(all, 5, seed);
-  const live = await phase3(port, sample);
-  writeFileSync(join(outDir, 'live.json'), JSON.stringify({ seed, rows: live }, null, 2));
+  console.log(`Phase 3 — Live spot-check (${liveN}×${TIERS.length}=${liveN * TIERS.length}, seed=${seed})…`);
+  const sample = samplePerTier(all, liveN, seed);
+  const live = await phase3(port, sample, {
+    maxTokens: runtime.maxTokens,
+    timeouts: { fastMs: timeoutFastMs, slowMs: timeoutSlowMs },
+  });
+  writeFileSync(
+    join(outDir, 'live.json'),
+    JSON.stringify(
+      { seed, liveN, maxTokens: runtime.maxTokens, timeouts: { fastMs: timeoutFastMs, slowMs: timeoutSlowMs }, rows: live },
+      null,
+      2,
+    ),
+  );
 
   const worst = rows
     .filter((r) => Math.abs(tierIdx(r.predTier) - tierIdx(r.goldTier)) >= 2)
@@ -574,22 +712,27 @@ async function main(): Promise<void> {
     );
 
   const offline = offlineFloorsMet(metrics);
-  const summary = writeSummary({ outDir, metrics, offline, probes, ablation, live, worst });
+  const summary = writeSummary({ outDir, metrics, offline, probes, ablation, live, worst, judgeProvider: runtime.judgeProvider });
   writeFileSync(join(outDir, 'summary.md'), summary);
 
   const scoredLive = rowsForLiveScoring(live);
   const rubricPass = scoredLive.filter((r) => !r.rubricFail).length;
+  const rubricFloor = rubricPassFloor(scoredLive.length);
   const judgeAvail = scoredLive.filter((r) => r.judge.available).length;
   const unavailableFrac = scoredLive.length ? (scoredLive.length - judgeAvail) / scoredLive.length : 0;
+  const judge5xxFrac = scoredLive.length
+    ? scoredLive.filter((r) => judgeUnavailable5xx(r.judge)).length / scoredLive.length
+    : 0;
   if (unavailableFrac > FLOORS.judgeDegradedFrac) {
     console.error('JUDGE_DEGRADED');
   }
+  if (judge5xxFrac > 0.5) console.error(`JUDGE_DOWN: ${runtime.judgeProvider}`);
 
   console.log(`Offline exact=${pct(metrics.exact)} adjacent=${pct(metrics.adjacent)} floors=${offline.ok ? 'MET' : 'FAIL'}`);
-  console.log(`Live rubric ${rubricPass}/${scoredLive.length} skipped=${live.length - scoredLive.length} (floor ${FLOORS.rubricPass}/${FLOORS.rubricTotal})`);
+  console.log(`Live rubric ${rubricPass}/${scoredLive.length} skipped=${live.length - scoredLive.length} (floor ${rubricFloor}/${scoredLive.length})`);
   console.log(`Wrote ${join(outDir, 'summary.md')}`);
 
-  const exitOk = offline.ok && rubricPass >= FLOORS.rubricPass;
+  const exitOk = offline.ok && rubricPass >= rubricFloor;
   process.exit(exitOk ? 0 : 1);
 }
 
