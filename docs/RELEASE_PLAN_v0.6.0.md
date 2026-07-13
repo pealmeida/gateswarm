@@ -212,6 +212,12 @@ Deferred (LOW/cleanup): #15 renormalization over present components, #17 history
 
 **Sequencing:** K6 lands in v0.6.0 (wave 12 adjacency); K1/K2 next (they change what "accuracy" means — before any further boundary refit); K3 before the first organic-data retrain; K4/K8/K9 with that retrain; K7/K10/K11 alongside Workstream J.
 
+## 9e. OSS hygiene (Workstream L — adversarial OSS review, 20 findings)
+
+Registry: `adv-review/oss-review.out`. v0.6.0 scope (wave 14): fail-closed admin auth for non-loopback binds (CRITICAL — unset `MOMA_ADMIN_TOKEN` + exposed port = anyone mints agent keys, defeating `GATESWARM_REQUIRE_AUTH`); coherent npm artifact (files/exports/bin pointed at TS source while main pointed at dist — unpublishable); removal of maintainer-personal content (OPS_GUIDE runbook, SECURITY_AUDIT with private hostname, broken QUICKSTART, provider account states in README/config/CHANGELOG/provider-quota comments, cron/RunPod job IDs); SECURITY.md + THIRD_PARTY_NOTICES.md (alpaca-cleaned is CC BY-NC — flagged); CI action SHA-pinning + pack smoke; gitignore/PR-template/start-script fixes.
+
+**Deferred post-0.6.0:** Docker base-image digest pinning, hash-locked Python requirements, dataset revision pinning inside train.py/build-corpus, full model cards + checksums for the vendored ONNX/tokenizer assets (manifest TODO added), pytest + container-build CI jobs.
+
 ## 10. Release sequencing
 
 1. **A1–A4** (safety chain) — first; nothing else is safe to ship around a live footgun.
