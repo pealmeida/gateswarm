@@ -8,7 +8,8 @@
  * Writes:
  *   v05_ordinal_weights.json
  */
-import { existsSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'fs';
+import { createHash } from 'crypto';
 import { join, dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import { loadEffort, type EffortExample } from './lib/dataset.js';
@@ -18,6 +19,7 @@ import { HeuristicLinearClassifier } from '../src/classifiers/heuristic-linear.j
 import type { EffortLevel } from '../src/types.js';
 import type { LabeledPrompt } from '../src/classifiers/types.js';
 import type { TierClassifier } from '../src/classifiers/types.js';
+import { decodeOrganicLabel } from '../src/organic-labels.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..');
@@ -30,6 +32,19 @@ interface Holdout {
   effort: { train: string[]; test: string[] };
 }
 interface CorpusRow { id: string; text: string; source: string; label?: EffortLevel; }
+
+export interface OrdinalGateMetrics {
+  bootstrapExactDeltaLower: number;
+  ordinalAdjacent: number;
+  ordinalRecall: Record<string, number>;
+  holdoutSupport: Record<string, number>;
+  ordinalEce: number;
+}
+
+export interface OrdinalGateResult {
+  passed: boolean;
+  reasons: string[];
+}
 
 function isTier(x: unknown): x is EffortLevel {
   return typeof x === 'string' && (TIERS as string[]).includes(x);
@@ -59,39 +74,67 @@ function loadFrozenTest(): EffortExample[] {
   return out;
 }
 
-function pickPrompt(row: any): string | null {
-  for (const key of ['prompt', 'text', 'input', 'user_prompt']) {
-    if (typeof row?.[key] === 'string' && row[key].trim()) return row[key];
-  }
-  return null;
-}
-
-function pickTier(row: any): EffortLevel | null {
-  const direct = row?.gold_vote ?? row?.tier ?? row?.effort ?? row?.label;
-  if (isTier(direct)) return direct;
-  if (isTier(direct?.tier)) return direct.tier;
-  if (isTier(row?.labels?.gold_vote)) return row.labels.gold_vote;
-  return null;
-}
-
-function loadOrganicGoldVotes(): LabeledPrompt[] {
-  if (!existsSync(ORGANIC_PATH)) return [];
+export function loadOrganicGoldVotes(path = ORGANIC_PATH): LabeledPrompt[] {
+  if (!existsSync(path)) return [];
   const out: LabeledPrompt[] = [];
-  const lines = readFileSync(ORGANIC_PATH, 'utf-8').split(/\r?\n/);
+  let legacySnippetOnly = 0;
+  const lines = readFileSync(path, 'utf-8').split(/\r?\n/);
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
     if (!line) continue;
-    let row: any;
+    let row: unknown;
     try {
       row = JSON.parse(line);
-    } catch {
+    } catch (error) {
+      console.error(`organic labels ${path} row ${i + 1}: invalid JSON (${error instanceof Error ? error.message : String(error)})`);
       continue;
     }
-    const prompt = pickPrompt(row);
-    const tier = pickTier(row);
-    if (prompt && tier) out.push({ id: `organic:gold_vote:${i}`, prompt, tier });
+    const decoded = decodeOrganicLabel(row);
+    if (!decoded.ok) {
+      if (decoded.legacySnippetOnly) {
+        legacySnippetOnly++;
+        console.error(`organic labels ${path} row ${i + 1}: ${decoded.reason}`);
+      } else {
+        console.error(`organic labels ${path} row ${i + 1}: ${decoded.reason}`);
+      }
+      continue;
+    }
+    out.push({ id: `organic:gold_vote:${i + 1}`, prompt: decoded.row.prompt, tier: decoded.row.actualTier });
+  }
+  if (legacySnippetOnly) {
+    console.error(`organic labels ${path}: skipped ${legacySnippetOnly} legacy snippet-only rows without prompt`);
   }
   return out;
+}
+
+export function normalizedPromptHash(prompt: string): string {
+  const normalized = prompt.toLowerCase().replace(/\s+/g, ' ').trim();
+  return createHash('sha256').update(normalized).digest('hex');
+}
+
+/** Keep the first occurrence so frozen labels take precedence over organic/silver rows. */
+export function deduplicateTrainingRows(rows: LabeledPrompt[]): LabeledPrompt[] {
+  const seen = new Set<string>();
+  return rows.filter((row) => {
+    const hash = normalizedPromptHash(row.prompt);
+    if (seen.has(hash)) return false;
+    seen.add(hash);
+    return true;
+  });
+}
+
+/** Frozen TEST prompts must never be present in any fitted training row. */
+export function assertNoFrozenTestPromptCollisions(
+  trainingRows: LabeledPrompt[],
+  frozenTestRows: Pick<EffortExample, 'id' | 'prompt'>[],
+): void {
+  const testByHash = new Map(frozenTestRows.map((row) => [normalizedPromptHash(row.prompt), row.id]));
+  for (const row of trainingRows) {
+    const testId = testByHash.get(normalizedPromptHash(row.prompt));
+    if (testId) {
+      throw new Error(`training row ${row.id} collides with frozen TEST row ${testId} by normalized prompt hash`);
+    }
+  }
 }
 
 function loadCorpusById(corpusPath: string): Map<string, CorpusRow> {
@@ -140,20 +183,95 @@ function loadSilverLabels(pathArg: string | undefined): LabeledPrompt[] {
   return out;
 }
 
+export interface HoldoutPrediction {
+  expected: EffortLevel;
+  predicted: EffortLevel;
+}
+
 async function evaluateHoldout(model: TierClassifier, rows: EffortExample[]) {
-  const effortRows: { expected: EffortLevel; predicted: EffortLevel }[] = [];
+  const effortRows: HoldoutPrediction[] = [];
   const eceRows: { confidence: number; correct: boolean }[] = [];
   for (const row of rows) {
     const p = await model.predictEffort(row.prompt);
     effortRows.push({ expected: row.tier, predicted: p.tier });
     eceRows.push({ confidence: p.confidence, correct: p.tier === row.tier });
   }
-  return { effort: effortMetrics(effortRows), ece: ece(eceRows) };
+  return { effort: effortMetrics(effortRows), ece: ece(eceRows), predictions: effortRows };
 }
 
 function printHoldoutLine(name: string, result: Awaited<ReturnType<typeof evaluateHoldout>>): void {
   const heavy = result.effort.recall.heavy;
   console.log(`${name}: exact ${pct(result.effort.exact)} adjacent ${pct(result.effort.adjacent)} mean|dist| ${result.effort.meanDist.toFixed(2)} heavy-recall ${pct(heavy)} ECE ${result.ece.toFixed(3)}`);
+}
+
+export interface BootstrapExactDeltaCI {
+  lower: number;
+  upper: number;
+}
+
+function seededRandom(seed: number): () => number {
+  let state = seed >>> 0;
+  return () => {
+    state = (state * 1664525 + 1013904223) >>> 0;
+    return state / 0x1_0000_0000;
+  };
+}
+
+/** Deterministic paired bootstrap for holdout exact-accuracy delta. */
+export function bootstrapExactDeltaCI(
+  heuristic: HoldoutPrediction[],
+  ordinal: HoldoutPrediction[],
+  seed = 42,
+  resamples = 1000,
+): BootstrapExactDeltaCI {
+  if (!heuristic.length || heuristic.length !== ordinal.length) throw new Error('paired holdout predictions are required');
+  if (!Number.isInteger(resamples) || resamples <= 0) throw new Error('resamples must be a positive integer');
+  const random = seededRandom(seed);
+  const deltas: number[] = [];
+  for (let sample = 0; sample < resamples; sample++) {
+    let heuristicCorrect = 0;
+    let ordinalCorrect = 0;
+    for (let i = 0; i < heuristic.length; i++) {
+      const index = Math.floor(random() * heuristic.length);
+      if (heuristic[index].expected !== ordinal[index].expected) throw new Error('paired holdout gold tiers differ');
+      if (heuristic[index].predicted === heuristic[index].expected) heuristicCorrect++;
+      if (ordinal[index].predicted === ordinal[index].expected) ordinalCorrect++;
+    }
+    deltas.push((ordinalCorrect - heuristicCorrect) / heuristic.length);
+  }
+  deltas.sort((a, b) => a - b);
+  return {
+    lower: deltas[Math.floor((resamples - 1) * 0.025)],
+    upper: deltas[Math.ceil((resamples - 1) * 0.975)],
+  };
+}
+
+/** Evaluate the release gate before activating an ordinal weights artifact. */
+export function evaluateOrdinalGate(metrics: OrdinalGateMetrics): OrdinalGateResult {
+  const requirements: Array<[boolean, string]> = [
+    [metrics.bootstrapExactDeltaLower > 0, `bootstrap exact-delta CI lower bound ${(metrics.bootstrapExactDeltaLower * 100).toFixed(1)}pp is not above 0.0pp`],
+    [metrics.ordinalAdjacent >= 0.90, `adjacent ${(metrics.ordinalAdjacent * 100).toFixed(1)}% is below 90.0%`],
+    [metrics.ordinalEce <= 0.10, `ECE ${metrics.ordinalEce.toFixed(3)} exceeds 0.100`],
+  ];
+  for (const tier of TIERS) {
+    const support = metrics.holdoutSupport[tier] ?? 0;
+    const recall = metrics.ordinalRecall[tier];
+    if (support >= 5) {
+      requirements.push([
+        recall >= 0.30,
+        `recall[${tier}] ${(recall * 100).toFixed(1)}% is below 30.0% with holdout support ${support}`,
+      ]);
+    }
+  }
+  return {
+    passed: requirements.every(([passed]) => passed),
+    reasons: requirements.filter(([passed]) => !passed).map(([, reason]) => reason),
+  };
+}
+
+function hashTrainingRows(rows: LabeledPrompt[]): string {
+  const contents = rows.map(({ id, prompt, tier, weight }) => ({ id, prompt, tier, weight }));
+  return createHash('sha256').update(JSON.stringify(contents)).digest('hex');
 }
 
 function parseSilverArg(): string | undefined {
@@ -178,23 +296,23 @@ async function main() {
   const frozen = loadFrozenTrain();
   const organic = loadOrganicGoldVotes();
   const silver = loadSilverLabels(silverArg);
-  const rows = [...frozen, ...organic, ...silver];
+  const goldRows = deduplicateTrainingRows([...frozen, ...organic]);
+  const rows = deduplicateTrainingRows([...goldRows, ...silver]);
   if (!rows.length) throw new Error('no training rows found');
+
+  const holdout = loadFrozenTest();
+  assertNoFrozenTestPromptCollisions(rows, holdout);
 
   const model = new OrdinalLogisticClassifier();
   model.fit(rows);
-  const state = model.toJSON();
-  writeFileSync(WEIGHTS_PATH, JSON.stringify(state, null, 2) + '\n', 'utf-8');
 
   console.log(`trained ordinal-logistic on ${rows.length} rows (${frozen.length} frozen + ${organic.length} organic gold_vote + ${silver.length} silver@0.3)`);
-  console.log(`wrote ${WEIGHTS_PATH}`);
   console.log(`train exact ${(trainAccuracy(model, rows) * 100).toFixed(1)}%`);
 
-  const holdout = loadFrozenTest();
   const heuristic = new HeuristicLinearClassifier();
-  heuristic.fit([...frozen, ...organic]);
+  heuristic.fit(goldRows);
   const goldOnly = new OrdinalLogisticClassifier();
-  goldOnly.fit([...frozen, ...organic]);
+  goldOnly.fit(goldRows);
 
   const heuristicResult = await evaluateHoldout(heuristic, holdout);
   const goldOnlyResult = await evaluateHoldout(goldOnly, holdout);
@@ -205,20 +323,55 @@ async function main() {
   printHoldoutLine('ordinal-logistic gold-only', goldOnlyResult);
   printHoldoutLine(silver.length ? 'ordinal-logistic gold+silver' : 'ordinal-logistic current', mixedResult);
 
+  const exactDeltaCI = bootstrapExactDeltaCI(heuristicResult.predictions, mixedResult.predictions);
+  const holdoutSupport = Object.fromEntries(TIERS.map((tier) => [
+    tier,
+    holdout.filter((row) => row.tier === tier).length,
+  ]));
+  const metrics: OrdinalGateMetrics = {
+    bootstrapExactDeltaLower: exactDeltaCI.lower,
+    ordinalAdjacent: mixedResult.effort.adjacent,
+    ordinalRecall: mixedResult.effort.recall,
+    holdoutSupport,
+    ordinalEce: mixedResult.ece,
+  };
+  const gate = evaluateOrdinalGate(metrics);
   const exactDelta = mixedResult.effort.exact - heuristicResult.effort.exact;
-  const pass = exactDelta >= 0.03 &&
-    mixedResult.effort.adjacent >= 0.90 &&
-    (mixedResult.effort.recall.heavy ?? 0) >= 0.30 &&
-    mixedResult.ece <= 0.10;
   console.log(`gate delta vs heuristic: ${(exactDelta * 100).toFixed(1)}pp`);
-  console.log(`gate result: ${pass ? 'PASS' : 'FAIL'} (requires exact >= heuristic +3pp, adjacent >=90%, heavy recall >=30%, ECE <=0.10)`);
+  console.log(`bootstrap 95% CI for exact delta: [${(exactDeltaCI.lower * 100).toFixed(1)}, ${(exactDeltaCI.upper * 100).toFixed(1)}]pp`);
+  console.log(`gate result: ${gate.passed ? 'PASS' : 'FAIL'} (requires CI lower >0, adjacent >=90%, per-tier recall >=30% where holdout n>=5, ECE <=0.10)`);
   if (silver.length) {
     console.log(`gold+silver vs gold-only exact delta: ${((mixedResult.effort.exact - goldOnlyResult.effort.exact) * 100).toFixed(1)}pp; ECE delta: ${(mixedResult.ece - goldOnlyResult.ece).toFixed(3)}`);
   }
-  console.log('production gate: keep feedback_loop.cascadeRetraining=false or omit v05_ordinal_weights.json if the gate fails');
+  if (!gate.passed) {
+    console.error(`weights artifact unchanged: ${gate.reasons.join('; ')}`);
+    console.log('production gate: keep feedback_loop.cascadeRetraining=false or omit v05_ordinal_weights.json if the gate fails');
+    process.exit(1);
+  }
+
+  const trainedAt = new Date().toISOString();
+  const state = {
+    ...model.toJSON(),
+    gate: {
+      passed: true,
+      metrics,
+      trainedAt,
+      dataHash: hashTrainingRows(rows),
+    },
+  };
+  const tempWeightsPath = `${WEIGHTS_PATH}.tmp-${process.pid}`;
+  try {
+    writeFileSync(tempWeightsPath, JSON.stringify(state, null, 2) + '\n', 'utf-8');
+    renameSync(tempWeightsPath, WEIGHTS_PATH);
+    console.log(`activated gate-passed weights at ${WEIGHTS_PATH}`);
+  } finally {
+    if (existsSync(tempWeightsPath)) unlinkSync(tempWeightsPath);
+  }
 }
 
-main().catch((e) => {
-  console.error(e);
-  process.exit(1);
-});
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((e) => {
+    console.error(e);
+    process.exit(1);
+  });
+}

@@ -101,41 +101,37 @@ export interface MultiWindowQuotaConfig {
 
 const MULTI_WINDOW_QUOTAS: Record<string, MultiWindowQuotaConfig> = {
   'ollama': {
-    // Local Ollama — truly unlimited
+    // Conservative defaults; override via config when provider limits differ.
     fiveHour: { requests: null, tokens: null, resetAt: 'never', resetType: 'rolling' },
     weekly:  { requests: null, tokens: null, resetAt: 'never', resetType: 'rolling' },
     monthly: { requests: null, tokens: null, resetAt: 'never', resetType: 'rolling' },
   },
   'ollama-cloud': {
-    // Ollama Cloud free tier: session-based quota (~reset every 24h)
-    // Session is the primary constraint — maps to 5h window approximately
-    // Real dashboard shows session % + deficit system
+    // Conservative defaults; override via config when provider limits differ.
     fiveHour: { requests: 200,    tokens: 50000,  resetAt: '01:00 UTC (session)',   resetType: 'rolling' },
     weekly:  { requests: 2000,   tokens: 500000, resetAt: 'Monday 01:00 UTC',      resetType: 'fixed' },
     monthly: { requests: null,    tokens: null,   resetAt: 'never',                 resetType: 'rolling' },
   },
   'opencodego': {
-    // OpenCode Go (opencode.ai/zen): token-based quotas across 3 windows
-    // 5h is the most constraining; monthly is nearly exhausted (96%)
+    // Conservative defaults; override via config when provider limits differ.
     fiveHour: { requests: null,   tokens: 50000,  resetAt: 'rolling 5h',            resetType: 'rolling' },
     weekly:  { requests: null,   tokens: 300000, resetAt: 'rolling 7d',            resetType: 'rolling' },
     monthly: { requests: null,   tokens: 500000, resetAt: '1st of month UTC',      resetType: 'fixed' },
   },
   'zai': {
-    // Z.AI Coding Lite Plan: token quota resets every 5 days
-    // Real dashboard: tokens 72% used, 5h 8%, MCP 0/100
+    // Conservative defaults; override via config when provider limits differ.
     fiveHour: { requests: null,   tokens: 30000,  resetAt: 'rolling 5h',            resetType: 'rolling' },
     weekly:  { requests: null,   tokens: 200000, resetAt: 'Monday 00:00 UTC',      resetType: 'fixed' },
     monthly: { requests: null,   tokens: null,   resetAt: 'never',                 resetType: 'rolling' },
   },
   'openrouter': {
-    // OpenRouter free tier: limited by credits / rate
+    // Conservative defaults; override via config when provider limits differ.
     fiveHour: { requests: 100,    tokens: 25000,  resetAt: '00:00 UTC',             resetType: 'rolling' },
     weekly:  { requests: 1000,    tokens: null,   resetAt: 'Monday 00:00 UTC',      resetType: 'fixed' },
     monthly: { requests: null,    tokens: null,   resetAt: 'never',                 resetType: 'rolling' },
   },
   'bailian': {
-    // Alibaba Bailian Coding Plan
+    // Conservative defaults; override via config when provider limits differ.
     fiveHour: { requests: 300,    tokens: 250000, resetAt: '00:00 UTC',             resetType: 'rolling' },
     weekly:  { requests: 30000,   tokens: null,   resetAt: 'Monday 00:00 UTC',      resetType: 'fixed' },
     monthly: { requests: 100000,  tokens: null,   resetAt: '1st of month UTC',      resetType: 'fixed' },
@@ -150,6 +146,7 @@ export function getMultiWindowQuota(provider: string): MultiWindowQuotaConfig | 
 }
 
 const PROVIDER_QUOTA_CONFIGS: Record<string, Partial<ProviderQuota>> = {
+  // Conservative defaults; override via config when provider limits differ.
   'ollama': {
     name: 'Ollama (Local CPU)',
     rpm: Infinity,
@@ -161,8 +158,8 @@ const PROVIDER_QUOTA_CONFIGS: Record<string, Partial<ProviderQuota>> = {
   },
   'ollama-cloud': {
     name: 'Ollama Cloud (Hosted)',
-    rpm: 100,               // Free tier: ~100 RPM
-    rpd: 10000,             // Free tier: generous daily limit
+    rpm: 100,
+    rpd: 10000,
     rpmRemaining: 100,
     rpdRemaining: 10000,
     tokensDailyLimit: 500000,
@@ -170,7 +167,7 @@ const PROVIDER_QUOTA_CONFIGS: Record<string, Partial<ProviderQuota>> = {
   },
   'opencodego': {
     name: 'OpenCode Go',
-    rpm: 50,                // Free tier
+    rpm: 50,
     rpd: 5000,
     rpmRemaining: 50,
     rpdRemaining: 5000,
@@ -179,7 +176,7 @@ const PROVIDER_QUOTA_CONFIGS: Record<string, Partial<ProviderQuota>> = {
   },
   'zai': {
     name: 'ZAI (GLM Coding Lite)',
-    rpm: 30,                // Coding lite plan
+    rpm: 30,
     rpd: 3000,
     rpmRemaining: 30,
     rpdRemaining: 3000,
@@ -188,7 +185,7 @@ const PROVIDER_QUOTA_CONFIGS: Record<string, Partial<ProviderQuota>> = {
   },
   'openrouter': {
     name: 'OpenRouter (Free)',
-    rpm: 20,                // Free tier: lowest limit
+    rpm: 20,
     rpd: 200,
     rpmRemaining: 20,
     rpdRemaining: 200,

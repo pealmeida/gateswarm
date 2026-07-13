@@ -11,18 +11,33 @@
  */
 
 import type { ComplexityScore, EffortLevel } from './types.js';
-import { extractFeatures, heuristicScoreFromFeatures } from './feature-extractor-v04.js';
+import { countPromptWords, extractFeatures, heuristicScoreFromFeatures } from './feature-extractor-v04.js';
 import { ensembleVote, type EnsembleVote } from './ensemble-voter.js';
+import { getOrdinalModelHealth } from './classifiers/ordinal-logistic.js';
 import { queryRag, getRagSignalEntries } from './rag-index.js';
 import { getConfig } from './v04-config.js';
 import { scoreToEffort, tierMidpoints } from './intent-engine.js';
 
 // ─── v3.3 Fallback ───────────────────────────────────────
 
+const MAX_PROMPT_SIZE = 64 * 1024;
+let lastTruncatedPromptLogAt = 0;
+let lastEnsembleFailureLogAt = 0;
+
+function promptForScoring(prompt: string): string {
+  if (prompt.length <= MAX_PROMPT_SIZE) return prompt;
+  const now = Date.now();
+  if (now - lastTruncatedPromptLogAt >= 60_000) {
+    lastTruncatedPromptLogAt = now;
+    console.error({ event: 'routing.prompt_truncated', originalLength: prompt.length, maxLength: MAX_PROMPT_SIZE });
+  }
+  return prompt.slice(0, MAX_PROMPT_SIZE);
+}
+
 function v33Fallback(prompt: string): ComplexityScore {
+  prompt = promptForScoring(prompt);
   const features = extractFeatures(prompt);
-  const words = prompt.split(/\s+/).filter(Boolean);
-  const score = heuristicScoreFromFeatures(features, words.length);
+  const score = heuristicScoreFromFeatures(features, countPromptWords(prompt));
 
   // v0.5.2: UNIFIED tier boundaries — uses the canonical scoreToEffort mapping
   // (previously hardcoded divergent boundaries here, causing fallback misrouting).
@@ -44,11 +59,11 @@ function v33Fallback(prompt: string): ComplexityScore {
 export async function scoreIntent(prompt: string): Promise<ComplexityScore> {
   const start = performance.now();
   const config = getConfig();
+  prompt = promptForScoring(prompt);
 
   // Extract features
   const features = extractFeatures(prompt);
-  const words = prompt.split(/\s+/).filter(Boolean);
-  const heuristicScore = heuristicScoreFromFeatures(features, words.length);
+  const heuristicScore = heuristicScoreFromFeatures(features, countPromptWords(prompt));
 
   // RAG signal — pass undefined when no prior context exists so the voter does
   // NOT inject a neutral 0.5 floor (the old behaviour added a flat +0.125 to every score).
@@ -70,6 +85,7 @@ export async function scoreIntent(prompt: string): Promise<ComplexityScore> {
   try {
     const vote = ensembleVote({
       prompt,
+      features,
       heuristicScore,
       ragSignal,
       cascadeAbstainMargin: config.ensemble.ordinalAbstainMargin,
@@ -89,6 +105,15 @@ export async function scoreIntent(prompt: string): Promise<ComplexityScore> {
       classifierAccuracy: vote.confidence,
     };
   } catch (err) {
+    const now = Date.now();
+    if (now - lastEnsembleFailureLogAt >= 60_000) {
+      lastEnsembleFailureLogAt = now;
+      console.error({
+        event: 'routing.ensemble_failure',
+        error: err instanceof Error ? err.message : 'unknown error',
+        fallback: 'heuristic',
+      });
+    }
     // Fallback to v3.3 heuristic
     const result = v33Fallback(prompt);
     result.latencyMs = performance.now() - start;
@@ -103,6 +128,10 @@ export async function scoreIntent(prompt: string): Promise<ComplexityScore> {
  */
 export function scoreIntentSync(prompt: string): ComplexityScore {
   return v33Fallback(prompt);
+}
+
+export function getScorerHealth(): { ordinal: 'active' | 'absent' | 'invalid' } {
+  return { ordinal: getOrdinalModelHealth() };
 }
 
 // Re-export v3.3 for backward compatibility

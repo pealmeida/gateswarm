@@ -237,6 +237,7 @@ function ragEntryForExample(ex: EffortExample, i: number): RagEntry {
     summary: `Warm routing fixture for ${ex.tier}: ${keywords.slice(0, 8).join(' ')}`,
     originalTokens: words,
     compressedTokens: Math.max(1, Math.round(words * 0.6)),
+    provenance: 'routing',
   };
 }
 

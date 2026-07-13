@@ -4,108 +4,56 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-## [Unreleased] — Routing Accuracy, Reliability & Organic Training
+## [0.6.0] — 2026-07-12 (Trustable Precision)
 
-Evidence-driven overhaul of the tier-routing pipeline: 5-fold CV exact
-accuracy 48.9% → 61.1% (adjacent 95.6%), provider failures now fall back
-instead of surfacing as answers, and training mode finally collects real
-user feedback into a growing organic dataset.
-
-### Added
-- **Phase 2 mid-band features.** `requirement_count`,
-  `distinct_imperative_verbs`, `question_count`, `conjunction_enumeration`,
-  `scale_quantity_mentions` (50MB / 2M events/sec / sub-100ms / p99) and
-  `diagnostic_causal_markers` separate moderate/heavy/intensive prompts
-  that length alone collapsed; 10 dead-MI features keep their fields but
-  carry zero weight.
-- **Ordinal-logistic cascade model** (`src/classifiers/ordinal-logistic.ts`
-  + `eval/train-ordinal.ts`): proportional-odds, Platt-calibrated,
-  abstention falls back to the heuristic tier. **Ships unwired** — it
-  failed its accuracy gate at n=60 train rows (CV 54.4% vs heuristic
-  61.1%); retrain as organic gold votes accrue, then flip
-  `feedback_loop.cascadeRetraining` and ship the weights file.
-- **Organic training loop.** Vote prompts are appended to responses,
-  chat-path replies ("✅" / "❌ heavy") are intercepted and recorded at
-  zero cost, gold votes land in the feedback store and
-  `data/organic/labeled.jsonl`; vote expiry 5 min → 24 h.
-- **Provider health & fallback** (`src/adapters/provider-health.ts`):
-  unusable bodies (empty, auth-error text) advance the fallback chain;
-  exhausted chain → 502, never an error string served as an answer; two
-  hard failures → 5-min provider cooldown.
-- **Hybrid eval harness** (`eval/hybrid-routing-eval.ts` + libs): offline
-  scoring, cold+warm ablation, live spot-check with infra-aware rubric,
-  provider skip, per-tier routed-model cost table, judge retry/JUDGE_DOWN.
-- **Boundary refit harness** (`eval/refit-boundaries.ts`): train-only DP
-  fit with 5-fold CV report; `--apply` writes config.
-- **Score-drift guard test**: CI fails when a scorer change shifts
-  golden-set tier medians out of their configured bands.
-
-### Changed
-- **Single source of truth for tier cut points** (`src/tier-boundaries.ts`)
-  — five previously divergent hardcoded copies (routing matrix, config
-  defaults, cascade thresholds, RAG tier maps, effort-override scores)
-  now derive from it. One-time sanctioned post-Phase-2 refit:
-  `[0.2089, 0.2642, 0.3250, 0.3659, 0.4854]`.
-- **Browser and server score with the same formula** — `v33Score`
-  delegates to the canonical 34-feature extractor.
-- **Ensemble weights are honest**: RAG/history at 0 (warm-vs-cold
-  ablation measured 0.0pp contribution), cascade at 0 until the ordinal
-  model passes its gate; code paths retained for re-enable.
-- Non-streaming CLI-provider requests go through the validated retry
-  loop (body checks + fallback); early dispatch stays for streaming.
-
-## [Unreleased] — Multimodal Routing + Security Hardening
-
-The "M" in MoMA becomes real: requests carrying image/audio/video parts
-are detected at ingress and routed to vision-capable models. Plus
-network-safe defaults for production deployments. (Not yet tagged; bump
-the version stamps and cut a release when publishing.)
-
-### Added
-- **Multimodal (MoMA) routing.** `detectRequestModalities()` scans content
-  arrays for `image_url` / `input_audio` / video parts. Vision requests
-  restrict candidates to `supportsVision` models; the static-primary
-  shortcut is skipped unless the static model can see.
-- **`vision_widened` fallback.** When no in-tier vision model is healthy,
-  the router widens the tier band to any healthy vision-capable model
-  instead of degrading to a text-only model.
-- **`X-Modality` response header** (`text` / `text+vision` / `+audio`).
-- **Opt-in auth enforcement** via `GATESWARM_REQUIRE_AUTH=true` — rejects
-  unresolved keys with 401 instead of falling back to the default agent.
-- **Loopback-by-default bind.** Gateway now binds `127.0.0.1`; set
-  `GATESWARM_HOST=0.0.0.0` to expose (warns if exposed without auth).
-- Portable local-demo scripts under `scripts/` (repo-relative paths).
-
-### Changed
-- **MoMA = Mixture of Multimodal Agents** (was "Mixture of Model Agents").
-  Completed the `moa` → `moma` rename across docs, scripts, public assets,
-  the systemd unit name (doctor accepts both), and package keywords.
-- Media parts are flattened to `[image]`/`[audio]` placeholders for
-  text-only targets and CLI agents — raw base64 never enters prompts,
-  scoring, or context compression; media-bearing messages keep their
-  original content arrays for vision targets.
-- Broadened the vision heuristic (llava, vision, moondream, pixtral,
-  gemma3, glm-4.Xv).
-
-### Fixed
-- **Windows `.env` loading.** `new URL().pathname` yielded `/C:/…` paths
-  that Node's `fs` could not open (0 vars loaded, provider 401s); switched
-  to `fileURLToPath` in the gateway and vault-env loader.
-- Model selection now requires an API key for HTTP providers, mirroring
-  dispatch (was selecting keyless providers that then 503'd).
-- `estimatedPromptTokens` was passing a messages array into the
-  string-typed estimator (always ~1 token); now estimates over flattened
-  text.
-- Made the CLI-provider concurrency test compare serialized vs unlimited
-  runs instead of a fixed wall-clock bound (was a timing flake).
+"Trustable Precision," developed on `release/v0.6.0`, implements the
+release-plan actions from a four-pass, 96-finding adversarial review.
 
 ### Security
-- Removed a since-deleted `data/agent-registry.json` (gateway-local agent
-  tokens; **no provider secrets were ever committed**) from all Git
-  history — `main`, all branches, and release tags rewritten. Tokens were
-  already rotated/dead.
-- Upgraded dev dependencies to clear all `npm audit` advisories
-  (0 vulnerabilities).
+- Protect agent-management and `/v04/retrain` with `MOMA_ADMIN_TOKEN`; the
+  gateway refuses non-loopback bindings without it unless explicitly overridden.
+- Cap request bodies at 1 MiB by default (`MOMA_MAX_BODY_BYTES`, HTTP 413), reject
+  malformed JSON with HTTP 400, and redact bounded upstream-error metadata.
+- Redact secrets and PII before persistence, and redact agent API keys from API responses.
+
+### Reliability
+- Validate provider responses before committing a stream, continue fallback chains on
+  transport and unusable-body failures, and emit structured stream errors on truncation.
+- Strengthen provider-health classification, cooldown persistence, and stale-result guards.
+- Validate and atomically reload configuration while exposing last-known-good reload state
+  and ordinal scorer health through `/health`.
+
+### Eval integrity
+- Compute release floors from frozen holdout rows only; treat unknown tiers and unavailable
+  infrastructure as failures rather than silently scoring them as valid answers.
+- Blind the adequacy judge, enforce all documented verdict floors and live-coverage minimums,
+  and refuse to overwrite versioned split artifacts.
+- Gate ordinal artifacts before activation: failed training exits non-zero and cannot write or
+  activate weights; a passed artifact carries gate provenance while the default ensemble remains heuristic-only.
+
+### Training loop
+- Ask for votes on streaming and CLI responses as well as synchronous responses; bind replies
+  to vote IDs and session identity, and preserve full redacted prompts in versioned organic labels.
+- Keep human gold labels immutable to lower-trust updates, deduplicate organic training rows,
+  and reject overlap with frozen test data.
+- Make boundary retraining admin-gated and proposal-only: it writes a validation-gated report
+  for review and never mutates live boundaries.
+
+### Routing core
+- Use Unicode-aware segmentation and char-class signals for CJK, emoji-only, and minified-code
+  prompts; deduplicate overlapping keyword evidence and reuse extracted feature vectors.
+- Reject non-finite boundaries and scores safely, validate ensemble/ordinal weights strictly,
+  and fall back to `moderate` for invalid scores.
+- Keep the 34-feature heuristic as the active default; RAG/history weights remain 0 pending
+  evidence and the ordinal cascade activates only from a passed gate artifact.
+- Keep multimodal routing vision-aware, including `vision_widened` fallback and safe text-only
+  placeholders for media when required.
+
+### Docs
+- Document the hosted low-tier defaults (`zai/glm-4.7-flash` and
+  `ollama-cloud/minimax-m2.7`), optional local Ollama, health diagnostics, and release gates.
+- Publish the v0.6.0 release context in `docs/RELEASE_PLAN_v0.6.0.md` and align CI with all
+  `release/**` branches.
 
 ## [0.5.6] - 2026-06-20 (latest tagged release — re-shuffle + cleanup)
 
@@ -131,40 +79,30 @@ health-aware routing, v0.5.6 re-shuffle).
 ### Removed
 - Root `ARCHITECTURE.md` (kept `docs/ARCHITECTURE.md` which is newer and larger)
 - Root `REQUIREMENTS.md` (kept `docs/REQUIREMENTS.md`)
-- `docs/PRD.md` and `docs/QUICKSTART.md` (duplicates of root versions)
+- `docs/PRD.md` (duplicate of the root version)
 
-### Verified
-- Service running v0.5.6 on main, all 7 version stamps aligned
-- Plan/Act + effort override + /v06/resolve verified end-to-end
-- Health check 11/11 pass
-- 5 public tags on origin: v0.4.4, v0.5.2, v0.5.3, v0.5.4, v0.5.5, v0.5.6
 ## [0.5.5] - 2026-06-20 (Routing Transparency + Quota-Aware Routing + OSS Hygiene)
 
 Routing Transparency + Quota-Aware Routing + OSS Hygiene. The
 foundation release that v0.5.6 (Plan/Act) builds on.
 
 ### Fixed
-- **Tier routing primaries purged of dead providers**: Bailian API key expired (HTTP 401) and OpenCodeGo hit `GoUsageLimitError` (14d reset). Re-routed all six tiers to currently-healthy providers only — zai for moderate/heavy, codex-cli for intensive/extreme, ollama for trivial/light. `v04_config.json` rewritten with no bailian or opencodego references in any tier.
+- **Tier routing primaries updated**: Static provider/model assignments were revised and non-primary providers remained available in fallback chains.
 - **LLM judge silently no-oping**: `self-eval.ts` hardcoded the judge provider to `bailian`; with bailian down, the judge was returning `adequacy: -1` for every request. Now config-driven (`config.feedback_loop.llmJudgeModel`), defaulting to `zai/glm-4.7`.
 - **`/health` banner reported stale version**: hardcoded `'bailian/qwen3.5-plus'` for the `llmJudge` field. Now reads `getConfig().feedback_loop.llmJudgeModel` at request time.
 - **Provider health-score poisoning**: `recordSuccess()` never decayed `rateLimitHits`, so a single batch of 429s from quota-sync probes tanked `zai` health to 0 (penalty `20 × 15 = -300`). Now decays by 1 per success.
 - **RAG signal pollution**: `RagEntry.tier` is overloaded between effort tiers (`moderate`/`heavy`/...) and compressor quality tiers (`Q0`/`Q1`/`Q2`). The intent engine treated both the same, so 9 cached "Hello, how can I help" RAG entries biased every score by +0.075. RAG now filters `Q*` entries before computing the signal. Index cleaned: 21 → 12 entries.
 - **TUI showed only static tier recommendations, not the actual last request decision**: `TiersMatrix.tsx` now shows a `★ LAST REQUEST →` header with the tier/provider/model of the most recent `request`-source decision, plus a `►` marker on the active row.
-- **Codex CLI / Claude CLI health checks were lies**: `codex --version` / `claude --version` pass without auth. Replaced with `bin/cli-health-probe.sh` which verifies binary + auth (OPENAI_API_KEY / ChatGPT OAuth via `~/.codex/auth.json` / `~/.claude/.credentials.json`). Both CLIs are correctly authenticated (verified: codex exec gpt-5.4 returns "pong" in 8s; Claude has OAuth credentials).
-- **Hardcoded absolute paths in source**: `src/agent-registry.ts` had `/root/.openclaw/workspace/gateswarm-moma-router/scripts/cli-health-probe.sh` (4 occurrences) — would break for any non-default install. Replaced with portable `"${GATESWARM_ROOT:-.}"/bin/cli-health-probe.sh <agent>`. The systemd unit now exports `GATESWARM_ROOT`; the script auto-resolves its own location for local dev. A new `bin/` directory is shipped alongside `scripts/`.
-- **Pi status bar showed `(moa)` instead of `(moma)`**: `defaultProvider` in `~/.pi/agent/settings.json` was `"moa"`. Renamed to `"moma"` (also in `models.json`). Pi must be restarted to pick up the new label.
+- **CLI health probes**: Replaced binary-only checks with `bin/cli-health-probe.sh`, which verifies that a CLI has usable credentials.
+- **Portable probe path resolution**: Replaced a machine-specific probe path with a repository-relative path.
 - **Ephemeral runtime state was tracked in git**: `data/consumption-history.json`, `data/provider-quota.json`, `data/quota-sync.json`, `data/model-matrix.json` were all tracked but contain operational state regenerated on every gateway start. Now gitignored + untracked via `git rm --cached`. The gateway regenerates them on first run.
-- **Removed broken `dotenv` import + dep** (from v0.5.3, which is now in the v0.5.5 line as the foundational work). The systemd unit already sources `.env` via `set -a; source`, so the import was redundant.
+- **Removed broken `dotenv` import + dep** (from v0.5.3, which is now in the v0.5.5 line as the foundational work).
 - **Debounced `agent-registry.save()`** (from v0.5.3, now in v0.5.5 line). Was 2 full-file writes per request; now coalesces bursts into 1 write per 1s window. Graceful shutdown via SIGINT/SIGTERM triggers `flushPending()`.
 
 ### Added
 - **`bin/cli-health-probe.sh`** — auth-aware health probe for codex-cli, claude-cli, pi-agent, hermes-agent.
-- **`docs/OPS_GUIDE.md`** — 25KB operations guide covering updates, debugging, analysis, versioning, and emergency procedures.
-- **`docs/SECURITY_AUDIT.md`** — pre-release security audit.
-- **`gateswarm ops-guide`** CLI command.
 - **`gateswarm health`** CLI command (11-point health check).
 - **`gateswarm version`** CLI command (verifies all 7 version stamps).
-- **`GET /v05/intel/ops-guide`** endpoint.
 - **`GET /v05/intel/last-decision`** endpoint.
 - **`getRecentDecisions(limit, source?)`** — supports filtering by source.
 - `tests/agent-registry-debounce.test.ts` — debounce regression test.
@@ -178,11 +116,6 @@ foundation release that v0.5.6 (Plan/Act) builds on.
   - intensive: codex-cli/cx/gpt-5.4-codex
   - extreme: codex-cli/cx/gpt-5.4-codex
 - **CLI TUI version**: 0.5.4 → 0.5.6 (during cleanup; final = 0.5.6 in this re-shuffle)
-- **`/usr/local/bin/gateswarm` wrapper**, **systemd Description**, **Pi `~/.pi/agent/models.json`** — all aligned on 0.5.6
-
-### Known issues / user blockers
-- **Rotate Bailian API key**: `BAILIAN_KEY=*** expired (HTTP 401)`. Once rotated, set the new key in `.env` and restart the gateway.
-- **OpenCodeGo GoUsageLimitError** resets in 14 days from 2026-06-20.
 ## [0.5.4] - 2026-06-20 (Plan/Act + Effort Override)
 
 Plan/Act Modes + Effort Override. The current latest release on
@@ -346,7 +279,7 @@ GitHub. Builds on the v0.5.5 health-aware routing foundation.
 
 ### Changed
 - **Banner updated** — v0.4.4 (TurboQuant v3.6)
-- **Heavy tier model** — Changed from glm-5.1/zai to qwen3.5-plus/bailian (glm-5.1 quota exhausted)
+- **Heavy tier model** — Changed from glm-5.1/zai to qwen3.5-plus/bailian as part of the routing configuration update.
 - **Extreme tier fallbacks** — Removed glm-5.1/zai fallback (same reason)
 
 ## [0.4.3-timeout-hardening] — 2026-05-14

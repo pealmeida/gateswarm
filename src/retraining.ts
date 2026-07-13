@@ -1,32 +1,28 @@
 /**
- * GateSwarm MoMA Router — Retraining Pipeline (v0.5.2 rewrite)
+ * GateSwarm MoMA Router — Boundary retraining proposals
  *
- * The previous pipeline tried to grid-search ENSEMBLE WEIGHTS, but:
- *   - simulateAccuracy() ignored the candidate weights entirely (it just counted
- *     predicted===actual), so the search was a no-op that returned the first
- *     candidate after a stable sort;
- *   - the feedback store never persisted the prompt or component scores, so
- *     re-running the ensemble under different weights was impossible; and
- *   - cascade is permanently disabled, so perturbing its weight only corrupted
- *     the saved config.
- *
- * What we CAN learn from real feedback is the right place to put the TIER
- * BOUNDARIES: each judged interaction gives us (routing score, LLM-judged
- * actual tier). Recalibrating the 5 cut points against those pairs is a genuine,
- * data-driven self-improvement — exactly the manual calibration in eval/, run
- * continuously. Boundaries are config-driven (see v04-config.syncTierBoundaries),
- * so an update takes effect live.
+ * Retraining is deliberately advisory: it fits and persists a proposal, but
+ * never changes live boundaries or v04_config.json. Applying a proposal is a
+ * reviewed source-controlled operation.
  */
 
+import { createHash } from 'crypto';
+import { existsSync, mkdirSync, renameSync, writeFileSync } from 'fs';
+import { dirname, join } from 'path';
+import { fileURLToPath } from 'url';
 import type { EffortLevel } from './types.js';
-import { getConfig, saveConfig, type EnsembleWeightsConfig } from './v04-config.js';
+import { getConfig, type EnsembleWeightsConfig } from './v04-config.js';
 import { getFeedbackEntries } from './feedback-store.js';
-import { setTierBoundaries, getTierBoundaries } from './intent-engine.js';
-import { resetHistoryCache } from './ensemble-voter.js';
+import { getTierBoundaries } from './tier-boundaries.js';
 
 const TIERS: EffortLevel[] = ['trivial', 'light', 'moderate', 'heavy', 'intensive', 'extreme'];
+const OPTIMIZATION_BUDGET_MS = 2000;
+const MIN_VALIDATION_IMPROVEMENT = 0.02;
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const TRAINING_DATA_DIR = process.env.MOMA_TRAINING_DATA_DIR ?? join(__dirname, '../data/training');
+const PROPOSAL_FILE = join(TRAINING_DATA_DIR, 'boundary-proposal.json');
 
-// ─── Weights (kept for API compatibility; weights are no longer the train target) ──
+// ─── Weights (kept for API compatibility; weights are no longer a train target) ──
 
 let _activeWeights: EnsembleWeightsConfig | null = null;
 
@@ -41,104 +37,206 @@ export function setWeights(weights: EnsembleWeightsConfig): void {
 
 // ─── Boundary optimisation ────────────────────────────────────────
 
-interface LabeledScore { score: number; tier: number; }
+export interface LabeledScore {
+  score: number;
+  tier: number;
+  /** Stable source identifier used only for deterministic train/validation splitting. */
+  id?: string;
+}
+
+export interface BoundaryProposal {
+  boundaries: [number, number, number, number, number];
+  accuracyBefore: number;
+  accuracyAfter: number;
+  n: number;
+  fittedAt: string;
+}
 
 /** Exact tier accuracy of a boundary set against labeled (score → tier) pairs. */
-function accuracyFor(bounds: number[], data: LabeledScore[]): number {
+export function accuracyFor(bounds: readonly number[], data: readonly LabeledScore[]): number {
   if (data.length === 0) return 0;
   let correct = 0;
   for (const { score, tier } of data) {
-    let pred = 0;
-    while (pred < bounds.length && score >= bounds[pred]) pred++;
-    if (pred === tier) correct++;
+    let predicted = 0;
+    while (predicted < bounds.length && score >= bounds[predicted]) predicted++;
+    if (predicted === tier) correct++;
   }
   return correct / data.length;
 }
 
+function assertWithinBudget(deadline: number): void {
+  if (Date.now() > deadline) throw new Error('boundary optimization exceeded its 2s time budget');
+}
+
 /**
- * Grid-search 5 strictly-increasing cut points maximising exact accuracy.
- * Coarse grid (0.01 step) — fast and enough given score granularity.
+ * Fit five ordered cuts using dynamic programming.
+ *
+ * Scores are sorted once. A valid cut can occur only between adjacent samples
+ * with different scores and labels; prefix counts reduce each DP transition to
+ * O(1), making the fixed-five-cut optimization O(n log n) overall.
  */
-function optimizeBoundaries(data: LabeledScore[]): { bounds: number[]; accuracy: number } {
-  const grid: number[] = [];
-  for (let v = 0.08; v <= 0.7; v += 0.01) grid.push(Number(v.toFixed(3)));
-  let best = { bounds: getTierBoundaries(), accuracy: accuracyFor(getTierBoundaries(), data) };
-  for (const b0 of grid.filter(v => v < 0.3))
-    for (const b1 of grid.filter(v => v > b0 && v < 0.4))
-      for (const b2 of grid.filter(v => v > b1 && v < 0.5))
-        for (const b3 of grid.filter(v => v > b2 && v < 0.6))
-          for (const b4 of grid.filter(v => v > b3 && v < 0.7)) {
-            const acc = accuracyFor([b0, b1, b2, b3, b4], data);
-            if (acc > best.accuracy) best = { bounds: [b0, b1, b2, b3, b4], accuracy: acc };
-          }
-  return best;
+export function optimizeBoundaries(
+  data: readonly LabeledScore[],
+  timeBudgetMs = OPTIMIZATION_BUDGET_MS,
+): { bounds: [number, number, number, number, number]; accuracy: number } | null {
+  const deadline = Date.now() + timeBudgetMs;
+  const sorted = [...data]
+    .filter(row => Number.isFinite(row.score) && Number.isInteger(row.tier) && row.tier >= 0 && row.tier < TIERS.length)
+    .sort((a, b) => a.score - b.score || a.tier - b.tier);
+  assertWithinBudget(deadline);
+
+  if (sorted.length < 6) return null;
+
+  const candidateCuts: number[] = [];
+  for (let index = 0; index < sorted.length - 1; index++) {
+    if (sorted[index].score !== sorted[index + 1].score && sorted[index].tier !== sorted[index + 1].tier) {
+      candidateCuts.push(index + 1);
+    }
+  }
+  if (candidateCuts.length < 5) return null;
+
+  // prefix[tier][i] is the number of labels == tier among sorted[0..i).
+  const prefix = TIERS.map(() => new Array<number>(sorted.length + 1).fill(0));
+  for (let index = 0; index < sorted.length; index++) {
+    for (let tier = 0; tier < TIERS.length; tier++) prefix[tier][index + 1] = prefix[tier][index];
+    prefix[sorted[index].tier][index + 1]++;
+  }
+
+  // After s segments, DP values end at an allowed cut and classify labels 0..s-1.
+  let previous = new Map<number, number>([[0, 0]]);
+  const backPointers: Array<Map<number, number>> = Array.from({ length: 6 }, () => new Map());
+
+  for (let segments = 1; segments <= 5; segments++) {
+    assertWithinBudget(deadline);
+    const tier = segments - 1;
+    const current = new Map<number, number>();
+    let bestPrevious = previous.has(0) ? (previous.get(0) as number) - prefix[tier][0] : Number.NEGATIVE_INFINITY;
+    let bestPosition = previous.has(0) ? 0 : -1;
+
+    for (const position of candidateCuts) {
+      if (bestPosition >= 0) {
+        current.set(position, bestPrevious + prefix[tier][position]);
+        backPointers[segments].set(position, bestPosition);
+      }
+      // Add this position only after evaluating it, so adjacent segments
+      // cannot share a cut and create a zero-width tier.
+      const prior = previous.get(position);
+      if (prior !== undefined) {
+        const candidate = prior - prefix[tier][position];
+        if (candidate > bestPrevious) {
+          bestPrevious = candidate;
+          bestPosition = position;
+        }
+      }
+    }
+    previous = current;
+  }
+
+  let bestScore = Number.NEGATIVE_INFINITY;
+  let finalCut = -1;
+  for (const position of candidateCuts) {
+    const prior = previous.get(position);
+    if (prior === undefined) continue;
+    const score = prior + (prefix[5][sorted.length] - prefix[5][position]);
+    if (score > bestScore) {
+      bestScore = score;
+      finalCut = position;
+    }
+  }
+  if (finalCut < 0) return null;
+
+  const cuts = [finalCut];
+  let position = finalCut;
+  for (let segments = 5; segments > 1; segments--) {
+    const prior = backPointers[segments].get(position);
+    if (prior === undefined || prior <= 0) return null;
+    cuts.push(prior);
+    position = prior;
+  }
+  cuts.reverse();
+  if (cuts.length !== 5 || new Set(cuts).size !== 5) return null;
+
+  const bounds = cuts.map(cut => (sorted[cut - 1].score + sorted[cut].score) / 2) as [number, number, number, number, number];
+  return { bounds, accuracy: bestScore / sorted.length };
+}
+
+function splitDeterministically(data: readonly LabeledScore[]): { train: LabeledScore[]; validation: LabeledScore[] } {
+  const train: LabeledScore[] = [];
+  const validation: LabeledScore[] = [];
+  for (const row of data) {
+    const id = row.id ?? `${row.score}:${row.tier}`;
+    const bucket = createHash('sha256').update(id).digest().readUInt32BE(0) / 0x1_0000_0000;
+    (bucket < 0.8 ? train : validation).push(row);
+  }
+  return { train, validation };
+}
+
+function writeProposal(proposal: BoundaryProposal): void {
+  if (!existsSync(TRAINING_DATA_DIR)) mkdirSync(TRAINING_DATA_DIR, { recursive: true });
+  const tempPath = `${PROPOSAL_FILE}.tmp-${process.pid}-${Date.now()}`;
+  writeFileSync(tempPath, JSON.stringify(proposal, null, 2), 'utf-8');
+  renameSync(tempPath, PROPOSAL_FILE);
 }
 
 // ─── Retraining trigger ───────────────────────────────────────────
 
 export interface RetrainResult {
-  retrained: boolean;
+  retrained: false;
   reason?: string;
-  accuracyBefore?: number;
-  accuracyAfter?: number;
-  boundaries?: number[];
+  proposal?: BoundaryProposal;
 }
 
 /**
- * Recalibrate tier boundaries if there is enough judged feedback with scores.
- * Only applies the new boundaries when they beat the current ones by a margin
- * (guards against noise / overfitting to a small sample).
+ * Fit a validation-gated boundary proposal. This function never mutates live
+ * boundaries, config, or ensemble state.
  */
 export async function retrainIfNeeded(): Promise<RetrainResult> {
   const config = getConfig();
   const minSamples = config.feedback_loop.minSamplesPerTier;
-
-  // Need judged entries that carry BOTH a routing score and an actual tier.
   const data: LabeledScore[] = getFeedbackEntries()
-    .filter(e => e.actualTier !== null && typeof e.score === 'number')
-    .map(e => ({ score: e.score as number, tier: TIERS.indexOf(e.actualTier as EffortLevel) }))
-    .filter(d => d.tier >= 0);
+    .filter(entry => entry.actualTier !== null && typeof entry.score === 'number' && Number.isFinite(entry.score) && entry.score >= 0 && entry.score <= 1)
+    .map(entry => ({
+      score: entry.score as number,
+      tier: TIERS.indexOf(entry.actualTier as EffortLevel),
+      id: entry.voteId ?? entry.promptHash ?? entry.id,
+    }))
+    .filter(row => row.tier >= 0);
 
-  // Require a reasonable global sample before touching boundaries.
-  if (data.length < Math.max(30, minSamples * 3)) {
-    return { retrained: false, reason: `insufficient labeled+scored feedback (${data.length})` };
+  const underrepresented = TIERS.map((tier, index) => ({ tier, count: data.filter(row => row.tier === index).length }))
+    .filter(({ count }) => count < minSamples);
+  if (underrepresented.length > 0) {
+    return {
+      retrained: false,
+      reason: `insufficient labeled+scored feedback for actual tiers: ${underrepresented.map(({ tier, count }) => `${tier}=${count}`).join(', ')}`,
+    };
   }
 
-  const current = getTierBoundaries();
-  const accuracyBefore = accuracyFor(current, data);
-  const best = optimizeBoundaries(data);
-
-  // Apply only on a meaningful improvement (≥2 percentage points).
-  if (best.accuracy < accuracyBefore + 0.02) {
-    return { retrained: false, reason: 'no significant improvement', accuracyBefore, accuracyAfter: best.accuracy };
+  const { train, validation } = splitDeterministically(data);
+  if (train.length < 6 || validation.length === 0) {
+    return { retrained: false, reason: 'insufficient deterministic train/validation split' };
   }
 
-  if (!setTierBoundaries(best.bounds)) {
-    return { retrained: false, reason: 'optimizer produced invalid boundaries' };
+  let optimized: ReturnType<typeof optimizeBoundaries>;
+  try {
+    optimized = optimizeBoundaries(train);
+  } catch (error) {
+    return { retrained: false, reason: error instanceof Error ? error.message : 'boundary optimization failed' };
+  }
+  if (!optimized) return { retrained: false, reason: 'insufficient distinct tier transitions to fit five boundaries' };
+
+  const accuracyBefore = accuracyFor(getTierBoundaries(), validation);
+  const accuracyAfter = accuracyFor(optimized.bounds, validation);
+  if (accuracyAfter < accuracyBefore + MIN_VALIDATION_IMPROVEMENT) {
+    return { retrained: false, reason: 'validation improvement below 2 percentage points' };
   }
 
-  // Boundaries moved — the voter's history-bias cache was computed against the
-  // old calibration. Force a reload so bias reflects post-retrain reality
-  // instead of correcting for misclassifications the new boundaries already fix.
-  resetHistoryCache();
-
-  // Persist to config so it survives restarts and stays the canonical source.
-  const cfg = getConfig();
-  cfg.tier_boundaries = {
-    trivial:   [0, best.bounds[0]],
-    light:     [best.bounds[0], best.bounds[1]],
-    moderate:  [best.bounds[1], best.bounds[2]],
-    heavy:     [best.bounds[2], best.bounds[3]],
-    intensive: [best.bounds[3], best.bounds[4]],
-    extreme:   [best.bounds[4], 1],
-  };
-  await saveConfig(cfg);
-
-  return {
-    retrained: true,
-    reason: `recalibrated boundaries on ${data.length} labeled samples`,
+  const proposal: BoundaryProposal = {
+    boundaries: optimized.bounds,
     accuracyBefore,
-    accuracyAfter: best.accuracy,
-    boundaries: best.bounds,
+    accuracyAfter,
+    n: data.length,
+    fittedAt: new Date().toISOString(),
   };
+  writeProposal(proposal);
+  return { retrained: false, proposal, reason: 'boundary proposal written; review required before applying' };
 }

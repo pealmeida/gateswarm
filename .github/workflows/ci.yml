@@ -2,19 +2,21 @@ name: CI
 
 on:
   push:
-    branches: [main, release/v0.5.x]
+    branches: [main, 'release/**']
   pull_request:
-    branches: [main, release/v0.5.x]
+    branches: [main, 'release/**']
 
 jobs:
   typecheck-and-test:
     name: Typecheck and Test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      # actions/checkout@v4.2.2
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
 
       - name: Set up Node 20
-        uses: actions/setup-node@v4
+        # actions/setup-node@v4.4.0
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: "20"
           cache: npm
@@ -27,3 +29,9 @@ jobs:
 
       - name: Test
         run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Check package contents
+        run: npm pack --dry-run

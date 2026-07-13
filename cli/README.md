@@ -1,4 +1,4 @@
-# GateSwarm Bar — v0.5.4 TUI
+# GateSwarm Bar TUI
 
 A cross-platform terminal UI for monitoring GateSwarm providers, models, and
 router configuration in real-time. Inspired by [CodexBar](https://codexbar.app),
@@ -40,7 +40,7 @@ gateswarm-bar
 gateswarm-bar --mock
 
 # Custom server URL
-gateswarm-bar --url http://gateswarm.internal:8900
+gateswarm-bar --url http://router.example.com:8900
 
 # Faster refresh
 gateswarm-bar --refresh 5
@@ -100,7 +100,7 @@ cli/
 | **Cost tracking** | Local log scan (Codex/Claude) | Server-side token tracking |
 | **Quotas** | Per-provider native | Per-window (5h/wk/mo) with ETA |
 | **Privacy** | Reads browser cookies, OAuth tokens | Reads only the local GateSwarm API |
-| **Installation** | Homebrew cask, dmg | `npm install -g` |
+| **Installation** | Homebrew cask, dmg | Local build followed by `npm link` |
 | **License** | MIT | MIT |
 
 ## Roadmap

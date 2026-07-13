@@ -8,12 +8,14 @@ export type TierBoundaries = [number, number, number, number, number];
 export const DEFAULT_BOUNDARIES: TierBoundaries = [0.208938, 0.264209, 0.32502, 0.36585, 0.485382];
 
 let _boundaries: TierBoundaries = [...DEFAULT_BOUNDARIES];
+let lastInvalidScoreLogAt = 0;
+const INVALID_SCORE_LOG_INTERVAL_MS = 60_000;
 
 /** Update tier cut points (e.g. after retraining). Ignores invalid/non-monotonic input. */
 export function setTierBoundaries(b: number[]): boolean {
   if (!Array.isArray(b) || b.length !== 5) return false;
   for (let i = 0; i < 5; i++) {
-    if (typeof b[i] !== 'number' || b[i] <= 0 || b[i] >= 1) return false;
+    if (!Number.isFinite(b[i]) || b[i] <= 0 || b[i] >= 1) return false;
     if (i > 0 && b[i] <= b[i - 1]) return false;
   }
   _boundaries = [b[0], b[1], b[2], b[3], b[4]];
@@ -87,6 +89,14 @@ export function tierMidpoints(): Record<EffortLevel, number> {
 }
 
 export function scoreToEffort(score: number): EffortLevel {
+  if (!Number.isFinite(score)) {
+    const now = Date.now();
+    if (now - lastInvalidScoreLogAt >= INVALID_SCORE_LOG_INTERVAL_MS) {
+      lastInvalidScoreLogAt = now;
+      console.error({ event: 'routing.invalid_score', score, fallbackTier: 'moderate' });
+    }
+    return 'moderate';
+  }
   const [b0, b1, b2, b3, b4] = _boundaries;
   if (score < b0) return 'trivial';
   if (score < b1) return 'light';

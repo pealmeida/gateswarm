@@ -8,7 +8,7 @@
 import { randomBytes, createHash } from 'crypto';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs';
 import type { EffortLevel } from './types.js';
 
 // ─── Types ────────────────────────────────────────────────
@@ -17,6 +17,8 @@ export interface VoteRecord {
   id: string;
   agentId: string;
   promptHash: string;
+  /** Full prompt retained for organic gold-label persistence (capped at 32 KiB). */
+  prompt: string;
   promptSnippet: string;
   predictedTier: EffortLevel;
   actualTier: EffortLevel | null;
@@ -53,7 +55,12 @@ export interface TierAccuracy {
 // ─── JSON File Persistence (lightweight SQLite alternative) ─
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const DATA_DIR = join(__dirname, '../data/training');
+const DATA_DIR = process.env.MOMA_TRAINING_DATA_DIR ?? join(__dirname, '../data/training');
+const VOTE_WAL_FILE = 'vote-wal.jsonl';
+const VOTE_WAL_APPLIED_FILE = 'vote-wal-applied.json';
+const RETRAIN_WATERMARK_FILE = 'last-retrain-watermark.json';
+const VOTE_JOURNAL_FILE = 'votes.journal.jsonl';
+const VOTE_COMPACTION_DELAY_MS = 5000;
 
 function ensureDataDir(): void {
   if (!existsSync(DATA_DIR)) {
@@ -67,43 +74,119 @@ function loadJSON<T>(filename: string, defaultVal: T): T {
   if (!existsSync(path)) return defaultVal;
   try {
     return JSON.parse(readFileSync(path, 'utf-8')) as T;
-  } catch {
+  } catch (error) {
+    const corruptPath = `${path}.corrupt-${Date.now()}`;
+    try {
+      renameSync(path, corruptPath);
+      console.error(`\u26a0\ufe0f\u26a0\ufe0f [vote-persistence] Corrupt ${filename} preserved at ${corruptPath}; using defaults.`, error);
+    } catch (renameError) {
+      console.error(`\u26a0\ufe0f\u26a0\ufe0f [vote-persistence] Failed to parse ${filename} and preserve the corrupt file; using defaults.`, error, renameError);
+    }
     return defaultVal;
   }
 }
 
 function saveJSON<T>(filename: string, data: T): void {
   ensureDataDir();
-  writeFileSync(join(DATA_DIR, filename), JSON.stringify(data, null, 2), 'utf-8');
+  const path = join(DATA_DIR, filename);
+  const tempPath = `${path}.tmp-${process.pid}-${Date.now()}`;
+  writeFileSync(tempPath, JSON.stringify(data, null, 2), 'utf-8');
+  renameSync(tempPath, path);
 }
 
 // ─── Vote Store ───────────────────────────────────────────
 
-let votes: VoteRecord[] = loadJSON<VoteRecord[]>('votes.json', []);
 const MAX_VOTES = 5000;
+type VoteMutation = { type: 'upsert'; vote: VoteRecord } | { type: 'replace'; votes: VoteRecord[] };
+
+function voteList(): VoteRecord[] {
+  return [...votes.values()];
+}
+
+function appendVoteMutation(mutation: VoteMutation): void {
+  ensureDataDir();
+  writeFileSync(join(DATA_DIR, VOTE_JOURNAL_FILE), `${JSON.stringify(mutation)}\n`, { encoding: 'utf-8', flag: 'a' });
+}
+
+function applyVoteMutation(mutation: VoteMutation): void {
+  if (mutation.type === 'upsert') {
+    votes.set(mutation.vote.id, mutation.vote);
+    return;
+  }
+  votes = new Map(mutation.votes.map(vote => [vote.id, vote]));
+}
+
+function replayVoteJournal(): void {
+  const path = join(DATA_DIR, VOTE_JOURNAL_FILE);
+  if (!existsSync(path)) return;
+  for (const line of readFileSync(path, 'utf-8').split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      const mutation = JSON.parse(line) as VoteMutation;
+      if (mutation.type === 'upsert' && mutation.vote && typeof mutation.vote.id === 'string') {
+        applyVoteMutation(mutation);
+      } else if (mutation.type === 'replace' && Array.isArray(mutation.votes)) {
+        applyVoteMutation(mutation);
+      } else {
+        console.error('\u26a0\ufe0f\u26a0\ufe0f [vote-persistence] Ignoring malformed vote journal mutation');
+      }
+    } catch (error) {
+      console.error('\u26a0\ufe0f\u26a0\ufe0f [vote-persistence] Ignoring malformed vote journal line', error);
+    }
+  }
+}
+
+let votes = new Map<string, VoteRecord>(loadJSON<VoteRecord[]>('votes.json', []).map(vote => [vote.id, vote]));
+replayVoteJournal();
+let voteCompactionTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleVoteCompaction(): void {
+  if (voteCompactionTimer) clearTimeout(voteCompactionTimer);
+  voteCompactionTimer = setTimeout(() => {
+    voteCompactionTimer = null;
+    saveJSON('votes.json', voteList());
+    writeFileSync(join(DATA_DIR, VOTE_JOURNAL_FILE), '', 'utf-8');
+  }, VOTE_COMPACTION_DELAY_MS);
+}
+
+/** Persist the snapshot and clear an already-applied mutation journal. */
+export function compactVotes(): void {
+  if (voteCompactionTimer) {
+    clearTimeout(voteCompactionTimer);
+    voteCompactionTimer = null;
+  }
+  saveJSON('votes.json', voteList());
+  writeFileSync(join(DATA_DIR, VOTE_JOURNAL_FILE), '', 'utf-8');
+}
 
 export function saveVote(vote: Omit<VoteRecord, 'id'> & { id?: string }): VoteRecord {
   const id = vote.id ?? randomBytes(8).toString('hex');
   const record: VoteRecord = { ...vote, id };
-  votes.push(record);
+  votes.set(record.id, record);
   // Trim oldest if over limit
-  if (votes.length > MAX_VOTES) {
-    votes = votes.slice(-MAX_VOTES);
+  if (votes.size > MAX_VOTES) {
+    const trimmed = voteList().slice(-MAX_VOTES);
+    votes = new Map(trimmed.map(entry => [entry.id, entry]));
+    appendVoteMutation({ type: 'replace', votes: trimmed });
+  } else {
+    appendVoteMutation({ type: 'upsert', vote: record });
   }
-  saveJSON('votes.json', votes);
+  scheduleVoteCompaction();
   return record;
 }
 
 export function updateVote(id: string, updates: Partial<VoteRecord>): boolean {
-  const idx = votes.findIndex(v => v.id === id);
-  if (idx < 0) return false;
-  votes[idx] = { ...votes[idx], ...updates };
-  saveJSON('votes.json', votes);
+  const existing = votes.get(id);
+  if (!existing) return false;
+  const updated = { ...existing, ...updates };
+  votes.set(id, updated);
+  appendVoteMutation({ type: 'upsert', vote: updated });
+  scheduleVoteCompaction();
   return true;
 }
 
 export function getVotes(filters?: { agentId?: string; source?: string; tier?: EffortLevel }): VoteRecord[] {
-  let result = votes;
+  let result = voteList();
   if (filters?.agentId) result = result.filter(v => v.agentId === filters.agentId);
   if (filters?.source) result = result.filter(v => v.source === filters.source);
   if (filters?.tier) result = result.filter(v => v.predictedTier === filters.tier);
@@ -112,7 +195,7 @@ export function getVotes(filters?: { agentId?: string; source?: string; tier?: E
 
 export function getLabeledVotes(agentId: string, minWeight = 0): VoteRecord[] {
   const now = Date.now();
-  return votes.filter(v =>
+  return voteList().filter(v =>
     v.agentId === agentId &&
     v.actualTier !== null &&
     v.timestamp < now &&
@@ -120,12 +203,62 @@ export function getLabeledVotes(agentId: string, minWeight = 0): VoteRecord[] {
   );
 }
 
+export interface VoteWalRecord {
+  voteId: string;
+  actualTier: EffortLevel;
+  agreed: boolean;
+  ts: number;
+}
+
+/** Append before consuming a vote across the independent training stores. */
+export function appendVoteWal(record: VoteWalRecord): void {
+  ensureDataDir();
+  writeFileSync(join(DATA_DIR, VOTE_WAL_FILE), JSON.stringify(record) + '\n', { encoding: 'utf-8', flag: 'a' });
+}
+
+export function getUnappliedVoteWal(): VoteWalRecord[] {
+  ensureDataDir();
+  const path = join(DATA_DIR, VOTE_WAL_FILE);
+  if (!existsSync(path)) return [];
+  const applied = loadJSON<string[]>(VOTE_WAL_APPLIED_FILE, []);
+  const appliedIds = new Set(applied);
+  const latest = new Map<string, VoteWalRecord>();
+  for (const line of readFileSync(path, 'utf-8').split('\n')) {
+    if (!line.trim()) continue;
+    try {
+      const value = JSON.parse(line) as VoteWalRecord;
+      if (typeof value.voteId === 'string' && typeof value.ts === 'number' && !appliedIds.has(value.voteId)) {
+        latest.set(value.voteId, value);
+      }
+    } catch {
+      console.warn('Ignoring malformed vote WAL record');
+    }
+  }
+  return [...latest.values()];
+}
+
+export function markVoteWalApplied(voteId: string): void {
+  const applied = loadJSON<string[]>(VOTE_WAL_APPLIED_FILE, []);
+  if (!applied.includes(voteId)) saveJSON(VOTE_WAL_APPLIED_FILE, [...applied, voteId]);
+}
+
+const tierAccuracyVoteIds = loadJSON<string[]>('tier-accuracy-votes.json', []);
+
+export function recordVoteTierAccuracy(voteId: string, agentId: string, tier: EffortLevel, correct: boolean): void {
+  if (tierAccuracyVoteIds.includes(voteId)) return;
+  recordTierAccuracy(agentId, tier, correct);
+  tierAccuracyVoteIds.push(voteId);
+  saveJSON('tier-accuracy-votes.json', tierAccuracyVoteIds);
+}
+
 export function cleanExpiredVotes(): void {
   const now = Date.now();
-  const before = votes.length;
-  votes = votes.filter(v => v.expiresAt > now || (v.actualTier !== null));
-  if (votes.length !== before) {
-    saveJSON('votes.json', votes);
+  const before = votes.size;
+  const remaining = voteList().filter(v => v.expiresAt > now || (v.actualTier !== null));
+  if (remaining.length !== before) {
+    votes = new Map(remaining.map(vote => [vote.id, vote]));
+    appendVoteMutation({ type: 'replace', votes: remaining });
+    scheduleVoteCompaction();
   }
 }
 
@@ -134,9 +267,9 @@ export function cleanExpiredVotes(): void {
 const DEFAULT_AGENT_CONFIG: AgentTrainingConfig = {
   agentId: '',
   enabled: false,
-  aleatoryRate: 0.10,
+  aleatoryRate: 0.25,
   alwaysAskBelowConfidence: 0.5,
-  neverAskTiers: ['trivial', 'extreme'],
+  neverAskTiers: ['trivial'],
   weightedTiers: ['moderate', 'heavy', 'intensive'],
   weightedRateMultiplier: 2.0,
   retrainAfterVotes: 10,
@@ -213,20 +346,50 @@ export function getOverallAccuracy(agentId: string): number {
   return total > 0 ? totalCorrect / total : -1;
 }
 
+type RetrainWatermarks = Record<string, number>;
+
+function goldLabelCount(agentId: string): number {
+  return getLabeledVotes(agentId, 0).filter(v => v.source === 'gold').length;
+}
+
+export function getLastRetrainWatermark(agentId: string): number {
+  return loadJSON<RetrainWatermarks>(RETRAIN_WATERMARK_FILE, {})[agentId] ?? 0;
+}
+
+/** Mark all current gold labels for an agent as consumed by a completed retrain. */
+export function markRetrained(agentId?: string): number {
+  const watermarks = loadJSON<RetrainWatermarks>(RETRAIN_WATERMARK_FILE, {});
+  const agentIds = agentId ? [agentId] : [...new Set(voteList().filter(v => v.source === 'gold').map(v => v.agentId))];
+  let consumed = 0;
+  for (const id of agentIds) {
+    const count = goldLabelCount(id);
+    watermarks[id] = count;
+    consumed += count;
+  }
+  saveJSON(RETRAIN_WATERMARK_FILE, watermarks);
+  return consumed;
+}
+
 // ─── Vote Parsing ─────────────────────────────────────────
 
 /**
  * Parse a user message to detect if it's a vote reply.
  * Returns { isVote, agreed, correctTier, voteId } or null if not a vote.
  */
+const VOTE_ID_RE = /\[\s*(?:vote\s*:\s*)?([A-Za-z0-9_-]+)\s*\]/i;
 const VOTE_RE = /^(✅|yes|correct|👍|❌|no|wrong|nah)\s*(trivial|light|moderate|heavy|intensive|extreme)?$/i;
+
+/** Extract the structured ID embedded by formatVotePrompt (legacy [id] accepted). */
+export function extractVoteId(text: string): string | null {
+  return text.match(VOTE_ID_RE)?.[1] ?? null;
+}
 
 export function parseVoteReply(text: string): {
   isVote: boolean;
   agreed: boolean;
   correctTier: EffortLevel | null;
 } | null {
-  const trimmed = text.trim();
+  const trimmed = text.replace(VOTE_ID_RE, '').trim();
   const match = trimmed.match(VOTE_RE);
   if (!match) return null;
 

@@ -1,7 +1,7 @@
-#!/usr/bin/env tsx
+#!/usr/bin/env node
 import * as dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
-dotenv.config({ path: fileURLToPath(new URL('../.env', import.meta.url)) });
+dotenv.config();
 import { loadVaultEnv } from './secrets/vault-env.js';
 /**
  * GateSwarm MoMA Router v0.5.6 — Multi-Agent API Gateway
@@ -67,14 +67,15 @@ import { loadVaultEnv } from './secrets/vault-env.js';
 import { createServer, IncomingMessage, ServerResponse } from 'http';
 import { BenchmarkLogger } from './benchmark-logger.js';
 import { heuristicScore, scoreToEffort, tierMidpoints } from './intent-engine.js';
-import { scoreIntent as scoreIntentV04 } from './intent-engine-v04.js';
+import { getScorerHealth, scoreIntent as scoreIntentV04 } from './intent-engine-v04.js';
 import { recordFeedback, getInteractionCount, getFeedbackEntries, getTierAccuracy, shouldRetrain, initFeedbackStore, startFeedbackAutoFlush, updateAdequacy } from './feedback-store.js';
 import { selfEvaluate } from './self-eval.js';
 import { addRagEntry, initRagIndex, startRagAutoFlush } from './rag-index.js';
 import { retrainIfNeeded } from './retraining.js';
 import { getEnsembleWeights, cascadeAvailable } from './ensemble-voter.js';
-import { getConfig, getTierModel, getAllTierModels, getReasoningStatus, saveConfig, getTierModelForMode, detectIntentMode } from './v04-config.js';
-import type { EffortLevel, IntentMode } from './types.js';
+import { getConfig, getConfigReloadHealth, getTierModel, getAllTierModels, getReasoningStatus, saveConfig, getTierModelForMode, detectIntentMode } from './v04-config.js';
+import type { TierModelConfig, V04Config } from './v04-config.js';
+import type { ComplexityScore, EffortLevel, IntentMode } from './types.js';
 import { agentRegistry, AgentConfig } from './agent-registry.js';
 import { estimateTokens } from './token-estimator.js';
 import { modelMatrix } from './model-matrix.js';
@@ -89,9 +90,10 @@ import { getUnusableProviderBodyReason, providerFailureKindForHttp, providerHeal
 import { turboQuantCompress, MODEL_CONTEXT_WINDOWS } from './turboquant-compressor.js';
 import { ragIndex, queryRag } from './rag-index.js';
 import {
-  setTrainingMode, isTrainingMode, createVoteRequest, processVoteReply,
+  setTrainingMode, isTrainingMode, createVoteRequest,
   detectVoteReply, inferRagConsensus, shouldRetrain as shouldRetrainTraining,
-  getTrainingStats, appendVotePromptToCompletion, recordDetectedVoteReply,
+  getTrainingStats, appendVotePromptToCompletion, appendVotePromptToStream, recordDetectedVoteReply,
+  isVoteClarification, processVoteReplyDetailed,
 } from './training-mode.js';
 import { getCalibrationStats, calibrateBronze, calibrateSilver } from './label-combiner.js';
 import { join, dirname } from 'path';
@@ -107,12 +109,34 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // ─── Configuration ─────────────────────────────────────
 
 const PORT = parseInt(process.argv.find(a => a === '--port') ? process.argv[process.argv.indexOf('--port') + 1] : '8900', 10);
+const HOST = process.env.GATESWARM_HOST || '127.0.0.1';
+
+function isEnabled(value: string | undefined): boolean {
+  return /^(1|true|yes|on)$/i.test(value || '');
+}
+
+export function isLoopbackHost(host: string): boolean {
+  const normalized = host.trim().toLowerCase();
+  return normalized === 'localhost'
+    || normalized === '127.0.0.1'
+    || normalized === '::1'
+    || normalized === '[::1]'
+    || normalized.startsWith('127.');
+}
+
+export function shouldRefuseUnauthenticatedAdmin(
+  host: string,
+  adminToken = process.env.MOMA_ADMIN_TOKEN,
+  allowUnauthenticatedAdmin = process.env.MOMA_ALLOW_UNAUTHENTICATED_ADMIN,
+): boolean {
+  return !isLoopbackHost(host) && !adminToken && !isEnabled(allowUnauthenticatedAdmin);
+}
 
 // ─── State ─────────────────────────────────────────────
 
 const benchmarkLogger = new BenchmarkLogger();
 
-type StreamFinishReason = 'stop' | 'length' | 'tool_calls' | 'content_filter' | 'function_call';
+type StreamFinishReason = 'stop' | 'length' | 'tool_calls' | 'content_filter' | 'function_call' | 'error';
 
 
 function messageContentToText(content: any): string {
@@ -153,6 +177,91 @@ function messageContentToText(content: any): string {
 function normalizeMessageContent(message: any): any {
   if (!message || typeof message !== 'object' || !('content' in message)) return message;
   return { ...message, content: messageContentToText(message.content) };
+}
+
+const GATEWAY_OWNED_PAYLOAD_FIELDS = new Set([
+  'direct_route',
+  'effort_override',
+  'mode',
+  'session',
+  'session_id',
+]);
+
+/**
+ * Build an HTTP-provider payload without leaking router controls upstream.
+ * HTTP providers receive all client generation controls; only the selected
+ * model and normalized messages are gateway-owned. CLI providers retain their
+ * separate sanitizeForCli path.
+ */
+export function buildHttpProviderPayload(
+  body: Record<string, any>,
+  messages: any[],
+  model: string,
+  options: {
+    providerId?: string;
+    tierModel?: Pick<TierModelConfig, 'enable_thinking' | 'max_tokens'>;
+    applyTierDefaults?: boolean;
+  } = {},
+): Record<string, any> {
+  const payload: Record<string, any> = { ...body, messages, model };
+  for (const field of GATEWAY_OWNED_PAYLOAD_FIELDS) delete payload[field];
+
+  if (!options.applyTierDefaults) return payload;
+
+  if (payload.max_tokens === undefined && options.tierModel?.max_tokens !== undefined) {
+    payload.max_tokens = options.tierModel.max_tokens;
+  }
+
+  // ZAI rejects enable_thinking=false. Recompute this per retry target so a
+  // primary ZAI target cannot leak the flag to another provider.
+  if (options.providerId === 'zai' && options.tierModel?.enable_thinking === true) {
+    payload.enable_thinking = true;
+  } else {
+    delete payload.enable_thinking;
+  }
+  return payload;
+}
+
+/** A greeting fast-path is safe only for an actual one-turn text conversation. */
+export function isGreetingFastPathEligible(messages: any[], body: Record<string, any>): boolean {
+  const tools = body.tools;
+  const hasTools = Array.isArray(tools) ? tools.length > 0 : tools !== undefined && tools !== null;
+  return messages.length === 1
+    && messages[0]?.role === 'user'
+    && !messages.some((message) => message?.role === 'system' || message?.role === 'assistant')
+    && !hasTools;
+}
+
+export const FALLBACK_GLOBAL_BUDGET_MS = 60_000;
+export const FALLBACK_ATTEMPT_TIMEOUT_MS = 120_000;
+
+/** Limit an individual attempt to the remaining request-wide fallback budget. */
+export function fallbackAttemptTimeoutMs(
+  retryDeadline: number,
+  now = Date.now(),
+  attemptTimeoutMs = FALLBACK_ATTEMPT_TIMEOUT_MS,
+): number {
+  return Math.max(0, Math.min(attemptTimeoutMs, retryDeadline - now));
+}
+
+/** Construct an override score without invoking the asynchronous intent scorer. */
+export async function scoreWithEffortOverride(
+  promptText: string,
+  effortOverride: EffortLevel | null,
+  scorer: (prompt: string) => Promise<ComplexityScore> = scoreIntentV04,
+): Promise<ComplexityScore> {
+  if (!effortOverride) return scorer(promptText);
+  const score = tierMidpoints()[effortOverride];
+  return {
+    value: score,
+    rawValue: score,
+    method: 'heuristic-fallback',
+    latencyMs: 0,
+    tier: effortOverride,
+    confidence: 1,
+    lowConfidence: false,
+    classifierAccuracy: 1,
+  };
 }
 
 // ─── MoMA: request modality detection ──────────────────
@@ -204,6 +313,30 @@ function createTerminalStreamChunk(model: string, finishReason: StreamFinishReas
   });
 }
 
+/** Incremental SSE framing parser accepting both LF and CRLF event delimiters. */
+export class IncrementalSseParser {
+  private buffer = '';
+
+  push(chunk: string, final = false): string[] {
+    this.buffer += chunk;
+    const events: string[] = [];
+    let match: RegExpExecArray | null;
+    const delimiter = /\r?\n\r?\n/g;
+    let start = 0;
+    while ((match = delimiter.exec(this.buffer)) !== null) {
+      const event = this.buffer.slice(start, match.index);
+      if (event) events.push(event);
+      start = match.index + match[0].length;
+    }
+    this.buffer = this.buffer.slice(start);
+    if (final && this.buffer.trim()) {
+      events.push(this.buffer.trimEnd());
+      this.buffer = '';
+    }
+    return events;
+  }
+}
+
 function writeTerminalStream(
   res: ServerResponse,
   model: string,
@@ -251,7 +384,9 @@ function writeProviderSseEvent(
   const data = parseSseEventData(event);
 
   if (data === '[DONE]') {
-    writeTerminalStream(res, model, 'stop', state);
+    // Delay the terminal marker until the caller has appended any training
+    // vote prompt. This also prevents a bare [DONE] after a read failure.
+    state.sawDone = true;
     return;
   }
 
@@ -260,6 +395,62 @@ function writeProviderSseEvent(
   }
 
   res.write(`${event}\n\n`);
+}
+
+function writeStreamError(res: ServerResponse, model: string, state: { sawFinishReason: boolean; sawDone: boolean }): void {
+  if (res.writableEnded) return;
+  res.write('event: error\ndata: {"error":{"message":"Upstream stream failed","type":"stream_error"}}\n\n');
+  // An error terminal is always emitted before [DONE], including when the
+  // provider had already sent a normal finish marker before the read failed.
+  res.write(`data: ${createTerminalStreamChunk(model, 'error')}\n\n`);
+  state.sawFinishReason = true;
+  if (!state.sawDone) res.write('data: [DONE]\n\n');
+  state.sawDone = true;
+}
+
+function writeVotePromptStream(res: ServerResponse, model: string, vote: ReturnType<typeof createVoteRequest>): void {
+  if (!vote || res.writableEnded) return;
+  res.write(`data: ${JSON.stringify({
+    id: `chatcmpl-vote-${Date.now()}`,
+    object: 'chat.completion.chunk',
+    created: Math.floor(Date.now() / 1000),
+    model,
+    choices: [{ index: 0, delta: appendVotePromptToStream(vote), finish_reason: null }],
+  })}\n\n`);
+}
+
+async function pipeSseResponse(
+  response: Response,
+  res: ServerResponse,
+  model: string,
+  vote: ReturnType<typeof createVoteRequest> | (() => ReturnType<typeof createVoteRequest>) = null,
+): Promise<boolean> {
+  const reader = response.body?.getReader();
+  if (!reader) return false;
+  const state = { sawFinishReason: false, sawDone: false };
+  const parser = new IncrementalSseParser();
+  const decoder = new TextDecoder();
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      for (const event of parser.push(decoder.decode(value, { stream: true }))) {
+        writeProviderSseEvent(res, event, model, state);
+      }
+    }
+    for (const event of parser.push(decoder.decode(), true)) {
+      writeProviderSseEvent(res, event, model, state);
+    }
+    writeVotePromptStream(res, model, typeof vote === 'function' ? vote() : vote);
+    writeTerminalStream(res, model, 'stop', state);
+    res.end();
+    return true;
+  } catch (error: any) {
+    console.error(`❌ Stream forwarding error: ${error?.message ?? 'unknown error'}`);
+    writeStreamError(res, model, state);
+    res.end();
+    return false;
+  }
 }
 
 interface CliStreamState {
@@ -302,6 +493,7 @@ function finishCliStream(
   state: CliStreamState,
   content: string,
   finishReason: StreamFinishReason = 'stop',
+  vote: ReturnType<typeof createVoteRequest> = null,
 ) {
   clearInterval(state.heartbeat);
 
@@ -316,6 +508,7 @@ function finishCliStream(
   }
 
   if (!res.writableEnded) {
+    writeVotePromptStream(res, state.model, vote);
     res.write(`data: ${createTerminalStreamChunk(state.model, finishReason)}\n\n`);
     res.write('data: [DONE]\n\n');
     res.end();
@@ -427,11 +620,9 @@ async function handleDirectRoute(
 
   console.log(`📍 [${agent.name}] Direct route → ${providerId}/${model} (classification bypassed)`);
 
-  // Remove direct_route from body to avoid downstream confusion
+  // Preserve HTTP client fields (tools, sampling controls, output format,
+  // stop sequences, etc.) while removing router-only controls below.
   const body = req && (req as any)._body ? (req as any)._body : { messages };
-  const cleanBody = { ...body };
-  delete cleanBody.direct_route;
-  delete cleanBody.model; // We set model ourselves
 
   const sanitizedMessages = sanitizeMessages(messages);
 
@@ -469,13 +660,8 @@ async function handleDirectRoute(
         return sanitizedMessages.map(normalizeMessageContent);
       })()
     : sanitizedMessages;
-  const payload: any = { messages: directMessages, model: cleanModel };
-  if (clientWantsStream) {
-    payload.stream = true;
-    payload.stream_options = { include_usage: true };
-  } else {
-    payload.stream = false;
-  }
+  const payload = buildHttpProviderPayload(body, directMessages, cleanModel);
+  const healthAttempt = providerHealth.beginAttempt(providerId);
 
   try {
     const response = await fetch(`${baseUrl}/chat/completions`, {
@@ -491,7 +677,18 @@ async function handleDirectRoute(
         modelMatrix.recordError(providerId, cleanModel, `rate-limited (${response.status})`);
         console.log(`⚠️  [${agent.name}] Direct route ${providerId}/${cleanModel} rate-limited (${response.status})`);
       }
-      const data = await response.json().catch(() => ({}));
+      const errorBody = await response.text().catch(() => '');
+      logUpstreamFailure(providerId, response.status, errorBody);
+      const failureKind = providerFailureKindForHttp(response.status, errorBody);
+      providerHealth.recordFailure(
+        providerId,
+        failureKind,
+        `${providerId}/${cleanModel}`,
+        upstreamFailureHealthDetail(providerId, response.status, errorBody),
+        healthAttempt,
+      );
+      let data: any = {};
+      try { data = JSON.parse(errorBody); } catch {}
       return jsonResponse(res, response.status, {
         error: data.error || { message: `Provider error: ${response.status}`, type: 'provider_error' },
       });
@@ -500,67 +697,15 @@ async function handleDirectRoute(
     // v0.5.6: Forward the upstream stream as-is when client wants streaming.
     // This is the only way to make streaming clients (Pi, etc.) happy —
     // they need a real SSE stream with [DONE] markers and finish_reason.
-    if (clientWantsStream && response.body) {
+    if (clientWantsStream && isSseContentType(response.headers.get('content-type')) && response.body) {
       res.writeHead(200, {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache',
         'Connection': 'keep-alive',
       });
-      const reader = response.body.getReader();
-      const streamState = { sawFinishReason: false, sawDone: false };
-      const decoder = new TextDecoder();
-      let buffer = '';
-      try {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          // Forward each complete SSE event as it arrives
-          let idx;
-          while ((idx = buffer.indexOf('\n\n')) !== -1) {
-            const evt = buffer.slice(0, idx);
-            buffer = buffer.slice(idx + 2);
-            if (!evt.trim()) continue;
-            // Check if this event has finish_reason
-            const dataLines = evt.split('\n').filter(l => l.startsWith('data:')).map(l => l.slice(5).trim());
-            for (const d of dataLines) {
-              if (d === '[DONE]') {
-                streamState.sawDone = true;
-              } else if (d) {
-                try {
-                  const parsed = JSON.parse(d);
-                  if (Array.isArray(parsed?.choices)) {
-                    for (const c of parsed.choices) {
-                      if (c?.finish_reason != null) streamState.sawFinishReason = true;
-                    }
-                  }
-                } catch {}
-              }
-            }
-            res.write(evt + '\n\n');
-          }
-        }
-        // Flush remaining buffer
-        if (buffer.trim()) {
-          res.write(buffer + '\n\n');
-        }
-        // If upstream didn't send [DONE] or finish_reason, send a terminal stop
-        if (!streamState.sawFinishReason || !streamState.sawDone) {
-          if (!streamState.sawFinishReason) {
-            res.write(`data: {"id":"chatcmpl-done","object":"chat.completion.chunk","created":${Math.floor(Date.now()/1000)},"model":"${cleanModel}","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n`);
-          }
-          if (!streamState.sawDone) {
-            res.write('data: [DONE]\n\n');
-          }
-        }
-        res.end();
-      } catch (streamErr: any) {
-        console.error(`❌ Direct stream forwarding error: ${streamErr.message}`);
-        try {
-          if (!streamState.sawDone) res.write('data: [DONE]\n\n');
-          res.end();
-        } catch {}
-      }
+      const completed = await pipeSseResponse(response, res, cleanModel);
+      if (completed) providerHealth.recordSuccess(providerId, healthAttempt);
+      else providerHealth.recordFailure(providerId, 'transport', `${providerId}/${cleanModel}`, 'stream read failure', healthAttempt);
       const latency = Date.now() - startTime;
       benchmarkLogger.log({
         prompt: '(direct route)',
@@ -571,13 +716,38 @@ async function handleDirectRoute(
         tokens_out: 0,
         latency_ms: latency,
         provider: providerId,
-        status: 'success',
+        status: completed ? 'success' : 'error',
       });
       return;
     }
 
     // Non-streaming: parse JSON and return
     const data = await response.json();
+    const bodyFailure = getUnusableProviderBodyReason(data);
+    if (bodyFailure) {
+      logUpstreamFailure(providerId, 200, data);
+      providerHealth.recordFailure(
+        providerId,
+        bodyFailure.kind,
+        `${providerId}/${cleanModel}`,
+        upstreamFailureHealthDetail(providerId, 200, data),
+        healthAttempt,
+      );
+      return jsonResponse(res, 502, {
+        error: { message: `Provider returned unusable response: ${bodyFailure.reason}`, type: 'provider_error' },
+      });
+    }
+    if (clientWantsStream) {
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+      });
+      writeJsonCompletionAsSse(res, data, cleanModel);
+      providerHealth.recordSuccess(providerId, healthAttempt);
+      return;
+    }
+    providerHealth.recordSuccess(providerId, healthAttempt);
     const latency = Date.now() - startTime;
 
     benchmarkLogger.log({
@@ -608,6 +778,7 @@ async function handleDirectRoute(
     return jsonResponse(res, 200, data);
   } catch (err: any) {
     console.error(`❌ Direct route error (${providerId}): ${err.message}`);
+    providerHealth.recordFailure(providerId, 'transport', `${providerId}/${cleanModel}`, err.message, healthAttempt);
     return jsonResponse(res, 502, {
       error: { message: `Provider error: ${err.message}`, type: 'provider_error' },
     });
@@ -649,12 +820,8 @@ async function handleCliProviderDirect(
   const startTime = Date.now();
   const cliMessages = sanitizeForCli(messages);
   const streamResponse = Boolean(req && (req as any)._body?.stream);
-  let cliStream: CliStreamState | null = null;
 
   try {
-    if (streamResponse) {
-      cliStream = startCliStream(res, providerId + '/' + model, 'chatcmpl-cli-direct');
-    }
     const result = await adapter.chatCompletion(cliMessages, model);
     const latency = Date.now() - startTime;
 
@@ -682,7 +849,8 @@ async function handleCliProviderDirect(
     };
     if (req) emitModeHeaders(req, res, promptText || '');
 
-    if (streamResponse && cliStream) {
+    if (streamResponse) {
+      const cliStream = startCliStream(res, providerId + '/' + model, 'chatcmpl-cli-direct');
       finishCliStream(res, cliStream, result.content, (result.finishReason ?? 'stop') as StreamFinishReason);
       return;
     }
@@ -690,13 +858,7 @@ async function handleCliProviderDirect(
     return jsonResponse(res, 200, openaiResponse);
   } catch (err: any) {
     console.error(`❌ CLI provider error (direct, ${providerId}): ${err.message}`);
-    if (streamResponse && cliStream) {
-      finishCliStream(res, cliStream, `CLI provider error: ${err.message}`, 'length');
-      return;
-    }
-    return jsonResponse(res, 502, {
-      error: { message: `CLI provider error: ${err.message}`, type: 'cli_error' },
-    });
+    return jsonResponse(res, 502, cliFailureResponse());
   }
 }
 
@@ -800,15 +962,66 @@ function extractKeyDecisions(text: string): string[] {
 
 // ─── Helpers ───────────────────────────────────────────
 
-function parseBody(req: IncomingMessage): Promise<any> {
+const DEFAULT_MAX_BODY_BYTES = 1_048_576;
+
+export class RequestBodyError extends Error {
+  constructor(
+    public readonly status: 400 | 413,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'RequestBodyError';
+  }
+}
+
+function maxBodyBytes(): number {
+  const configured = Number(process.env.MOMA_MAX_BODY_BYTES);
+  return Number.isSafeInteger(configured) && configured > 0
+    ? configured
+    : DEFAULT_MAX_BODY_BYTES;
+}
+
+export function parseBody(req: IncomingMessage): Promise<any> {
   return new Promise((resolve, reject) => {
-    let body = '';
-    req.on('data', chunk => body += chunk);
-    req.on('end', () => {
-      try { resolve(body ? JSON.parse(body) : {}); }
-      catch { resolve({}); }
+    const chunks: Buffer[] = [];
+    let bodyBytes = 0;
+    let settled = false;
+
+    const fail = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      reject(error);
+    };
+
+    req.on('data', (chunk: Buffer | string) => {
+      if (settled) return;
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      bodyBytes += buffer.length;
+      if (bodyBytes > maxBodyBytes()) {
+        // Stop accepting additional data immediately. The request is destroyed
+        // after the route handler has flushed its 413 response.
+        req.pause();
+        fail(new RequestBodyError(413, 'request body too large'));
+        return;
+      }
+      chunks.push(buffer);
     });
-    req.on('error', reject);
+    req.on('end', () => {
+      if (settled) return;
+      settled = true;
+      const body = Buffer.concat(chunks).toString('utf8');
+      if (!body) {
+        resolve({});
+        return;
+      }
+      try {
+        resolve(JSON.parse(body));
+      } catch {
+        reject(new RequestBodyError(400, 'invalid JSON body'));
+      }
+    });
+    req.on('error', error => fail(error));
+    req.on('aborted', () => fail(new Error('request aborted')));
   });
 }
 
@@ -824,11 +1037,299 @@ function extractApiKey(req: IncomingMessage): string {
   return (req.headers['x-api-key'] as string) || '';
 }
 
+function headerValue(value: string | string[] | undefined): string {
+  return Array.isArray(value) ? value[0] ?? '' : value ?? '';
+}
+
+export function hasAdminAccess(headers: Record<string, string | string[] | undefined>): boolean {
+  const requiredToken = process.env.MOMA_ADMIN_TOKEN;
+  if (!requiredToken) return true;
+
+  const adminToken = headerValue(headers['x-admin-token']);
+  const authorization = headerValue(headers.authorization);
+  return adminToken === requiredToken || authorization === `Bearer ${requiredToken}`;
+}
+
+function requireAdminAccess(req: IncomingMessage, res: ServerResponse): boolean {
+  if (hasAdminAccess(req.headers)) return true;
+  jsonResponse(res, 401, { error: { message: 'Admin token required', type: 'authentication_error' } });
+  return false;
+}
+
+export function redactAgentForResponse(agent: AgentConfig): AgentConfig {
+  return {
+    ...agent,
+    apiKey: agent.apiKey ? `***${agent.apiKey.slice(-4)}` : '',
+  };
+}
+
+export function agentListItem(agent: AgentConfig) {
+  return {
+    id: agent.id,
+    name: agent.name,
+    provider: agent.provider,
+    tierProfile: Object.entries(agent.tierConfig).map(([tier, model]) => ({ tier, model })),
+    benchmarkEnabled: agent.benchmarkEnabled,
+    requestCount: agent.requestCount,
+    createdAt: agent.createdAt,
+    apiKey: redactAgentForResponse(agent).apiKey,
+  };
+}
+
+export interface UpstreamFailureMetadata {
+  provider: string;
+  status: number;
+  code: string | number | null;
+  bodyPrefix: string;
+}
+
+export function maskApiKeyShapedSubstrings(value: string): string {
+  return value
+    .replace(/\bBearer\s+[A-Za-z0-9._-]{8,}\b/gi, 'Bearer [REDACTED_API_KEY]')
+    .replace(/\b(?:sk|pk|rk|AIza|AKIA|gh[pousr]|xox[baprs]?)[-_A-Za-z0-9]{8,}\b/gi, '[REDACTED_API_KEY]')
+    .replace(/((?:api[_-]?key|token|authorization)\s*[=:]\s*["']?)(?:Bearer\s+)?[A-Za-z0-9._-]{8,}/gi, '$1[REDACTED_API_KEY]');
+}
+
+export function upstreamFailureMetadata(provider: string, status: number, body: unknown): UpstreamFailureMetadata {
+  const text = typeof body === 'string' ? body : JSON.stringify(body ?? '') ?? '';
+  let code: string | number | null = null;
+  try {
+    const parsed = JSON.parse(text);
+    const error = parsed?.error ?? parsed;
+    if (typeof error?.code === 'string' || typeof error?.code === 'number') code = error.code;
+  } catch {}
+  return {
+    provider,
+    status,
+    code,
+    bodyPrefix: maskApiKeyShapedSubstrings(text).slice(0, 200),
+  };
+}
+
+function upstreamFailureHealthDetail(provider: string, status: number, body: unknown): string {
+  return JSON.stringify(upstreamFailureMetadata(provider, status, body));
+}
+
+function logUpstreamFailure(provider: string, status: number, body: unknown): void {
+  console.error('❌ Upstream provider failure', upstreamFailureMetadata(provider, status, body));
+}
+
 // Optional auth enforcement. GATESWARM_REQUIRE_AUTH=true rejects requests
 // whose key doesn't resolve to a registered agent, instead of silently
 // falling back to the `default` agent. Off by default to preserve the
 // zero-config local-dev experience; turn ON for any network-exposed deploy.
 const REQUIRE_AUTH = /^(1|true|yes|on)$/i.test(process.env.GATESWARM_REQUIRE_AUTH || '');
+
+function isSseContentType(contentType: string | null): boolean {
+  return Boolean(contentType && /(?:^|;)\s*text\/event-stream(?:;|$)/i.test(contentType));
+}
+
+export function jsonCompletionToSseEvents(
+  data: any,
+  model: string,
+  votePrompt?: string,
+): string[] {
+  const events: string[] = [];
+  const choice = data?.choices?.[0] ?? {};
+  const content = choice?.message?.content ?? choice?.text ?? '';
+  const finishReason = (choice?.finish_reason ?? 'stop') as StreamFinishReason;
+  if (content !== '' && content !== null && content !== undefined) {
+    events.push(`data: ${JSON.stringify({
+      id: data?.id ?? `chatcmpl-json-${Date.now()}`,
+      object: 'chat.completion.chunk',
+      created: data?.created ?? Math.floor(Date.now() / 1000),
+      model: data?.model ?? model,
+      choices: [{ index: 0, delta: { content }, finish_reason: null }],
+    })}\n\n`);
+  }
+  if (votePrompt) {
+    events.push(`data: ${JSON.stringify({
+      id: `chatcmpl-vote-${Date.now()}`,
+      object: 'chat.completion.chunk',
+      created: Math.floor(Date.now() / 1000),
+      model,
+      choices: [{ index: 0, delta: { content: votePrompt }, finish_reason: null }],
+    })}\n\n`);
+  }
+  events.push(`data: ${createTerminalStreamChunk(model, finishReason)}\n\n`, 'data: [DONE]\n\n');
+  return events;
+}
+
+function writeJsonCompletionAsSse(
+  res: ServerResponse,
+  data: any,
+  model: string,
+  vote: ReturnType<typeof createVoteRequest> = null,
+): void {
+  const votePrompt = vote ? appendVotePromptToStream(vote).content : undefined;
+  for (const event of jsonCompletionToSseEvents(data, model, votePrompt)) {
+    res.write(event);
+  }
+  res.end();
+}
+
+export function cliFailureResponse(): { error: { message: string; type: string } } {
+  return { error: { message: 'CLI provider failed before producing output', type: 'cli_error' } };
+}
+
+interface StreamingTarget {
+  providerId: string;
+  model: string;
+  baseUrl?: string;
+  apiKey?: string;
+  isCli: boolean;
+  label: string;
+}
+
+/**
+ * Select a usable stream before writing response headers. HTTP attempts only
+ * become committed after their status and content type (or valid JSON
+ * completion) have been checked; this keeps the fallback chain available.
+ */
+async function forwardStreamingWithFallback(options: {
+  providerId: string;
+  model: string;
+  tier: EffortLevel;
+  tierModel: TierModelConfig;
+  cfg: V04Config;
+  agent: AgentConfig;
+  body: Record<string, any>;
+  messages: any[];
+  requestModalities: { vision: boolean };
+  promptText: string;
+  confidence: number;
+  res: ServerResponse;
+}): Promise<void> {
+  const { providerId, model, tier, tierModel, cfg, agent, body, messages, requestModalities, promptText, confidence, res } = options;
+  const recordStreamOutcome = (target: StreamingTarget, status: 'success' | 'error', started: number) => {
+    if (!agent.benchmarkEnabled) return;
+    void benchmarkLogger.log({
+      prompt: promptText.slice(0, 500),
+      prompt_length: promptText.length,
+      tier,
+      routed_model: target.label,
+      tokens_in: 0,
+      tokens_out: 0,
+      latency_ms: Date.now() - started,
+      provider: target.providerId,
+      status,
+    });
+  };
+  const buildTarget = (id: string, targetModel: string): StreamingTarget | null => {
+    if (agentRegistry.isCliProvider(id)) {
+      return agent.id === id ? null : { providerId: id, model: targetModel, isCli: true, label: `${id}/${targetModel}` };
+    }
+    const baseUrl = agentRegistry.getProviderBaseUrl(id);
+    const apiKey = agentRegistry.getProviderApiKey(id);
+    return baseUrl && apiKey
+      ? { providerId: id, model: targetModel, baseUrl, apiKey, isCli: false, label: `${id}/${targetModel}` }
+      : null;
+  };
+  const initial = buildTarget(providerId, model);
+  if (!initial) {
+    jsonResponse(res, 503, { error: { message: `Provider ${providerId} not configured`, type: 'provider_unavailable' } });
+    return;
+  }
+  const targets: StreamingTarget[] = [initial];
+  for (const fallback of cfg.tier_models[tier]?.fallback_models ?? []) {
+    if (targets.some(target => target.providerId === fallback.provider && target.model === fallback.model)) continue;
+    const target = buildTarget(fallback.provider, fallback.model);
+    if (target) targets.push(target);
+  }
+
+  const deadline = Date.now() + FALLBACK_GLOBAL_BUDGET_MS;
+  const attempted: string[] = [];
+  for (const target of targets) {
+    if (fallbackAttemptTimeoutMs(deadline) <= 0) break;
+    const skipReason = providerHealth.getSkipReason(target.providerId);
+    if (skipReason || (!target.isCli && providerQuota.shouldSwitch(target.providerId).shouldSwitch)) continue;
+    const healthAttempt = providerHealth.beginAttempt(target.providerId);
+    attempted.push(target.label);
+    const started = Date.now();
+    try {
+      if (target.isCli) {
+        const available = await agentRegistry.checkCliProviderAvailability(target.providerId);
+        if (!available.ok) throw new Error(available.reason ?? 'CLI unavailable');
+        const result = await agentRegistry.getCliAdapter(target.providerId)!.chatCompletion(sanitizeForCli(messages), target.model, {});
+        const resultBody = { choices: [{ message: { role: 'assistant', content: result.content }, finish_reason: result.finishReason }] };
+        const unusable = getUnusableProviderBodyReason(resultBody);
+        if (unusable) {
+          providerHealth.recordFailure(target.providerId, unusable.kind, target.label, unusable.reason, healthAttempt);
+          continue;
+        }
+        // The subprocess has now produced valid output, so it is safe to
+        // commit HTTP 200. Do not turn stderr/errors into assistant content.
+        const vote = createVoteRequest(agent.id, promptText, tier, confidence);
+        const stream = startCliStream(res, target.label);
+        finishCliStream(res, stream, result.content, (result.finishReason ?? 'stop') as StreamFinishReason, vote);
+        providerHealth.recordSuccess(target.providerId, healthAttempt);
+        recordStreamOutcome(target, 'success', started);
+        return;
+      }
+
+      const timeoutMs = fallbackAttemptTimeoutMs(deadline);
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), timeoutMs);
+      const url = target.baseUrl!.endsWith('/v1') || target.baseUrl!.endsWith('/v4')
+        ? `${target.baseUrl}/chat/completions`
+        : target.baseUrl!;
+      const targetMessages = requestModalities.vision && !consumptionIntelligence.modelSupportsVision(target.providerId, target.model)
+        ? messages.map(normalizeMessageContent)
+        : messages;
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${target.apiKey}` },
+        body: JSON.stringify(buildHttpProviderPayload(body, targetMessages, target.model, {
+          providerId: target.providerId, tierModel, applyTierDefaults: true,
+        })),
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+      if (!response.ok) {
+        const errorBody = await response.text().catch(() => '');
+        const kind = providerFailureKindForHttp(response.status, errorBody);
+        logUpstreamFailure(target.providerId, response.status, errorBody);
+        providerHealth.recordFailure(target.providerId, kind, target.label, upstreamFailureHealthDetail(target.providerId, response.status, errorBody), healthAttempt);
+        continue;
+      }
+
+      if (isSseContentType(response.headers.get('content-type')) && response.body) {
+        res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'Access-Control-Allow-Origin': '*' });
+        const completed = await pipeSseResponse(response, res, target.model, () => createVoteRequest(agent.id, promptText, tier, confidence));
+        if (completed) {
+          providerHealth.recordSuccess(target.providerId, healthAttempt);
+          recordStreamOutcome(target, 'success', started);
+        } else {
+          providerHealth.recordFailure(target.providerId, 'transport', target.label, 'stream read failure', healthAttempt);
+          recordStreamOutcome(target, 'error', started);
+        }
+        return; // a failed read is terminal: some output is already committed.
+      }
+
+      // Some providers reply to stream:true with a normal completion JSON.
+      // It is usable only when it passes the same completion validation.
+      let data: any;
+      try { data = await response.json(); } catch { data = null; }
+      const unusable = getUnusableProviderBodyReason(data);
+      if (unusable) {
+        providerHealth.recordFailure(target.providerId, unusable.kind, target.label, unusable.reason, healthAttempt);
+        continue;
+      }
+      const vote = createVoteRequest(agent.id, promptText, tier, confidence);
+      res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'Access-Control-Allow-Origin': '*' });
+      writeJsonCompletionAsSse(res, data, target.model, vote);
+      providerHealth.recordSuccess(target.providerId, healthAttempt);
+      recordStreamOutcome(target, 'success', started);
+      return;
+    } catch (error: any) {
+      const kind = error?.name === 'AbortError' ? 'timeout' : 'transport';
+      providerHealth.recordFailure(target.providerId, kind, target.label, error?.message ?? kind, healthAttempt);
+      recordStreamOutcome(target, 'error', started);
+      console.error(`❌ Streaming attempt ${target.label} failed: ${error?.message ?? kind}`);
+    }
+  }
+  jsonResponse(res, 502, { error: { message: `Provider stream chain exhausted (attempted: ${attempted.join(' → ') || 'none'})`, type: 'provider_chain_exhausted' } });
+}
 
 async function forwardToProvider(
   providerId: string,
@@ -869,7 +1370,7 @@ async function forwardToProvider(
 
     if (!response.ok) {
       const error = await response.text();
-      console.error(`❌ Provider error: ${response.status} ${error}`);
+      logUpstreamFailure(providerId, response.status, error);
       jsonResponse(res, response.status, { error: { message: error, type: 'provider_error' } });
       return;
     }
@@ -964,6 +1465,9 @@ async function forwardToProvider(
 // ─── Route Handlers ────────────────────────────────────
 
 async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, agent: AgentConfig): Promise<void> {
+  // Keep routing decisions stable while async selection/fallback work is in
+  // flight; getConfig() can otherwise hot-reload between individual attempts.
+  const cfg: V04Config = structuredClone(getConfig());
   const body = await parseBody(req);
   (req as any)._body = body;
   const rawMessages = Array.isArray(body.messages) ? body.messages : [];
@@ -980,6 +1484,9 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
   const recordedVote = recordDetectedVoteReply(agent.id, promptText);
   if (recordedVote) {
     res.setHeader('X-Training-Vote', 'recorded');
+    const message = isVoteClarification(recordedVote)
+      ? recordedVote.clarification
+      : `Recorded your router feedback: actual tier is ${recordedVote.actualTier}. Thank you.`;
     return jsonResponse(res, 200, {
       id: `chatcmpl-vote-${Date.now()}`,
       object: 'chat.completion',
@@ -987,7 +1494,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
       model: body.model || 'gateswarm-training-mode',
       choices: [{
         index: 0,
-        message: { role: 'assistant', content: `Recorded your router feedback: actual tier is ${recordedVote.actualTier}. Thank you.` },
+        message: { role: 'assistant', content: message },
         finish_reason: 'stop',
       }],
       usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
@@ -1052,8 +1559,9 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
   // v0.5.7: If effort_override is set, skip the greeting fast-path so the
   // caller's chosen tier is honored.
   const GREETING_RE = /^\s*(hi|hello|hey|yo|sup|good\s+(morning|afternoon|evening)|thanks?|thank\s+you|ok(?:ay)?|bye|cya|gm|gn)\s*[.!]?\s*$/i;
-  if (!effortOverride && promptText && GREETING_RE.test(promptText) && promptText.length < 30) {
-    const trivialCfg = getConfig().tier_models.trivial;
+  if (!effortOverride && promptText && GREETING_RE.test(promptText) && promptText.length < 30
+    && isGreetingFastPathEligible(messages, body)) {
+    const trivialCfg = cfg.tier_models.trivial;
     // v0.5.5: Check provider health before fast-path routing.
     // If the trivial provider is throttled/rate-limited, fall through to
     // normal routing which has the full fallback chain.
@@ -1064,21 +1572,23 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
     // the fast-path whenever the trivial tier was re-pointed at a new provider.
     if (!trivialHealth.shouldSwitch && trivialCfg && agentRegistry.isHttpProvider(trivialCfg.provider)) {
       console.log(`⚡ [${agent.name}] Greeting fast-path: '${promptText.slice(0,20)}' → ${trivialCfg.provider}/${trivialCfg.model}`);
-      // Strip system messages, send only the user message
-      const greetingMessages = [messages.filter((m: any) => m.role === 'user').pop()].filter(Boolean);
+      const greetingMessages = messages;
       // v0.5.5: Respect client's stream flag. If client wants streaming, forward
       // the stream as-is (Pi's OpenAI client needs SSE with [DONE] markers).
       // If client wants non-streaming, collect and return JSON.
       const clientWantsStream = body.stream === true;
+      let greetingHealthAttempt: any = null;
       try {
         const baseUrl = agentRegistry.getProviderBaseUrl(trivialCfg.provider);
         const apiKey = agentRegistry.getProviderApiKey(trivialCfg.provider);
         if (baseUrl && apiKey) {
           const cleanModel = trivialCfg.model.includes('/') ? trivialCfg.model.split('/').slice(1).join('/') : trivialCfg.model;
+          const healthAttempt = providerHealth.beginAttempt(trivialCfg.provider);
+          greetingHealthAttempt = healthAttempt;
           const resp = await fetch(`${baseUrl}/chat/completions`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-            body: JSON.stringify({ messages: greetingMessages, model: cleanModel, stream: clientWantsStream }),
+            body: JSON.stringify(buildHttpProviderPayload(body, greetingMessages, cleanModel)),
             signal: AbortSignal.timeout(10000),
           });
           if (resp.ok) {
@@ -1093,90 +1603,69 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
             res.setHeader('X-Routing-Method', 'greeting-fast-path');
             res.setHeader('X-Routing-Reason', 'greeting-fast-path');
             res.setHeader('X-Modality', 'text');
-            if (clientWantsStream) {
-              // Forward the upstream SSE stream as-is
+            if (clientWantsStream && isSseContentType(resp.headers.get('content-type')) && resp.body) {
               res.writeHead(200, {
                 'Content-Type': 'text/event-stream',
                 'Cache-Control': 'no-cache',
                 'Connection': 'keep-alive',
               });
-              const reader = resp.body?.getReader();
-              if (reader) {
-                const streamState = { sawFinishReason: false, sawDone: false };
-                const decoder = new TextDecoder();
-                let buffer = '';
-                try {
-                  while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-                    buffer += decoder.decode(value, { stream: true });
-                    let idx;
-                    while ((idx = buffer.indexOf('\n\n')) !== -1) {
-                      const evt = buffer.slice(0, idx);
-                      buffer = buffer.slice(idx + 2);
-                      if (!evt.trim()) continue;
-                      for (const line of evt.split('\n')) {
-                        if (!line.startsWith('data:')) continue;
-                        const d = line.slice(5).trim();
-                        if (d === '[DONE]') streamState.sawDone = true;
-                        else if (d) {
-                          try {
-                            const parsed = JSON.parse(d);
-                            if (Array.isArray(parsed?.choices)) {
-                              for (const c of parsed.choices) {
-                                if (c?.finish_reason != null) streamState.sawFinishReason = true;
-                              }
-                            }
-                          } catch {}
-                        }
-                      }
-                      res.write(evt + '\n\n');
-                    }
-                  }
-                  if (buffer.trim()) res.write(buffer + '\n\n');
-                  // Ensure terminal markers
-                  if (!streamState.sawFinishReason) {
-                    res.write(`data: {"id":"chatcmpl-done","object":"chat.completion.chunk","created":${Math.floor(Date.now()/1000)},"model":"${cleanModel}","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n`);
-                  }
-                  if (!streamState.sawDone) {
-                    res.write('data: [DONE]\n\n');
-                  }
-                  res.end();
-                } catch (streamErr) {
-                  if (!res.writableEnded) res.end();
-                }
-              } else {
-                res.end();
-              }
+              const completed = await pipeSseResponse(resp, res, cleanModel);
+              if (completed) providerHealth.recordSuccess(trivialCfg.provider, healthAttempt);
+              else providerHealth.recordFailure(trivialCfg.provider, 'transport', `${trivialCfg.provider}/${trivialCfg.model}`, 'greeting stream read failure', healthAttempt);
             } else {
               const data = await resp.json();
               const bodyFailure = getUnusableProviderBodyReason(data);
               if (bodyFailure) {
                 console.log(`⚡ [${agent.name}] Greeting fast-path returned unusable body (${bodyFailure.reason}) — falling through to normal routing`);
-                providerHealth.recordFailure(trivialCfg.provider, bodyFailure.kind, `${trivialCfg.provider}/${trivialCfg.model}`, bodyFailure.message);
+                logUpstreamFailure(trivialCfg.provider, 200, data);
+                providerHealth.recordFailure(trivialCfg.provider, bodyFailure.kind, `${trivialCfg.provider}/${trivialCfg.model}`, upstreamFailureHealthDetail(trivialCfg.provider, 200, data), healthAttempt);
                 consumptionIntelligence.recordFallbackOutcome('trivial', trivialCfg.provider, trivialCfg.model, false, bodyFailure.reason);
                 throw new Error(`Greeting fast-path unusable response: ${bodyFailure.reason}`);
+              }
+              providerHealth.recordSuccess(trivialCfg.provider, healthAttempt);
+              if (clientWantsStream) {
+                res.writeHead(200, {
+                  'Content-Type': 'text/event-stream',
+                  'Cache-Control': 'no-cache',
+                  'Connection': 'keep-alive',
+                });
+                writeJsonCompletionAsSse(res, data, cleanModel);
+                return;
               }
               return jsonResponse(res, 200, data);
             }
             return;
           }
+          const errorText = await resp.text().catch(() => '');
+          logUpstreamFailure(trivialCfg.provider, resp.status, errorText);
+          const healthDetail = upstreamFailureHealthDetail(trivialCfg.provider, resp.status, errorText);
           if (resp.status === 429 || resp.status === 1305 || resp.status === 1308) {
             providerQuota.record429(trivialCfg.provider);
+            providerHealth.recordFailure(trivialCfg.provider, 'rate_limit', `${trivialCfg.provider}/${trivialCfg.model}`, healthDetail, healthAttempt);
             // v0.5.5: Feed the greeting-fast-path failure to the intelligence layer
             // so the trivial tier gets rebalanced if ZAI is persistently exhausted
             consumptionIntelligence.recordFallbackOutcome('trivial', trivialCfg.provider, trivialCfg.model, false, '429');
             console.log(`⚡ [${agent.name}] Greeting fast-path failed (429) — falling through to normal routing`);
             // Fall through to normal routing below
           } else {
-            const errorText = await resp.text().catch(() => '');
             const failureKind = providerFailureKindForHttp(resp.status, errorText);
-            providerHealth.recordFailure(trivialCfg.provider, failureKind, `${trivialCfg.provider}/${trivialCfg.model}`, errorText || `HTTP ${resp.status}`);
+            providerHealth.recordFailure(trivialCfg.provider, failureKind, `${trivialCfg.provider}/${trivialCfg.model}`, healthDetail, healthAttempt);
             consumptionIntelligence.recordFallbackOutcome('trivial', trivialCfg.provider, trivialCfg.model, false, String(resp.status));
             console.log(`⚡ [${agent.name}] Greeting fast-path failed (${resp.status}) — falling through to normal routing`);
           }
         }
-      } catch {
+      } catch (error: any) {
+        const detail = maskApiKeyShapedSubstrings(String(error?.message ?? 'greeting stream failed'));
+        console.error(`⚡ [${agent.name}] Greeting fast-path error: ${detail}`);
+        if (greetingHealthAttempt) {
+          providerHealth.recordFailure(trivialCfg.provider, 'transport', `${trivialCfg.provider}/${trivialCfg.model}`, detail, greetingHealthAttempt);
+        }
+        if (clientWantsStream && !res.headersSent) {
+          res.writeHead(502, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' });
+          writeStreamError(res, trivialCfg.model, { sawFinishReason: false, sawDone: false });
+          res.end();
+          return;
+        }
         console.log(`⚡ [${agent.name}] Greeting fast-path error — falling through to normal routing`);
         // Fall through
       }
@@ -1191,20 +1680,14 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
 
 
 
-  // Score complexity — v0.4 ensemble
-  const v04Score = await scoreIntentV04(promptText);
+  // Score complexity — v0.4 ensemble. An explicit override must not invoke
+  // the scorer (or its RAG/config work) at all.
+  const v04Score = await scoreWithEffortOverride(promptText, effortOverride);
   let score = v04Score.value;
   // Bias-free score for the feedback store: boundary retraining must fit
   // against the stable signal, not the transient history-bias correction.
   let rawScore = v04Score.rawValue ?? v04Score.value;
   let effort: EffortLevel = v04Score.tier ?? 'moderate';
-
-  // v0.5.7: effort_override bypasses ensemble scoring; jump straight to the named tier.
-  if (effortOverride) {
-    score = tierMidpoints()[effortOverride as EffortLevel];
-    rawScore = score;
-    effort = effortOverride as EffortLevel;
-  }
 
   // ─── v0.4.4: Context Continuity Anchor ─────────────────────
   // Extract session ID from request body or generate from agent+prompt hash
@@ -1230,7 +1713,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
     });
   } catch {
     console.log(`🧠 [${agent.name}] Intelligence engine failed — using static config`);
-    const staticCfg = getTierModel(effort);
+    const staticCfg = cfg.tier_models[effort];
     decision = {
       provider: staticCfg?.provider || 'zai',
       model: staticCfg?.model || 'glm-4.5-air',
@@ -1254,12 +1737,21 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
   }
 
   // v0.5.3: plan mode override
-  const rawTier = getTierModel(effort);
+  const rawTier = cfg.tier_models[effort];
   if (activeMode === 'plan' && rawTier?.plan_model) {
     providerId = rawTier.plan_provider || decision.provider;
     model = rawTier.plan_model;
     console.log(`📋 [${agent.name}] Plan mode override: ${providerId}/${model}`);
   }
+  const routedTierModel: TierModelConfig = activeMode === 'plan' && rawTier?.plan_model
+    ? {
+        ...rawTier,
+        model: rawTier.plan_model,
+        provider: rawTier.plan_provider ?? rawTier.provider,
+        max_tokens: rawTier.plan_max_tokens ?? rawTier.max_tokens,
+        enable_thinking: rawTier.plan_enable_thinking ?? false,
+      }
+    : rawTier;
 
   console.log(`🧠 [${agent.name}] Score: ${score.toFixed(3)} → ${effort} (${activeMode}) → ${providerId}/${model} [${decision.reason}, conf=${decision.confidence.toFixed(2)}]`);
   const interactionId = `${agent.id}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -1488,6 +1980,23 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
   compressedMessages.length = 0;
   compressedMessages.push(...sanitizedMessages);
 
+  if (body.stream === true) {
+    return forwardStreamingWithFallback({
+      providerId,
+      model,
+      tier: effort,
+      tierModel: routedTierModel,
+      cfg,
+      agent,
+      body,
+      messages: compressedMessages,
+      requestModalities,
+      promptText,
+      confidence: v04Score.confidence ?? 0.7,
+      res,
+    });
+  }
+
   // ─── v0.5: CLI Provider Dispatch ──────────────────────────
   // If provider is a CLI agent, use light sanitization + subprocess dispatch.
   // LOOP GUARD: If the authenticated agent IS this CLI provider, routing
@@ -1508,7 +2017,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
     if (!avail.ok) {
       console.log(`⚠️  [${agent.name}] CLI ${providerId}/${model} unavailable (${avail.reason}) — diverting to ${effort} fallback chain`);
       const unavailableCli = providerId;
-      const fbList = getTierModel(effort)?.fallback_models ?? [];
+      const fbList = cfg.tier_models[effort]?.fallback_models ?? [];
       for (const fb of fbList) {
         if (fb.provider === unavailableCli) continue;
         if (agentRegistry.isCliProvider(fb.provider)) {
@@ -1558,15 +2067,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
       });
     }
 
-    const url = `${baseUrl}/chat/completions`;
-    const tierModel = getTierModel(effort);
-    const payload: any = { ...body, model, messages: compressedMessages };
-    // v3.6: Only send enable_thinking to ZAI when TRUE — ZAI rejects enable_thinking=false
-    if (tierModel?.enable_thinking === true && providerId === 'zai') {
-      payload.enable_thinking = true;
-    } else if (payload.enable_thinking !== undefined) {
-      delete payload.enable_thinking;
-    }
+    const tierModel = routedTierModel;
 
     // ─── 429/503 Fallback Chain: try primary then fallback_models from config ───
     // v0.5: Extended to support both HTTP and CLI providers
@@ -1606,7 +2107,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
     }
 
     // Supplement with static config fallbacks as backup
-    const tierCfg = getTierModel(effort);
+    const tierCfg = cfg.tier_models[effort];
     if (tierCfg) {
       const fbModels = (tierCfg as any).fallback_models as Array<{model: string; provider: string}> | undefined;
       if (fbModels) {
@@ -1626,19 +2127,24 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
     // v0.5.5: Global retry budget — don't spend more than 60s on fallbacks.
     // If all providers are rate-limited, failing fast is better than a
     // 5-minute cascade of guaranteed 429s.
-    const retryDeadline = Date.now() + 60000;
+    const retryDeadline = Date.now() + FALLBACK_GLOBAL_BUDGET_MS;
+    const attemptedTargets: string[] = [];
+    const skippedTargets: string[] = [];
 
     try {
-    for (const target of retryTargets) {
+    for (let targetIndex = 0; targetIndex < retryTargets.length; targetIndex++) {
+      const target = retryTargets[targetIndex];
       // ─── v0.5.5: Global budget check ───
-      if (Date.now() > retryDeadline) {
+      if (fallbackAttemptTimeoutMs(retryDeadline) <= 0) {
         console.log(`⏱️  [${agent.name}] Retry budget exhausted (60s) — giving up`);
+        skippedTargets.push(...retryTargets.slice(targetIndex).map((remaining) => `${remaining.label} (global budget exhausted)`));
         break;
       }
 
       const healthSkip = providerHealth.getSkipReason(target.providerId);
       if (healthSkip) {
         console.log(`⏭️  [${agent.name}] Skipping ${target.label}: ${healthSkip}`);
+        skippedTargets.push(`${target.label} (${healthSkip})`);
         continue;
       }
 
@@ -1650,9 +2156,13 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
         const switchCheck = providerQuota.shouldSwitch(target.providerId);
         if (switchCheck.shouldSwitch) {
           console.log(`⏭️  [${agent.name}] Skipping ${target.label}: ${switchCheck.reason}`);
+          skippedTargets.push(`${target.label} (${switchCheck.reason})`);
           continue;
         }
       }
+
+      const healthAttempt = providerHealth.beginAttempt(target.providerId);
+      attemptedTargets.push(target.label);
 
       // ─── CLI provider fallback ───
       if (target.isCli) {
@@ -1661,12 +2171,12 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
           const avail = await agentRegistry.checkCliProviderAvailability(target.providerId);
           if (!avail.ok) {
             console.log(`⚠️  [${agent.name}] CLI ${target.label} unavailable: ${avail.reason}`);
-            providerHealth.recordFailure(target.providerId, 'transport', target.label, avail.reason ?? 'unavailable');
+            providerHealth.recordFailure(target.providerId, 'transport', target.label, avail.reason ?? 'unavailable', healthAttempt);
             continue;
           }
           const cliResult = await (async () => {
             const adapter = agentRegistry.getCliAdapter(target.providerId)!;
-            return adapter.chatCompletion(sanitizeForCli(payload.messages), target.model, {});
+            return adapter.chatCompletion(sanitizeForCli(compressedMessages), target.model, {});
           })();
           const bodyFailure = getUnusableProviderBodyReason({
             choices: [{ message: { role: 'assistant', content: cliResult.content } }],
@@ -1675,7 +2185,9 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
             console.log(`⚠️  [${agent.name}] CLI ${target.label} returned unusable body (${bodyFailure.reason}), trying fallback...`);
             modelMatrix.recordError(target.providerId, target.model, bodyFailure.reason);
             consumptionTracker.recordUsage(target.providerId, { tokensIn: 0, tokensOut: 0, latencyMs: 0, error: true });
-            providerHealth.recordFailure(target.providerId, bodyFailure.kind, target.label, bodyFailure.message);
+            const providerBody = { choices: [{ message: { role: 'assistant', content: cliResult.content } }] };
+            logUpstreamFailure(target.providerId, 200, providerBody);
+            providerHealth.recordFailure(target.providerId, bodyFailure.kind, target.label, upstreamFailureHealthDetail(target.providerId, 200, providerBody), healthAttempt);
             consumptionIntelligence.recordFallbackOutcome(effort, target.providerId, target.model, false, bodyFailure.reason);
             continue;
           }
@@ -1690,36 +2202,47 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
           };
           latency = Date.now() - startTime;
           actualTarget = target;
-          providerHealth.recordSuccess(target.providerId);
+          providerHealth.recordSuccess(target.providerId, healthAttempt);
           break;
         } catch (err: any) {
           console.log(`⚠️  [${agent.name}] CLI ${target.label} failed: ${err.message}`);
           // v0.5.5: Feed CLI failure to intelligence layer
           consumptionIntelligence.recordFallbackOutcome(effort, target.providerId, target.model, false, 'cli_error');
-          providerHealth.recordFailure(target.providerId, 'transport', target.label, err.message);
+          providerHealth.recordFailure(target.providerId, 'transport', target.label, err.message, healthAttempt);
           continue;
         }
       }
 
       // ─── HTTP provider fallback ───
       let reqTimeoutId: ReturnType<typeof setTimeout> | undefined;
+      let attemptTimeoutMs = 0;
       try {
         const fBaseUrl = target.baseUrl || '';
         const url = fBaseUrl.endsWith('/v1') || fBaseUrl.endsWith('/v4')
           ? `${fBaseUrl}/chat/completions`
           : fBaseUrl;
         const reqController = new AbortController();
-        reqTimeoutId = setTimeout(() => reqController.abort(), 120000);
+        attemptTimeoutMs = fallbackAttemptTimeoutMs(retryDeadline);
+        if (attemptTimeoutMs <= 0) {
+          skippedTargets.push(`${target.label} (global budget exhausted)`);
+          break;
+        }
+        reqTimeoutId = setTimeout(() => reqController.abort(), attemptTimeoutMs);
         // MoMA: non-vision targets reject image_url content parts (e.g. zai
         // error 1210) — flatten media to placeholders for them; vision-capable
         // targets receive the original content arrays.
-        const targetPayload = requestModalities.vision
+        const targetMessages = requestModalities.vision
           && !consumptionIntelligence.modelSupportsVision(target.providerId, target.model)
           ? (() => {
               console.log(`⚠️  [${agent.name}] ${target.label} is not vision-capable — sending media parts as placeholders`);
-              return { ...payload, messages: payload.messages.map(normalizeMessageContent), model: target.model };
+              return compressedMessages.map(normalizeMessageContent);
             })()
-          : { ...payload, model: target.model };
+          : compressedMessages;
+        const targetPayload = buildHttpProviderPayload(body, targetMessages, target.model, {
+          providerId: target.providerId,
+          tierModel,
+          applyTierDefaults: true,
+        });
         const resp = await fetch(url, {
           method: 'POST',
           headers: {
@@ -1730,12 +2253,18 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
           signal: reqController.signal,
         });
         clearTimeout(reqTimeoutId);
+        const errorText = !resp.ok ? await resp.text().catch(() => '') : '';
+        if (!resp.ok) logUpstreamFailure(target.providerId, resp.status, errorText);
+        const healthDetail = !resp.ok
+          ? upstreamFailureHealthDetail(target.providerId, resp.status, errorText)
+          : '';
 
         if (resp.status === 429 || resp.status === 1305 || resp.status === 1308) {
           console.log(`⚠️  [${agent.name}] ${target.label} rate-limited (${resp.status}), trying fallback...`);
           modelMatrix.recordError(target.providerId, target.model, `rate-limited (${resp.status})`);
           providerQuota.record429(target.providerId);
           consumptionTracker.recordUsage(target.providerId, { tokensIn: 0, tokensOut: 0, latencyMs: 0, error: true });
+          providerHealth.recordFailure(target.providerId, 'rate_limit', target.label, healthDetail, healthAttempt);
           // v0.5.5: Feed the failure to the intelligence layer for self-healing
           consumptionIntelligence.recordFallbackOutcome(effort, target.providerId, target.model, false, '429');
           continue;
@@ -1745,17 +2274,19 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
           console.log(`⚠️  [${agent.name}] ${target.label} server error (${resp.status}), trying fallback...`);
           modelMatrix.recordError(target.providerId, target.model, `server error (${resp.status})`);
           consumptionTracker.recordUsage(target.providerId, { tokensIn: 0, tokensOut: 0, latencyMs: 0, error: true });
+          const failureKind = providerFailureKindForHttp(resp.status, errorText);
+          providerHealth.recordFailure(target.providerId, failureKind, target.label, healthDetail, healthAttempt);
+          consumptionIntelligence.recordFallbackOutcome(effort, target.providerId, target.model, false, String(resp.status));
           continue;
         }
 
         if (!resp.ok) {
-          const error = await resp.text();
-          const failureKind = providerFailureKindForHttp(resp.status, error);
+          const failureKind = providerFailureKindForHttp(resp.status, errorText);
           console.log(`⚠️  [${agent.name}] ${target.label} provider error (${resp.status}), trying fallback...`);
           modelMatrix.recordError(target.providerId, target.model, `provider error (${resp.status})`);
           if (failureKind === 'rate_limit') providerQuota.record429(target.providerId);
           consumptionTracker.recordUsage(target.providerId, { tokensIn: 0, tokensOut: 0, latencyMs: 0, error: true });
-          providerHealth.recordFailure(target.providerId, failureKind, target.label, error || `HTTP ${resp.status}`);
+          providerHealth.recordFailure(target.providerId, failureKind, target.label, healthDetail, healthAttempt);
           consumptionIntelligence.recordFallbackOutcome(effort, target.providerId, target.model, false, String(resp.status));
           continue;
         }
@@ -1767,33 +2298,38 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
           modelMatrix.recordError(target.providerId, target.model, bodyFailure.reason);
           if (bodyFailure.kind === 'rate_limit') providerQuota.record429(target.providerId);
           consumptionTracker.recordUsage(target.providerId, { tokensIn: 0, tokensOut: 0, latencyMs: 0, error: true });
-          providerHealth.recordFailure(target.providerId, bodyFailure.kind, target.label, bodyFailure.message);
+          logUpstreamFailure(target.providerId, 200, data);
+          providerHealth.recordFailure(target.providerId, bodyFailure.kind, target.label, upstreamFailureHealthDetail(target.providerId, 200, data), healthAttempt);
           consumptionIntelligence.recordFallbackOutcome(effort, target.providerId, target.model, false, bodyFailure.reason);
           continue;
         }
         latency = Date.now() - startTime;
         actualTarget = target;
-        providerHealth.recordSuccess(target.providerId);
+        providerHealth.recordSuccess(target.providerId, healthAttempt);
         break;
       } catch (err: any) {
         clearTimeout(reqTimeoutId);
         if (err.name === 'AbortError') {
-          console.error(`⏱️  ${target.label} timed out after 120s, trying fallback...`);
-          modelMatrix.recordError(target.providerId, target.model, 'timeout after 120s');
-          consumptionTracker.recordUsage(target.providerId, { tokensIn: 0, tokensOut: 0, latencyMs: 120000, error: true });
-          providerHealth.recordFailure(target.providerId, 'timeout', target.label, 'timeout after 120s');
+          console.error(`⏱️  ${target.label} timed out within the global retry budget, trying fallback...`);
+          modelMatrix.recordError(target.providerId, target.model, 'timeout within global budget');
+          consumptionTracker.recordUsage(target.providerId, { tokensIn: 0, tokensOut: 0, latencyMs: attemptTimeoutMs, error: true });
+          providerHealth.recordFailure(target.providerId, 'timeout', target.label, 'timeout within global budget', healthAttempt);
         } else {
           console.error(`❌ Forward error to ${target.label}: ${err.message}`);
           consumptionTracker.recordUsage(target.providerId, { tokensIn: 0, tokensOut: 0, latencyMs: 0, error: true });
-          providerHealth.recordFailure(target.providerId, 'transport', target.label, err.message);
+          providerHealth.recordFailure(target.providerId, 'transport', target.label, err.message, healthAttempt);
         }
         continue;
       }
     }
 
     if (!data) {
-      const tried = retryTargets.map(t => t.label).join(' → ');
-      jsonResponse(res, 502, { error: { message: `All providers failed or returned unusable responses (tried: ${tried})`, type: 'provider_chain_exhausted' } });
+      const attempted = attemptedTargets.length > 0 ? attemptedTargets.join(' → ') : 'none';
+      const skipped = skippedTargets.length > 0 ? skippedTargets.join(' → ') : 'none';
+      jsonResponse(res, 502, { error: {
+        message: `Provider chain exhausted (attempted: ${attempted}; skipped: ${skipped})`,
+        type: 'provider_chain_exhausted',
+      } });
       return;
     }
     if (actualTarget.providerId !== providerId) {
@@ -1833,6 +2369,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
 
       recordFeedback({
         prompt: promptText,
+        agentId: agent.id,
         predictedTier: effort,
         actualTier: null,
         modelUsed: `${actualTarget.providerId}/${actualTarget.model}`,
@@ -1921,22 +2458,20 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
       return jsonResponse(res, 502, { error: { message: err.message, type: 'gateway_error' } });
     }
   } else {
-    // ─── v0.5: CLI providers do not support streaming — downgrade to sync
-    // LOOP GUARD: same self-reference check as non-streaming path
-    if (agentRegistry.isCliProvider(providerId) && agent.id !== providerId) {
-      console.log(`📝 [${agent.name}] Streaming disabled for CLI provider ${providerId}, using sync dispatch`);
-      return handleCliProvider(
-        providerId, model, agent, messages, effort,
-        compressionResult, promptText, res, score, rawScore, true,
-      );
-    }
-    if (agentRegistry.isCliProvider(providerId) && agent.id === providerId) {
-      console.log(`🔒 [${agent.name}] Loop guard (stream): skipping CLI dispatch to ${providerId}`);
-    }
-    // For streaming, compress before forwarding
-    const compressedBody: any = { ...body, model, messages: compressedMessages };
-    // v0.4.1: Both Bailian and ZAI support tool calling — pass tools through
-    await forwardToProvider(providerId, model, compressedBody, res);
+    await forwardStreamingWithFallback({
+      providerId,
+      model,
+      tier: effort,
+      tierModel: routedTierModel,
+      cfg,
+      agent,
+      body,
+      messages: compressedMessages,
+      requestModalities,
+      promptText,
+      confidence: v04Score.confidence ?? 0.7,
+      res,
+    });
   }
 }
 
@@ -1975,7 +2510,6 @@ async function handleCliProvider(
   }
 
   const startTime = Date.now();
-  let cliStream: CliStreamState | null = null;
 
   try {
     // Check availability (quota + command)
@@ -1985,10 +2519,6 @@ async function handleCliProvider(
       return jsonResponse(res, 503, {
         error: { message: `CLI provider ${providerId} unavailable: ${avail.reason}`, type: 'provider_unavailable' },
       });
-    }
-
-    if (streamResponse) {
-      cliStream = startCliStream(res, providerId + '/' + model);
     }
 
     // Execute CLI
@@ -2029,6 +2559,7 @@ async function handleCliProvider(
     const feedbackId = `${agent.id}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     recordFeedback({
       prompt: promptText,
+      agentId: agent.id,
       predictedTier: effort,
       actualTier: null,
       modelUsed: `${providerId}/${result.model}`,
@@ -2087,21 +2618,20 @@ async function handleCliProvider(
 
     console.log(`🖥️  [${agent.name}] CLI ${providerId}/${result.model}: ${tokensIn}→${tokensOut}tok, ${latency}ms`);
 
-    if (streamResponse && cliStream) {
-      finishCliStream(res, cliStream, result.content, (result.finishReason ?? 'stop') as StreamFinishReason);
+    const voteRequest = createVoteRequest(agent.id, promptText, effort, 0.7);
+    if (voteRequest) {
+      openaiResponse.choices[0].message.content += appendVotePromptToStream(voteRequest).content;
+    }
+    if (streamResponse) {
+      const cliStream = startCliStream(res, providerId + '/' + model);
+      finishCliStream(res, cliStream, result.content, (result.finishReason ?? 'stop') as StreamFinishReason, voteRequest);
       return;
     }
 
     return jsonResponse(res, 200, openaiResponse);
   } catch (err: any) {
     console.error(`❌ CLI provider error (${providerId}): ${err.message}`);
-    if (streamResponse && cliStream) {
-      finishCliStream(res, cliStream, `CLI provider error: ${err.message}`, 'length');
-      return;
-    }
-    return jsonResponse(res, 502, {
-      error: { message: `CLI provider error: ${err.message}`, type: 'cli_error' },
-    });
+    return jsonResponse(res, 502, cliFailureResponse());
   }
 }
 
@@ -2140,6 +2670,12 @@ async function init() {
     console.log(`🔐 [Secrets] vault unavailable — ${secrets.count} keys from local .env fallback`);
   } else {
     console.log('🔐 [Secrets] no vault and no .env — providers with missing keys will register unconfigured');
+  }
+
+  if (shouldRefuseUnauthenticatedAdmin(HOST)) {
+    throw new Error(
+      `Refusing to bind ${HOST} without MOMA_ADMIN_TOKEN. Set MOMA_ADMIN_TOKEN, bind to a loopback host, or explicitly set MOMA_ALLOW_UNAUTHENTICATED_ADMIN=true.`,
+    );
   }
 
   await benchmarkLogger.initialize();
@@ -2200,7 +2736,10 @@ async function init() {
   console.log('🔄 [Intel] Tier recovery check: every 5min');
 
   const agents = agentRegistry.getAgents();
-  console.log(`🚀 GateSwarm MoMA Router v0.5.6 (Routing Transparency) starting on :${PORT}`);
+  console.log(`🚀 GateSwarm MoMA Router v0.6.0 (Trustable Precision) starting on :${PORT}`);
+  if (!process.env.MOMA_ADMIN_TOKEN) {
+    console.warn('⚠️⚠️  [SECURITY] MOMA_ADMIN_TOKEN is unset; agent-management endpoints are unauthenticated.');
+  }
   console.log(`📊 Providers: ${agentRegistry.getProviders().map(p => p.id).join(', ')}`);
   console.log(`🤖 Registered agents: ${agents.map(a => a.name).join(', ')}`);
 
@@ -2224,7 +2763,7 @@ async function init() {
       res.writeHead(200, {
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Allow-Methods': 'GET, POST, PATCH, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Admin-Token',
       });
       res.end();
       return;
@@ -2236,11 +2775,13 @@ async function init() {
         const agents = agentRegistry.getAgents();
         return jsonResponse(res, 200, {
           status: 'healthy',
-          router: 'GateSwarm MoMA Router v0.5.6 (Routing Transparency)',
+          router: 'GateSwarm MoMA Router v0.6.0 (Trustable Precision)',
           turboquant: 'v3.6',
           ensemble: 'enabled',
           feedback: 'enabled',
           llmJudge: getConfig().feedback_loop.llmJudgeModel,
+          configReload: getConfigReloadHealth(),
+          scorerHealth: getScorerHealth(),
           capabilities: {
             directRouting: true,
             cliProviders: true,
@@ -2274,20 +2815,6 @@ async function init() {
           return jsonResponse(res, 404, { error: 'no recent request decisions' });
         }
         return jsonResponse(res, 200, recent[0]);
-      }
-
-      if (url.pathname === '/v05/intel/ops-guide' && method === 'GET') {
-        const fs = await import('fs/promises');
-        const path = await import('path');
-        const guidePath = path.join(__dirname, '..', 'docs', 'OPS_GUIDE.md');
-        try {
-          const content = await fs.readFile(guidePath, 'utf-8');
-          res.writeHead(200, { 'Content-Type': 'text/markdown; charset=utf-8', 'Access-Control-Allow-Origin': '*' });
-          res.end(content);
-          return;
-        } catch (e: any) {
-          return jsonResponse(res, 404, { error: `ops guide not found: ${e.message}` });
-        }
       }
 
       // ─── v0.6: Plan/Act Mode Detection ───────────────────
@@ -2487,6 +3014,7 @@ async function init() {
 
       // ─── Per-Agent Metrics ───
       if (url.pathname.startsWith('/metrics/') && method === 'GET') {
+        if (!requireAdminAccess(req, res)) return;
         const agentId = url.pathname.split('/')[2];
         const agent = agentRegistry.getAgent(agentId);
         if (!agent) {
@@ -2554,7 +3082,7 @@ async function init() {
       // ─── v0.5.1: Direct Chat (alternative endpoint) ───
       if (url.pathname === '/v1/direct/chat' && method === 'POST') {
         const body = await parseBody(req);
-  (req as any)._body = body;
+        (req as any)._body = body;
         let agent: AgentConfig | null = null;
         const apiKey = extractApiKey(req);
         if (apiKey) {
@@ -2586,24 +3114,18 @@ async function init() {
 
       // ─── List Agents ───
       if (url.pathname === '/v1/agents' && method === 'GET') {
+        if (!requireAdminAccess(req, res)) return;
         const agents = agentRegistry.getAgents();
         return jsonResponse(res, 200, {
-          agents: agents.map(a => ({
-            id: a.id,
-            name: a.name,
-            provider: a.provider,
-            tierProfile: Object.entries(a.tierConfig).map(([tier, model]) => ({ tier, model })),
-            benchmarkEnabled: a.benchmarkEnabled,
-            requestCount: a.requestCount,
-            createdAt: a.createdAt,
-          })),
+          agents: agents.map(agentListItem),
         });
       }
 
       // ─── Register Agent ───
       if (url.pathname === '/v1/agents/register' && method === 'POST') {
+        if (!requireAdminAccess(req, res)) return;
         const body = await parseBody(req);
-  (req as any)._body = body;
+        (req as any)._body = body;
         if (!body.name) {
           return jsonResponse(res, 400, { error: { message: 'name is required', type: 'bad_request' } });
         }
@@ -2633,30 +3155,32 @@ async function init() {
 
       // ─── Get Agent ───
       if (url.pathname.match(/^\/v1\/agents\/[a-z0-9-]+$/) && method === 'GET') {
+        if (!requireAdminAccess(req, res)) return;
         const agentId = url.pathname.split('/').pop()!;
         const agent = agentRegistry.getAgent(agentId);
         if (!agent) {
           return jsonResponse(res, 404, { error: { message: `Agent ${agentId} not found`, type: 'not_found' } });
         }
-        return jsonResponse(res, 200, { agent });
+        return jsonResponse(res, 200, { agent: redactAgentForResponse(agent) });
       }
 
       // ─── Update Agent ───
       if (url.pathname.match(/^\/v1\/agents\/[a-z0-9-]+$/) && method === 'PATCH') {
+        if (!requireAdminAccess(req, res)) return;
         const agentId = url.pathname.split('/').pop()!;
         const agent = agentRegistry.getAgent(agentId);
         if (!agent) {
           return jsonResponse(res, 404, { error: { message: `Agent ${agentId} not found`, type: 'not_found' } });
         }
         const body = await parseBody(req);
-  (req as any)._body = body;
+        (req as any)._body = body;
         if (body.tierProfile && body.tierProfile in (await import('./agent-registry.js')).DEFAULT_TIER_CONFIGS) {
           const configs = (await import('./agent-registry.js')).DEFAULT_TIER_CONFIGS;
           agent.tierConfig = configs[body.tierProfile];
         }
         if (body.benchmarkEnabled !== undefined) agent.benchmarkEnabled = body.benchmarkEnabled;
         if (body.provider) agent.provider = body.provider;
-        return jsonResponse(res, 200, { message: 'Agent updated', agent });
+        return jsonResponse(res, 200, { message: 'Agent updated', agent: redactAgentForResponse(agent) });
       }
 
       // ─── Chat Completions ───
@@ -2734,15 +3258,15 @@ async function init() {
 
       // ─── v0.4 Trigger Retraining ───
       if (url.pathname === '/v04/retrain' && method === 'POST') {
+        if (!requireAdminAccess(req, res)) return;
+        const body = await parseBody(req);
+        (req as any)._body = body;
         const result = await retrainIfNeeded();
         return jsonResponse(res, 200, {
-          retrained: result.retrained,
-          accuracyBefore: result.accuracyBefore,
-          accuracyAfter: result.accuracyAfter,
-          boundaries: result.boundaries,
-          message: result.retrained
-            ? `Tier boundaries recalibrated and applied live (${result.reason})`
-            : `No retraining: ${result.reason ?? 'not enough data'}`,
+          proposal: result.proposal ?? null,
+          message: result.proposal
+            ? 'Boundary proposal written; review it before applying any boundary change.'
+            : `No proposal: ${result.reason ?? 'not enough data'}`,
         });
       }
 
@@ -2765,7 +3289,7 @@ async function init() {
       // POST /v04/training/enable — Enable/disable training mode
       if (url.pathname === '/v04/training/enable' && method === 'POST') {
         const body = await parseBody(req);
-  (req as any)._body = body;
+        (req as any)._body = body;
         if (!body.agentId) {
           return jsonResponse(res, 400, { error: { message: 'agentId is required', type: 'bad_request' } });
         }
@@ -2780,21 +3304,24 @@ async function init() {
       // POST /v04/training/vote — Record a vote reply
       if (url.pathname === '/v04/training/vote' && method === 'POST') {
         const body = await parseBody(req);
-  (req as any)._body = body;
+        (req as any)._body = body;
         if (!body.voteId || !body.agentId || !body.reply) {
           return jsonResponse(res, 400, { error: { message: 'voteId, agentId, and reply are required', type: 'bad_request' } });
         }
-        const success = processVoteReply(body.voteId, body.agentId, body.reply);
+        const result = processVoteReplyDetailed(body.voteId, body.agentId, body.reply);
+        const success = result !== null && !isVoteClarification(result);
         return jsonResponse(res, 200, {
           success,
-          message: success ? 'Vote recorded' : 'Vote not found or invalid reply',
+          message: result !== null && isVoteClarification(result)
+            ? result.clarification
+            : success ? 'Vote recorded' : 'Vote not found or invalid reply',
         });
       }
 
       // POST /v04/training/vote/reply — Check if a message is a vote reply
       if (url.pathname === '/v04/training/vote/reply' && method === 'POST') {
         const body = await parseBody(req);
-  (req as any)._body = body;
+        (req as any)._body = body;
         if (!body.agentId || !body.message) {
           return jsonResponse(res, 400, { error: { message: 'agentId and message are required', type: 'bad_request' } });
         }
@@ -2836,19 +3363,25 @@ async function init() {
       jsonResponse(res, 404, { error: { message: `Not found: ${url.pathname}`, type: 'not_found' } });
 
     } catch (err: any) {
+      if (err instanceof RequestBodyError) {
+        if (!res.headersSent) {
+          if (err.status === 413) res.once('finish', () => req.destroy());
+          jsonResponse(res, err.status, { error: { message: err.message } });
+        }
+        return;
+      }
       console.error(`❌ Server error: ${err.message}`);
       jsonResponse(res, 500, { error: { message: err.message, type: 'internal_error' } });
     }
   });
 
   // Bind host: default to loopback so a fresh install is not network-exposed.
-  // Set GATESWARM_HOST=0.0.0.0 to expose it (do this only with REQUIRE_AUTH=true).
-  const HOST = process.env.GATESWARM_HOST || '127.0.0.1';
-  if ((HOST === '0.0.0.0' || HOST === '::') && !REQUIRE_AUTH) {
-    console.warn(`⚠️  SECURITY: binding ${HOST} without GATESWARM_REQUIRE_AUTH — anyone on the network can spend your provider quota. Set GATESWARM_REQUIRE_AUTH=true.`);
+  // Non-loopback bindings require MOMA_ADMIN_TOKEN unless explicitly overridden.
+  if (!isLoopbackHost(HOST) && !REQUIRE_AUTH) {
+    console.warn(`⚠️  SECURITY: binding ${HOST} without GATESWARM_REQUIRE_AUTH — network clients can spend provider quota. Set GATESWARM_REQUIRE_AUTH=true.`);
   }
   server.listen(PORT, HOST, () => {
-    console.log(`✅ GateSwarm MoMA Router v0.5.6 (Routing Transparency) listening on http://${HOST}:${PORT}`);
+    console.log(`✅ GateSwarm MoMA Router v0.6.0 (Trustable Precision) listening on http://${HOST}:${PORT}`);
     console.log(`📡 Endpoint: http://localhost:${PORT}/v1/chat/completions`);
     console.log(`📊 Metrics: http://localhost:${PORT}/metrics`);
     console.log(`🤖 Agents: http://localhost:${PORT}/v1/agents`);
@@ -2864,5 +3397,6 @@ async function init() {
   });
 }
 
-init().catch(console.error);
-
+if (process.env.NODE_ENV !== 'test') {
+  init().catch(console.error);
+}

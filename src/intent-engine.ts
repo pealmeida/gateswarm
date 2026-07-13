@@ -11,7 +11,7 @@
  */
 
 import type { ComplexityScore, EffortLevel } from './types.js';
-import { extractFeatures, heuristicScoreFromFeatures, type FeatureVector } from './feature-extractor-v04.js';
+import { countPromptWords, extractFeatures, heuristicScoreFromFeatures, type FeatureVector } from './feature-extractor-v04.js';
 import { scoreToEffort as scoreToEffortFromScore } from './tier-boundaries.js';
 
 export interface V33ScoreResult {
@@ -76,8 +76,7 @@ export function v33Score(prompt: string): V33ScoreResult {
     return { tier: 'trivial', score: 0, signals: 0, wordCount: 0, hasContext: false };
   }
 
-  const words = prompt.split(/\s+/).filter(Boolean);
-  const wordCount = words.length;
+  const wordCount = countPromptWords(prompt);
   const features = extractFeatures(prompt);
   const score = heuristicScoreFromFeatures(features, wordCount);
 

@@ -4,8 +4,9 @@
  * Run: npx tsx eval/hybrid-routing-eval.ts [--port 8900] [--seed 42] [--out …]
  * Do not run the full live eval unless the gateway is up (Task 6).
  */
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { EffortLevel } from '../src/types.js';
 import { loadEffort, TIERS, tierIdx } from './lib/dataset.js';
 import type { EffortExample } from './lib/dataset.js';
@@ -26,6 +27,10 @@ import {
 import { runAblation } from './lib/hybrid-ablation.js';
 import type { AblationMode } from './lib/hybrid-ablation.js';
 import { selectWarmAblationExamples } from './lib/hybrid-warm-fixtures.js';
+import { evaluateHybridExitVerdict } from './lib/hybrid-verdict.js';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const HOLDOUT_PATH = join(__dirname, 'splits', 'holdout.v1.json');
 
 const DEFAULT_TIMEOUT_FAST_MS = 120_000;
 const DEFAULT_TIMEOUT_SLOW_MS = 180_000;
@@ -38,6 +43,9 @@ const FLOORS = {
   rubricTotal: 30,
   judgeOverall: 3.5,
   judgePerTier: 3.0,
+  judgeAvailability: 0.8,
+  liveCoverage: 0.7,
+  offlineInfraFailure: 0.1,
   judgeDegradedFrac: 0.2,
 } as const;
 
@@ -56,11 +64,12 @@ const CRITICAL: CriticalProbe[] = [
 interface ScoreRow {
   id: string;
   goldTier: EffortLevel;
-  predTier: EffortLevel;
+  predTier?: EffortLevel;
   score: number;
   confidence: number;
   selected?: { provider: string; model: string };
   latencyMs: number;
+  infrastructureFailure?: string;
 }
 
 interface CriticalProbeResult {
@@ -80,7 +89,7 @@ interface LiveRow {
   reasoning: string;
   rubricFail: boolean;
   rubricReasons: string[];
-  judge: { adequacy: number; on_tier: boolean; reason: string; available: boolean };
+  judge: { adequacy: number; minimumTier: string; matchesGold: boolean; reason: string; available: boolean };
   policyViolation: boolean;
   routedModel: string;
   skipped?: boolean;
@@ -177,9 +186,17 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-function asEffort(t: string): EffortLevel {
-  if ((TIERS as string[]).includes(t)) return t as EffortLevel;
-  return 'moderate';
+export function asEffort(t: unknown): EffortLevel | null {
+  if (typeof t === 'string' && (TIERS as string[]).includes(t)) return t as EffortLevel;
+  return null;
+}
+
+function loadHoldoutTestIds(): Set<string> {
+  const raw = JSON.parse(readFileSync(HOLDOUT_PATH, 'utf8')) as { effort?: { test?: unknown } };
+  if (!Array.isArray(raw.effort?.test) || !raw.effort.test.every((id) => typeof id === 'string')) {
+    throw new Error(`invalid frozen holdout at ${HOLDOUT_PATH}`);
+  }
+  return new Set(raw.effort.test);
 }
 
 function offlineFloorsMet(m: EffortMetrics): { ok: boolean; fails: string[] } {
@@ -249,14 +266,17 @@ function judgeUnavailable5xx(judge: LiveRow['judge']): boolean {
 function writeSummary(opts: {
   outDir: string;
   metrics: EffortMetrics;
+  diagnosticMetrics: EffortMetrics;
   offline: { ok: boolean; fails: string[] };
+  offlineInfraFailures: ScoreRow[];
+  verdict: { passed: boolean; reasons: string[] };
   probes: CriticalProbeResult[];
   ablation: AblationReport;
   live: LiveRow[];
   worst: ScoreRow[];
   judgeProvider: string;
 }): string {
-  const { metrics, offline, probes, ablation, live, worst, judgeProvider } = opts;
+  const { metrics, diagnosticMetrics, offline, offlineInfraFailures, verdict, probes, ablation, live, worst, judgeProvider } = opts;
   const scoredLive = rowsForLiveScoring(live);
   const skippedSummary = summarizeSkippedRows(live);
   const rubricPass = scoredLive.filter((r) => !r.rubricFail).length;
@@ -325,6 +345,15 @@ function writeSummary(opts: {
     for (const f of offline.fails) lines.push(`- ${f}`);
   }
   lines.push('');
+  lines.push(`### Full-bank numbers — diagnostic (train-contaminated; excluded from verdict; n=${diagnosticMetrics.n})`);
+  lines.push('');
+  lines.push(`Exact ${pct(diagnosticMetrics.exact)}; adjacent ${pct(diagnosticMetrics.adjacent)}.`);
+  lines.push('');
+  lines.push(`### Offline infrastructure failures`);
+  lines.push('');
+  lines.push(`${offlineInfraFailures.length} rows excluded from accuracy denominators (run fails above ${pct(FLOORS.offlineInfraFailure)}).`);
+  for (const row of offlineInfraFailures) lines.push(`- ${row.id}: ${row.infrastructureFailure ?? 'unknown failure'}`);
+  lines.push('');
   lines.push(`## Ablation (n=${ablation.n})`);
   lines.push('');
   lines.push(`### Cold stores`);
@@ -357,13 +386,14 @@ function writeSummary(opts: {
   lines.push('');
   lines.push(`### Judge mean per tier (floor ${FLOORS.judgePerTier})`);
   lines.push('');
-  lines.push(`| Tier | Mean adequacy | n | Status |`);
-  lines.push(`|------|---------------|---|--------|`);
+  lines.push(`| Tier | Mean adequacy | n | Gold-tier match | Status |`);
+  lines.push(`|------|---------------|---|-----------------|--------|`);
   for (const t of TIERS) {
     const m = judgeByTier[t];
     const n = judgeAvail.filter((r) => r.goldTier === t).length;
     const status = isNaN(m) ? 'n/a' : m >= FLOORS.judgePerTier ? 'PASS' : 'FAIL';
-    lines.push(`| ${t} | ${isNaN(m) ? 'n/a' : m.toFixed(2)} | ${n} | ${status} |`);
+    const matched = judgeAvail.filter((r) => r.goldTier === t && r.judge.matchesGold).length;
+    lines.push(`| ${t} | ${isNaN(m) ? 'n/a' : m.toFixed(2)} | ${n} | ${n ? `${matched}/${n}` : 'n/a'} | ${status} |`);
   }
   lines.push('');
   lines.push(`### Routed provider/model counts`);
@@ -418,6 +448,11 @@ function writeSummary(opts: {
     lines.push(`- ${p.pass ? 'PASS' : 'FAIL'}: \`${p.prompt}\` → ${p.predTier} (${p.detail})`);
   }
   lines.push('');
+  lines.push(`## Exit verdict: ${verdict.passed ? 'PASS' : 'FAIL'}`);
+  lines.push('');
+  if (verdict.reasons.length) for (const reason of verdict.reasons) lines.push(`- ${reason}`);
+  else lines.push('_All release floors passed._');
+  lines.push('');
   lines.push(`## Worst misroutes (|Δtier| ≥ 2)`);
   lines.push('');
   if (!worst.length) {
@@ -426,8 +461,10 @@ function writeSummary(opts: {
     lines.push(`| id | gold | pred | Δ | score |`);
     lines.push(`|----|------|------|---|-------|`);
     for (const w of worst) {
-      const d = tierIdx(w.predTier) - tierIdx(w.goldTier);
-      lines.push(`| ${w.id} | ${w.goldTier} | ${w.predTier} | ${d >= 0 ? '+' : ''}${d} | ${w.score.toFixed(3)} |`);
+      if (w.predTier !== undefined) {
+        const d = tierIdx(w.predTier) - tierIdx(w.goldTier);
+        lines.push(`| ${w.id} | ${w.goldTier} | ${w.predTier} | ${d >= 0 ? '+' : ''}${d} | ${w.score.toFixed(3)} |`);
+      }
     }
   }
   lines.push('');
@@ -440,10 +477,10 @@ async function runCriticalProbes(port: number): Promise<CriticalProbeResult[]> {
     const r = await postScore(port, c.prompt);
     const pred = asEffort(r.tier);
     if (c.minTier) {
-      const pass = tierIdx(pred) >= tierIdx(c.minTier);
+      const pass = pred !== null && tierIdx(pred) >= tierIdx(c.minTier);
       out.push({
         prompt: c.prompt,
-        predTier: pred,
+        predTier: pred ?? `INVALID(${r.tier})`,
         pass,
         detail: `minTier=${c.minTier}`,
       });
@@ -451,7 +488,7 @@ async function runCriticalProbes(port: number): Promise<CriticalProbeResult[]> {
       const pass = pred === c.expect;
       out.push({
         prompt: c.prompt,
-        predTier: pred,
+        predTier: pred ?? `INVALID(${r.tier})`,
         pass,
         detail: `expect=${c.expect}`,
       });
@@ -482,15 +519,17 @@ async function judgeAdequacyWithRetry(
   port: number,
   prompt: string,
   answer: string,
-  tier: EffortLevel,
+  goldTier: EffortLevel,
 ): Promise<LiveRow['judge']> {
   const once = async (): Promise<LiveRow['judge']> => {
     try {
-      return await judgeAdequacy(port, prompt, answer, tier);
+      const judged = await judgeAdequacy(port, prompt, answer);
+      return { ...judged, matchesGold: asEffort(judged.minimumTier) === goldTier };
     } catch (e) {
       return {
         adequacy: 0,
-        on_tier: false,
+        minimumTier: '',
+        matchesGold: false,
         reason: e instanceof Error ? e.message : String(e),
         available: false,
       };
@@ -506,23 +545,29 @@ async function judgeAdequacyWithRetry(
 async function phase1(
   port: number,
   all: EffortExample[],
-): Promise<{ rows: ScoreRow[]; metrics: EffortMetrics; probes: CriticalProbeResult[] }> {
+): Promise<{ rows: ScoreRow[]; metrics: EffortMetrics; diagnosticMetrics: EffortMetrics; probes: CriticalProbeResult[] }> {
   const rows: ScoreRow[] = [];
   for (const ex of all) {
     const r: ScoreResp = await postScore(port, ex.prompt);
+    const predTier = asEffort(r.tier);
     rows.push({
       id: ex.id,
       goldTier: ex.tier,
-      predTier: asEffort(r.tier),
+      predTier: predTier ?? undefined,
       score: r.score,
       confidence: r.confidence,
       selected: r.selected,
       latencyMs: r.latencyMs ?? 0,
+      infrastructureFailure: predTier === null ? `invalid /v1/score tier: ${JSON.stringify(r.tier)}` : undefined,
     });
   }
-  const metrics = effortMetrics(rows.map((r) => ({ expected: r.goldTier, predicted: r.predTier })));
+  const validRows = rows.filter((r): r is ScoreRow & { predTier: EffortLevel } => r.predTier !== undefined);
+  const holdoutIds = loadHoldoutTestIds();
+  const holdoutRows = validRows.filter((r) => holdoutIds.has(r.id));
+  const metrics = effortMetrics(holdoutRows.map((r) => ({ expected: r.goldTier, predicted: r.predTier })));
+  const diagnosticMetrics = effortMetrics(validRows.map((r) => ({ expected: r.goldTier, predicted: r.predTier })));
   const probes = await runCriticalProbes(port);
-  return { rows, metrics, probes };
+  return { rows, metrics, diagnosticMetrics, probes };
 }
 
 async function phase3(
@@ -557,7 +602,7 @@ async function phase3(
           reasoning: '',
           rubricFail: false,
           rubricReasons: [],
-          judge: { adequacy: 0, on_tier: false, reason: skipReason, available: false },
+          judge: { adequacy: 0, minimumTier: '', matchesGold: false, reason: skipReason, available: false },
           policyViolation,
           routedModel,
           skipped: true,
@@ -584,9 +629,9 @@ async function phase3(
       }
       const judge =
         timedOut || chat.status === 0
-          ? { adequacy: 0, on_tier: false, reason: 'chat_timeout', available: false }
+          ? { adequacy: 0, minimumTier: '', matchesGold: false, reason: 'chat_timeout', available: false }
           : rubric.fail
-            ? { adequacy: 0, on_tier: false, reason: rubric.reasons[0] || 'rubric_hard_fail', available: false }
+            ? { adequacy: 0, minimumTier: '', matchesGold: false, reason: rubric.reasons[0] || 'rubric_hard_fail', available: false }
           : await judgeAdequacyWithRetry(port, ex.prompt, answer, ex.tier);
 
       live.push({
@@ -618,7 +663,7 @@ async function phase3(
         reasoning: '',
         rubricFail: rubric.fail,
         rubricReasons: rubric.reasons,
-        judge: { adequacy: 0, on_tier: false, reason: message.slice(0, 200), available: false },
+        judge: { adequacy: 0, minimumTier: '', matchesGold: false, reason: message.slice(0, 200), available: false },
         policyViolation: false,
         routedModel: '',
         elapsedMs: Date.now() - startedAt,
@@ -666,10 +711,11 @@ async function main(): Promise<void> {
 
   const all = loadEffort();
   console.log(`Phase 1 — Offline score (n=${all.length})…`);
-  const { rows, metrics, probes } = await phase1(port, all);
+  const { rows, metrics, diagnosticMetrics, probes } = await phase1(port, all);
+  const offlineInfraFailures = rows.filter((row) => row.infrastructureFailure);
   writeFileSync(
     join(outDir, 'scores.json'),
-    JSON.stringify({ rows, metrics, criticalProbes: probes }, null, 2),
+    JSON.stringify({ rows, holdoutMetrics: metrics, diagnosticFullBankMetrics: diagnosticMetrics, criticalProbes: probes }, null, 2),
   );
 
   console.log(`Phase 2 — Ablation…`);
@@ -704,6 +750,7 @@ async function main(): Promise<void> {
   );
 
   const worst = rows
+    .filter((r): r is ScoreRow & { predTier: EffortLevel } => r.predTier !== undefined)
     .filter((r) => Math.abs(tierIdx(r.predTier) - tierIdx(r.goldTier)) >= 2)
     .sort(
       (a, b) =>
@@ -712,13 +759,21 @@ async function main(): Promise<void> {
     );
 
   const offline = offlineFloorsMet(metrics);
-  const summary = writeSummary({ outDir, metrics, offline, probes, ablation, live, worst, judgeProvider: runtime.judgeProvider });
-  writeFileSync(join(outDir, 'summary.md'), summary);
-
   const scoredLive = rowsForLiveScoring(live);
   const rubricPass = scoredLive.filter((r) => !r.rubricFail).length;
   const rubricFloor = rubricPassFloor(scoredLive.length);
-  const judgeAvail = scoredLive.filter((r) => r.judge.available).length;
+  const judgeRows = scoredLive.filter((r) => r.judge.available);
+  const judgeAvail = judgeRows.length;
+  const judgeMean = judgeRows.length
+    ? judgeRows.reduce((sum, row) => sum + row.judge.adequacy, 0) / judgeRows.length
+    : NaN;
+  const judgeByTier = Object.fromEntries(TIERS.map((tier) => {
+    const tierRows = judgeRows.filter((row) => row.goldTier === tier);
+    return [tier, {
+      n: tierRows.length,
+      mean: tierRows.length ? tierRows.reduce((sum, row) => sum + row.judge.adequacy, 0) / tierRows.length : NaN,
+    }];
+  }));
   const unavailableFrac = scoredLive.length ? (scoredLive.length - judgeAvail) / scoredLive.length : 0;
   const judge5xxFrac = scoredLive.length
     ? scoredLive.filter((r) => judgeUnavailable5xx(r.judge)).length / scoredLive.length
@@ -728,15 +783,50 @@ async function main(): Promise<void> {
   }
   if (judge5xxFrac > 0.5) console.error(`JUDGE_DOWN: ${runtime.judgeProvider}`);
 
-  console.log(`Offline exact=${pct(metrics.exact)} adjacent=${pct(metrics.adjacent)} floors=${offline.ok ? 'MET' : 'FAIL'}`);
+  const verdict = evaluateHybridExitVerdict({
+    offline,
+    criticalProbes: probes,
+    rubricPass,
+    rubricFloor,
+    judgeAvailable: judgeAvail,
+    scoredLive: scoredLive.length,
+    sampledLive: live.length,
+    judgeMean,
+    judgeOverallFloor: FLOORS.judgeOverall,
+    judgeByTier,
+    judgePerTierFloor: FLOORS.judgePerTier,
+    liveCoverageFloor: FLOORS.liveCoverage,
+    judgeAvailabilityFloor: FLOORS.judgeAvailability,
+    offlineInfraFailures: offlineInfraFailures.length,
+    offlineScored: rows.length - offlineInfraFailures.length,
+    offlineInfraFailureCeiling: FLOORS.offlineInfraFailure,
+  });
+  const summary = writeSummary({
+    outDir,
+    metrics,
+    diagnosticMetrics,
+    offline,
+    offlineInfraFailures,
+    verdict,
+    probes,
+    ablation,
+    live,
+    worst,
+    judgeProvider: runtime.judgeProvider,
+  });
+  writeFileSync(join(outDir, 'summary.md'), summary);
+
+  console.log(`Offline holdout exact=${pct(metrics.exact)} adjacent=${pct(metrics.adjacent)} floors=${offline.ok ? 'MET' : 'FAIL'}`);
   console.log(`Live rubric ${rubricPass}/${scoredLive.length} skipped=${live.length - scoredLive.length} (floor ${rubricFloor}/${scoredLive.length})`);
   console.log(`Wrote ${join(outDir, 'summary.md')}`);
 
-  const exitOk = offline.ok && rubricPass >= rubricFloor;
-  process.exit(exitOk ? 0 : 1);
+  if (!verdict.passed) console.error(`Release verdict FAIL: ${verdict.reasons.join('; ')}`);
+  process.exit(verdict.passed ? 0 : 1);
 }
 
-main().catch((e) => {
-  console.error(e);
-  process.exit(1);
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((e) => {
+    console.error(e);
+    process.exit(1);
+  });
+}

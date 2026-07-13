@@ -8,14 +8,17 @@
  */
 
 import { promises as fs } from 'fs';
-import { join, dirname } from 'path';
+import { basename, join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import type { EffortLevel, IntentMode } from './types.js';
 import { DEFAULT_BOUNDARIES, getEffortRanges, setTierBoundaries } from './tier-boundaries.js';
 import { setEnsembleWeights as setVoterWeights, getEnsembleWeights as getVoterWeights } from './ensemble-voter.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const CONFIG_FILE = join(__dirname, '../v04_config.json');
+const DEFAULT_CONFIG_FILE = join(__dirname, '../v04_config.json');
+const CONFIG_RELOAD_ERROR_THROTTLE_MS = 5 * 60 * 1000;
+const TIER_NAMES: EffortLevel[] = ['trivial', 'light', 'moderate', 'heavy', 'intensive', 'extreme'];
+const BOUNDARY_TIER_NAMES: EffortLevel[] = ['trivial', 'light', 'moderate', 'heavy', 'intensive'];
 
 // ─── Types ───────────────────────────────────────────────
 
@@ -122,8 +125,7 @@ export const DEFAULT_V04_CONFIG: V04Config = {
   // A config-load failure must not re-route traffic to providers/models the
   // catalogs don't serve — the old defaults pointed at retired bailian models.
   tier_models: {
-    // 2026-07-12: trivial/light moved off local ollama — deployment hosts run
-    // no local models, so a local primary 404s and burns the fallback chain.
+    // Low tiers use hosted defaults; local Ollama remains an optional fallback.
     trivial:   { model: 'glm-4.7-flash',  provider: 'zai',          max_tokens: 256,  enable_thinking: false,
                  fallback_models: [{ model: 'glm-4.5-air', provider: 'zai' }, { model: 'minimax-m2.7', provider: 'ollama-cloud' }, { model: 'deepseek-v4-flash', provider: 'opencodego' }] },
     light:     { model: 'minimax-m2.7',   provider: 'ollama-cloud', max_tokens: 512,  enable_thinking: false,
@@ -163,30 +165,161 @@ export const DEFAULT_V04_CONFIG: V04Config = {
 // ─── Singleton ───────────────────────────────────────────
 
 let _config: V04Config | null = null;
-let _configLoadedAt = 0;
+let _configReloadCheckedAt = 0;
+let _configGeneration = 0;
+let _reloadInFlight: Promise<V04Config> | null = null;
+let temporaryFileSequence = 0;
 const CONFIG_RELOAD_MS = 5000;
+let _reloadHealth: ConfigReloadHealth = {
+  ok: true,
+  lastError: null,
+  lastLoadedAt: null,
+  source: 'default',
+};
+const loggedReloadErrors = new Map<string, number>();
 
-export async function loadConfig(): Promise<V04Config> {
-  const now = Date.now();
-  if (_config && (now - _configLoadedAt) < CONFIG_RELOAD_MS) return _config;
-  try {
-    const raw = await fs.readFile(CONFIG_FILE, 'utf-8');
-    _config = JSON.parse(raw) as V04Config;
-    _configLoadedAt = now;
-  } catch {
-    if (!_config) _config = DEFAULT_V04_CONFIG;
-    _configLoadedAt = now;
+export interface ConfigReloadHealth {
+  ok: boolean;
+  lastError: string | null;
+  lastLoadedAt: string | null;
+  source: 'file' | 'default';
+}
+
+function configFile(): string {
+  return process.env.GATESWARM_CONFIG_FILE || DEFAULT_CONFIG_FILE;
+}
+
+function configBackupFile(): string {
+  return `${configFile()}.bak`;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function validationError(message: string): Error {
+  return new Error(`Invalid configuration: ${message}`);
+}
+
+/** Validate the fields that can change live routing behavior before applying them. */
+function validateConfig(value: unknown): V04Config {
+  if (!isRecord(value)) throw validationError('root must be an object');
+
+  if (!isRecord(value.tier_models)) throw validationError('tier_models must be an object');
+  for (const tier of TIER_NAMES) {
+    const tierConfig = value.tier_models[tier];
+    if (!isRecord(tierConfig)) throw validationError(`tier_models.${tier} is required`);
+    if (typeof tierConfig.model !== 'string' || tierConfig.model.trim() === '') {
+      throw validationError(`tier_models.${tier}.model must be a non-empty string`);
+    }
+    if (typeof tierConfig.provider !== 'string' || tierConfig.provider.trim() === '') {
+      throw validationError(`tier_models.${tier}.provider must be a non-empty string`);
+    }
   }
-  syncTierBoundaries(_config);
-  return _config;
+
+  if (!isRecord(value.ensemble) || !isRecord(value.ensemble.weights)) {
+    throw validationError('ensemble.weights must be an object');
+  }
+  for (const key of ['heuristic', 'cascade', 'ragSignal', 'historyBias']) {
+    const weight = value.ensemble.weights[key];
+    if (typeof weight !== 'number' || !Number.isFinite(weight) || weight < 0) {
+      throw validationError(`ensemble.weights.${key} must be a finite non-negative number`);
+    }
+  }
+
+  if (value.tier_boundaries !== undefined) {
+    if (!isRecord(value.tier_boundaries)) throw validationError('tier_boundaries must be an object');
+    let previous = -Infinity;
+    for (const tier of BOUNDARY_TIER_NAMES) {
+      const range = value.tier_boundaries[tier];
+      if (!Array.isArray(range) || typeof range[1] !== 'number') {
+        throw validationError(`tier_boundaries.${tier}[1] must be a number`);
+      }
+      const upper = range[1];
+      if (!Number.isFinite(upper) || upper <= 0 || upper >= 1 || upper <= previous) {
+        throw validationError('tier_boundaries must contain five finite, ascending upper cuts in (0, 1)');
+      }
+      previous = upper;
+    }
+  }
+
+  return value as unknown as V04Config;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function recordReloadError(error: unknown): void {
+  const message = errorMessage(error);
+  _reloadHealth = { ..._reloadHealth, ok: false, lastError: message };
+
+  const now = Date.now();
+  const lastLoggedAt = loggedReloadErrors.get(message) ?? 0;
+  if (now - lastLoggedAt >= CONFIG_RELOAD_ERROR_THROTTLE_MS) {
+    loggedReloadErrors.set(message, now);
+    console.error(JSON.stringify({ event: 'config_reload_failed', error: message, source: configFile() }));
+  }
+}
+
+function applyConfig(config: V04Config, source: ConfigReloadHealth['source']): V04Config {
+  _config = config;
+  const loadedAt = Date.now();
+  _configReloadCheckedAt = loadedAt;
+  _configGeneration++;
+  _reloadHealth = {
+    ok: true,
+    lastError: null,
+    lastLoadedAt: new Date(loadedAt).toISOString(),
+    source,
+  };
+  syncTierBoundaries(config);
+  syncVoterWeights(config);
+  return config;
+}
+
+export async function loadConfig(force = false): Promise<V04Config> {
+  const now = Date.now();
+  if (!force && _config && (now - _configReloadCheckedAt) < CONFIG_RELOAD_MS) return _config;
+  if (_reloadInFlight) return _reloadInFlight;
+
+  const reloadGeneration = _configGeneration;
+  const reload = (async (): Promise<V04Config> => {
+    try {
+      const raw = await fs.readFile(configFile(), 'utf-8');
+      const parsed = validateConfig(JSON.parse(raw));
+      _configReloadCheckedAt = Date.now();
+      if (reloadGeneration !== _configGeneration) return _config ?? DEFAULT_V04_CONFIG;
+      return applyConfig(parsed, 'file');
+    } catch (error) {
+      if (reloadGeneration !== _configGeneration) return _config ?? DEFAULT_V04_CONFIG;
+      _configReloadCheckedAt = Date.now();
+      if (_config) {
+        recordReloadError(error);
+        return _config;
+      }
+      const fallback = applyConfig(DEFAULT_V04_CONFIG, 'default');
+      recordReloadError(error);
+      return fallback;
+    }
+  })();
+  _reloadInFlight = reload;
+  try {
+    return await reload;
+  } finally {
+    if (_reloadInFlight === reload) _reloadInFlight = null;
+  }
+}
+
+export function getConfigReloadHealth(): ConfigReloadHealth {
+  return { ..._reloadHealth };
 }
 
 export function getConfig(): V04Config {
-  if (!_config || (Date.now() - _configLoadedAt) >= CONFIG_RELOAD_MS) {
-    loadConfig().catch(() => {});
+  if (!_config || (Date.now() - _configReloadCheckedAt) >= CONFIG_RELOAD_MS) {
+    void loadConfig();
   }
-  if (!_config) return DEFAULT_V04_CONFIG;
-  return _config;
+  return _config ?? DEFAULT_V04_CONFIG;
 }
 
 /**
@@ -198,14 +331,48 @@ function syncTierBoundaries(cfg: V04Config): void {
   const tb = cfg.tier_boundaries;
   if (!tb) return;
   const cuts = [tb.trivial?.[1], tb.light?.[1], tb.moderate?.[1], tb.heavy?.[1], tb.intensive?.[1]];
-  if (cuts.every(c => typeof c === 'number')) {
+  if (cuts.every(c => typeof c === 'number' && Number.isFinite(c))) {
     setTierBoundaries(cuts as number[]);
   }
 }
 
+/** Push a complete, valid config weight set into the live ensemble voter. */
+function syncVoterWeights(cfg: V04Config): void {
+  const weights = cfg.ensemble?.weights;
+  if (!weights) return;
+  const values = [weights.heuristic, weights.cascade, weights.ragSignal, weights.historyBias];
+  if (values.every(value => Number.isFinite(value) && value >= 0)) {
+    setVoterWeights(weights);
+  }
+}
+
 export async function saveConfig(config?: V04Config): Promise<void> {
-  if (config) _config = config;
-  await fs.writeFile(CONFIG_FILE, JSON.stringify(getConfig(), null, 2), 'utf-8');
+  const candidate = config ?? getConfig();
+  const validConfig = validateConfig(candidate);
+
+  const target = configFile();
+  const temporary = join(dirname(target), `.${basename(target)}.${process.pid}.${Date.now()}.${++temporaryFileSequence}.tmp`);
+  const contents = JSON.stringify(validConfig, null, 2);
+  let temporaryHandle: fs.FileHandle | null = null;
+  try {
+    temporaryHandle = await fs.open(temporary, 'w', 0o600);
+    await temporaryHandle.writeFile(contents, 'utf-8');
+    await temporaryHandle.sync();
+    await temporaryHandle.close();
+    temporaryHandle = null;
+
+    try {
+      await fs.copyFile(target, configBackupFile());
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+    await fs.rename(temporary, target);
+    applyConfig(validConfig, 'file');
+  } catch (error) {
+    if (temporaryHandle) await temporaryHandle.close();
+    await fs.rm(temporary, { force: true });
+    throw error;
+  }
 }
 
 // ─── Tier Model Commands ─────────────────────────────────
@@ -363,5 +530,3 @@ export function getCliProvidersConfig(): CliProvidersConfig {
   const cfg = getConfig() as any;
   return cfg.cliProviders ?? { enabled: true };
 }
-
-

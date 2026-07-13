@@ -1,4 +1,4 @@
-#!/usr/bin/env npx tsx
+#!/usr/bin/env node
 /**
  * GateSwarm MoMA Router v0.5.2 — CLI Providers + Direct Routing + Plan/Act Mode
  *
@@ -132,8 +132,7 @@ function printUsage() {
   console.log(`
 🧠 GateSwarm MoMA Router v0.5.6 — CLI + TUI + Consumption Intelligence
 
-Ops Commands:
-  ops-guide                                 Show operations guide (debugging, updates, versioning)
+Operations Commands:
   health                                    Quick 10-second health check
   version                                   Show all version stamps and detect skew
 
@@ -377,14 +376,13 @@ async function cmdRag() {
 }
 
 async function cmdRetrain() {
-  console.log('🔄 Triggering manual retraining...');
+  console.log('🔄 Generating a boundary retraining proposal...');
   const result = await retrainIfNeeded();
-  if (result.retrained) {
-    console.log(`✅ Retraining complete. Accuracy: ${((result.accuracyBefore ?? 0) * 100).toFixed(1)}% → ${((result.accuracyAfter ?? 0) * 100).toFixed(1)}%`);
-    console.log(`   Recalibrated tier boundaries: ${JSON.stringify(result.boundaries)} (live, no restart needed).`);
+  if (result.proposal) {
+    console.log(`✅ Proposal written. Validation accuracy: ${(result.proposal.accuracyBefore * 100).toFixed(1)}% → ${(result.proposal.accuracyAfter * 100).toFixed(1)}%`);
+    console.log(`   Proposed boundaries: ${JSON.stringify(result.proposal.boundaries)} (not applied).`);
   } else {
-    console.log('⏭️  Not enough data for retraining yet.');
-    console.log('   Need min 50 samples per tier with LLM-judged ground truth.');
+    console.log(`⏭️  No proposal generated: ${result.reason ?? 'not enough data'}.`);
   }
 }
 
@@ -679,9 +677,6 @@ async function main() {
   const command = args[0];
 
   switch (command) {
-    case 'ops-guide':
-      await cmdOpsGuide();
-      break;
     case 'health':
       await cmdHealth();
       break;
@@ -783,9 +778,6 @@ async function main() {
       await cmdTui(args.slice(1));
       break;
 
-    case 'ops-guide':
-      await cmdOpsGuide();
-      break;
     case 'health':
       await cmdHealth();
       break;
@@ -797,23 +789,6 @@ async function main() {
       console.error(`❌ Unknown command: ${command}`);
       printUsage();
       process.exit(1);
-  }
-}
-
-// ─── v0.5.6 Operations Commands ──────────────────────────────
-
-async function cmdOpsGuide(): Promise<void> {
-  try {
-    const res = await fetch(`${GATEWAY_URL}/v05/intel/ops-guide`);
-    if (!res.ok) {
-      console.error(`❌ Failed to fetch ops guide: HTTP ${res.status}`);
-      process.exit(1);
-    }
-    const text = await res.text();
-    console.log(text);
-  } catch (e: any) {
-    console.error(`❌ Could not reach gateway at ${GATEWAY_URL}: ${e.message}`);
-    process.exit(1);
   }
 }
 
@@ -929,7 +904,7 @@ async function cmdVersion(): Promise<void> {
     console.log(`  [~/.pi/agent/models.json] ${m ?? '⚠️  no moma provider'}`);
   } catch {}
 
-  console.log('\nIf any line shows ⚠️, the version bump is incomplete. See `gateswarm ops-guide` §5.4.');
+  console.log('\nIf any line shows ⚠️, the version bump is incomplete.');
 }
 
 main().catch(console.error);

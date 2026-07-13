@@ -31,8 +31,7 @@ and feeds it into the GateSwarm TUI.
 # Manual sync
 python3 $(dirname "$0")/quota-sync.py
 
-# Auto-sync every 5 min (cron job already configured)
-# Job ID: 1bf77be7-5235-4172-90e5-9494a32a1188
+# Schedule this command with your preferred job runner if periodic sync is needed.
 
 # View in TUI
 gateswarm-bar

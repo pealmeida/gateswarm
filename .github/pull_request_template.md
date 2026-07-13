@@ -7,14 +7,14 @@
 ## Subsystem
 
 - [ ] Python scorer (`router.py`, `train.py`, `llmfit/`)
-- [ ] TypeScript gateway (`gateway/`)
+- [ ] TypeScript gateway (`src/`)
 - [ ] Docs / examples
 - [ ] CI / tooling
 
 ## Verification
 
-- [ ] `python -m pytest gateway/tests/test_router.py` passes
-- [ ] `cd gateway && npm run typecheck && npm run test` passes (if touching gateway)
+- [ ] `python -m pytest tests/test_router.py` passes
+- [ ] `npm run typecheck && npx vitest run` passes (if touching TypeScript)
 - [ ] Manually exercised the affected CLI / endpoint
 - [ ] `CHANGELOG.md` updated
 

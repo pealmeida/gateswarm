@@ -6,7 +6,7 @@
  * dataset and each split file). Every model reads these — nobody re-splits.
  * Re-running with the same SEED reproduces byte-identical files.
  */
-import { writeFileSync, mkdirSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { loadEffort, loadMode, loadRaw } from './lib/dataset.js';
@@ -25,8 +25,32 @@ function writeJson(path: string, obj: unknown): string {
   return sha256(s);
 }
 
-function main() {
+/** Frozen split artifacts are immutable: create a new version rather than rewriting history. */
+export function assertSplitVersionDoesNotExist(splitDir: string, version: string): void {
+  const paths = [
+    join(splitDir, `folds.${version}.json`),
+    join(splitDir, `holdout.${version}.json`),
+  ];
+  const manifestPath = join(splitDir, 'MANIFEST.json');
+  if (existsSync(manifestPath)) {
+    try {
+      const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as { version?: unknown };
+      if (manifest.version === version) paths.push(manifestPath);
+    } catch {
+      paths.push(manifestPath);
+    }
+  }
+  const existing = paths.filter(existsSync);
+  if (existing.length) {
+    throw new Error(
+      `refusing to overwrite frozen split version ${version}: ${existing.join(', ')}. Bump VERSION and generate new folds/holdout/manifest files.`,
+    );
+  }
+}
+
+export function main() {
   mkdirSync(SPLIT_DIR, { recursive: true });
+  assertSplitVersionDoesNotExist(SPLIT_DIR, VERSION);
   const effort = loadEffort();
   const mode = loadMode();
   const { bytes } = loadRaw();
@@ -58,4 +82,4 @@ function main() {
   console.log(`dataset.json sha256: ${manifest.hashes['dataset.json'].slice(0, 16)}…`);
 }
 
-main();
+if (process.argv[1] && process.argv[1] === fileURLToPath(import.meta.url)) main();

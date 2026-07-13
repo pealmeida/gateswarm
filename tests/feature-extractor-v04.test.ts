@@ -62,6 +62,40 @@ Build the import tool.
     expect(f.scale_quantity_mentions).toBe(0);
   });
 
+  it('uses Unicode-aware segmentation for Chinese, emoji-only, and minified code prompts', () => {
+    const chinese = extractFeatures('请帮我设计一个可扩展的分布式订单系统，需要处理高并发请求，并且说明如何保证数据一致性、故障恢复和监控告警。');
+    const emoji = extractFeatures('😀 🚀 🔧 🧠 ✨');
+    const minifiedPrompt = Array(40)
+      .fill('const value=Array.from({length:200},(_,i)=>i).map(i=>i*2).filter(i=>i%3===0).join(\',\');')
+      .join('');
+    const minified = extractFeatures(minifiedPrompt);
+
+    expect(chinese.sentence_count).toBeGreaterThan(0);
+    expect(chinese.avg_word_length).toBeGreaterThan(0);
+    expect(emoji.avg_word_length).toBeGreaterThan(0);
+    expect(minified.avg_word_length).toBeGreaterThan(0);
+    expect(minified.has_code).toBe(1);
+    expect(minifiedPrompt.length).toBeGreaterThanOrEqual(2000);
+  });
+
+  it('deduplicates overlapping scale, list, and keyword evidence', () => {
+    const scale = extractFeatures('Handle 100 qps without dropping requests.');
+    const list = extractFeatures('1. validate input\n2. emit output');
+    const consensus = extractFeatures('consensus');
+
+    expect(scale.scale_quantity_mentions).toBe(1);
+    expect(list.requirement_count).toBe(2);
+    expect(list.conjunction_enumeration).toBe(2);
+    expect(heuristicScoreFromFeatures(consensus, 1)).toBeLessThan(0.264209);
+  });
+
+  it('keeps short explain-compound prompts in the light tier', () => {
+    const prompt = 'Explain async/await';
+    const score = heuristicScoreFromFeatures(extractFeatures(prompt), 2);
+    expect(score).toBeGreaterThanOrEqual(0.208938);
+    expect(score).toBeLessThan(0.264209);
+  });
+
   it('detects diagnostic and causal markers', () => {
     const f = extractFeatures(
       "Checkout latency spiked from 200ms to 1.4s after the last deploy, and I'm not sure if it is cache or the pool. Figure out why.",

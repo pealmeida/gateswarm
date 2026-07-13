@@ -4,6 +4,7 @@
 
 | Version | Supported |
 |---------|-----------|
+| 0.6.x   | Yes       |
 | 0.5.x   | Yes       |
 | < 0.5   | No        |
 
@@ -11,12 +12,7 @@
 
 **DO NOT open a public GitHub issue for security vulnerabilities.**
 
-Please report security issues using one of the following methods:
-
-- **Email:** pealmeida96@gmail.com — include a description of the issue, steps to reproduce, and any relevant logs or proof-of-concept code.
-- **GitHub Private Vulnerability Reporting:** Use the "Report a vulnerability" button on the Security tab at [github.com/pealmeida/gateswarm-router](https://github.com/pealmeida/gateswarm-router).
-
-You can expect an acknowledgement within 48 hours and a resolution timeline within 7 days for confirmed vulnerabilities.
+Please use [GitHub private vulnerability reporting](https://github.com/pealmeida/gateswarm-router/security/advisories/new). Include a description, reproduction steps, affected versions, and any relevant logs or proof of concept. Do not open a public issue for vulnerabilities.
 
 ## Provider Key Security
 

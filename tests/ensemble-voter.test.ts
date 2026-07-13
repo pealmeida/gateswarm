@@ -176,6 +176,19 @@ describe('setEnsembleWeights — additive historyBias is not normalized', () => 
   });
 });
 
+describe('setEnsembleWeights — invalid inputs', () => {
+  it('rejects negative and non-finite weights without changing live weights', () => {
+    const before = getEnsembleWeights();
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    setEnsembleWeights({ cascade: -1 });
+    expect(getEnsembleWeights()).toEqual(before);
+    setEnsembleWeights({ heuristic: Number.NaN });
+    expect(getEnsembleWeights()).toEqual(before);
+    expect(error).toHaveBeenCalled();
+    error.mockRestore();
+  });
+});
+
 // ─── Confidence tracks LIVE boundaries ───────────────────────────────────────
 
 describe('confidence — reads live tier boundaries', () => {
