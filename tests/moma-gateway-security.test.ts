@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   agentListItem,
   hasAdminAccess,
+  shouldRefuseUnauthenticatedAdmin,
   parseBody,
   redactAgentForResponse,
   upstreamFailureMetadata,
@@ -57,6 +58,15 @@ describe('MoMA gateway security helpers', () => {
     expect(hasAdminAccess({ 'x-admin-token': 'wrong-token' })).toBe(false);
     expect(hasAdminAccess({ 'x-admin-token': 'admin-token' })).toBe(true);
     expect(hasAdminAccess({ authorization: 'Bearer admin-token' })).toBe(true);
+  });
+
+  it('fails closed for non-loopback bindings without an admin token', () => {
+    expect(shouldRefuseUnauthenticatedAdmin('0.0.0.0', '', '')).toBe(true);
+    expect(shouldRefuseUnauthenticatedAdmin('192.0.2.10', '', '')).toBe(true);
+    expect(shouldRefuseUnauthenticatedAdmin('127.0.0.1', '', '')).toBe(false);
+    expect(shouldRefuseUnauthenticatedAdmin('::1', '', '')).toBe(false);
+    expect(shouldRefuseUnauthenticatedAdmin('0.0.0.0', 'admin-token', '')).toBe(false);
+    expect(shouldRefuseUnauthenticatedAdmin('0.0.0.0', '', 'true')).toBe(false);
   });
 
   it('enforces the configured request body cap with a 413 error', async () => {

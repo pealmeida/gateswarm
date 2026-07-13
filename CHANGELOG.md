@@ -10,8 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 release-plan actions from a four-pass, 96-finding adversarial review.
 
 ### Security
-- Protect agent-management and `/v04/retrain` with `MOMA_ADMIN_TOKEN`; when it
-  is unset, the gateway remains explicitly unauthenticated and logs a loud warning.
+- Protect agent-management and `/v04/retrain` with `MOMA_ADMIN_TOKEN`; the
+  gateway refuses non-loopback bindings without it unless explicitly overridden.
 - Cap request bodies at 1 MiB by default (`MOMA_MAX_BODY_BYTES`, HTTP 413), reject
   malformed JSON with HTTP 400, and redact bounded upstream-error metadata.
 - Redact secrets and PII before persistence, and redact agent API keys from API responses.
@@ -79,40 +79,30 @@ health-aware routing, v0.5.6 re-shuffle).
 ### Removed
 - Root `ARCHITECTURE.md` (kept `docs/ARCHITECTURE.md` which is newer and larger)
 - Root `REQUIREMENTS.md` (kept `docs/REQUIREMENTS.md`)
-- `docs/PRD.md` and `docs/QUICKSTART.md` (duplicates of root versions)
+- `docs/PRD.md` (duplicate of the root version)
 
-### Verified
-- Service running v0.5.6 on main, all 7 version stamps aligned
-- Plan/Act + effort override + /v06/resolve verified end-to-end
-- Health check 11/11 pass
-- 5 public tags on origin: v0.4.4, v0.5.2, v0.5.3, v0.5.4, v0.5.5, v0.5.6
 ## [0.5.5] - 2026-06-20 (Routing Transparency + Quota-Aware Routing + OSS Hygiene)
 
 Routing Transparency + Quota-Aware Routing + OSS Hygiene. The
 foundation release that v0.5.6 (Plan/Act) builds on.
 
 ### Fixed
-- **Tier routing primaries purged of dead providers**: Bailian API key expired (HTTP 401) and OpenCodeGo hit `GoUsageLimitError` (14d reset). Re-routed all six tiers to currently-healthy providers only — zai for moderate/heavy, codex-cli for intensive/extreme, ollama for trivial/light. `v04_config.json` rewritten with no bailian or opencodego references in any tier.
+- **Tier routing primaries updated**: Static provider/model assignments were revised and non-primary providers remained available in fallback chains.
 - **LLM judge silently no-oping**: `self-eval.ts` hardcoded the judge provider to `bailian`; with bailian down, the judge was returning `adequacy: -1` for every request. Now config-driven (`config.feedback_loop.llmJudgeModel`), defaulting to `zai/glm-4.7`.
 - **`/health` banner reported stale version**: hardcoded `'bailian/qwen3.5-plus'` for the `llmJudge` field. Now reads `getConfig().feedback_loop.llmJudgeModel` at request time.
 - **Provider health-score poisoning**: `recordSuccess()` never decayed `rateLimitHits`, so a single batch of 429s from quota-sync probes tanked `zai` health to 0 (penalty `20 × 15 = -300`). Now decays by 1 per success.
 - **RAG signal pollution**: `RagEntry.tier` is overloaded between effort tiers (`moderate`/`heavy`/...) and compressor quality tiers (`Q0`/`Q1`/`Q2`). The intent engine treated both the same, so 9 cached "Hello, how can I help" RAG entries biased every score by +0.075. RAG now filters `Q*` entries before computing the signal. Index cleaned: 21 → 12 entries.
 - **TUI showed only static tier recommendations, not the actual last request decision**: `TiersMatrix.tsx` now shows a `★ LAST REQUEST →` header with the tier/provider/model of the most recent `request`-source decision, plus a `►` marker on the active row.
-- **Codex CLI / Claude CLI health checks were lies**: `codex --version` / `claude --version` pass without auth. Replaced with `bin/cli-health-probe.sh` which verifies binary + auth (OPENAI_API_KEY / ChatGPT OAuth via `~/.codex/auth.json` / `~/.claude/.credentials.json`). Both CLIs are correctly authenticated (verified: codex exec gpt-5.4 returns "pong" in 8s; Claude has OAuth credentials).
-- **Hardcoded absolute paths in source**: `src/agent-registry.ts` had `/root/.openclaw/workspace/gateswarm-moma-router/scripts/cli-health-probe.sh` (4 occurrences) — would break for any non-default install. Replaced with portable `"${GATESWARM_ROOT:-.}"/bin/cli-health-probe.sh <agent>`. The systemd unit now exports `GATESWARM_ROOT`; the script auto-resolves its own location for local dev. A new `bin/` directory is shipped alongside `scripts/`.
-- **Pi status bar showed `(moa)` instead of `(moma)`**: `defaultProvider` in `~/.pi/agent/settings.json` was `"moa"`. Renamed to `"moma"` (also in `models.json`). Pi must be restarted to pick up the new label.
+- **CLI health probes**: Replaced binary-only checks with `bin/cli-health-probe.sh`, which verifies that a CLI has usable credentials.
+- **Portable probe path resolution**: Replaced a machine-specific probe path with a repository-relative path.
 - **Ephemeral runtime state was tracked in git**: `data/consumption-history.json`, `data/provider-quota.json`, `data/quota-sync.json`, `data/model-matrix.json` were all tracked but contain operational state regenerated on every gateway start. Now gitignored + untracked via `git rm --cached`. The gateway regenerates them on first run.
-- **Removed broken `dotenv` import + dep** (from v0.5.3, which is now in the v0.5.5 line as the foundational work). The systemd unit already sources `.env` via `set -a; source`, so the import was redundant.
+- **Removed broken `dotenv` import + dep** (from v0.5.3, which is now in the v0.5.5 line as the foundational work).
 - **Debounced `agent-registry.save()`** (from v0.5.3, now in v0.5.5 line). Was 2 full-file writes per request; now coalesces bursts into 1 write per 1s window. Graceful shutdown via SIGINT/SIGTERM triggers `flushPending()`.
 
 ### Added
 - **`bin/cli-health-probe.sh`** — auth-aware health probe for codex-cli, claude-cli, pi-agent, hermes-agent.
-- **`docs/OPS_GUIDE.md`** — 25KB operations guide covering updates, debugging, analysis, versioning, and emergency procedures.
-- **`docs/SECURITY_AUDIT.md`** — pre-release security audit.
-- **`gateswarm ops-guide`** CLI command.
 - **`gateswarm health`** CLI command (11-point health check).
 - **`gateswarm version`** CLI command (verifies all 7 version stamps).
-- **`GET /v05/intel/ops-guide`** endpoint.
 - **`GET /v05/intel/last-decision`** endpoint.
 - **`getRecentDecisions(limit, source?)`** — supports filtering by source.
 - `tests/agent-registry-debounce.test.ts` — debounce regression test.
@@ -126,11 +116,6 @@ foundation release that v0.5.6 (Plan/Act) builds on.
   - intensive: codex-cli/cx/gpt-5.4-codex
   - extreme: codex-cli/cx/gpt-5.4-codex
 - **CLI TUI version**: 0.5.4 → 0.5.6 (during cleanup; final = 0.5.6 in this re-shuffle)
-- **`/usr/local/bin/gateswarm` wrapper**, **systemd Description**, **Pi `~/.pi/agent/models.json`** — all aligned on 0.5.6
-
-### Known issues / user blockers
-- **Rotate Bailian API key**: `BAILIAN_KEY=*** expired (HTTP 401)`. Once rotated, set the new key in `.env` and restart the gateway.
-- **OpenCodeGo GoUsageLimitError** resets in 14 days from 2026-06-20.
 ## [0.5.4] - 2026-06-20 (Plan/Act + Effort Override)
 
 Plan/Act Modes + Effort Override. The current latest release on
@@ -294,7 +279,7 @@ GitHub. Builds on the v0.5.5 health-aware routing foundation.
 
 ### Changed
 - **Banner updated** — v0.4.4 (TurboQuant v3.6)
-- **Heavy tier model** — Changed from glm-5.1/zai to qwen3.5-plus/bailian (glm-5.1 quota exhausted)
+- **Heavy tier model** — Changed from glm-5.1/zai to qwen3.5-plus/bailian as part of the routing configuration update.
 - **Extreme tier fallbacks** — Removed glm-5.1/zai fallback (same reason)
 
 ## [0.4.3-timeout-hardening] — 2026-05-14

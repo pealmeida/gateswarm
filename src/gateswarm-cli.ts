@@ -1,4 +1,4 @@
-#!/usr/bin/env npx tsx
+#!/usr/bin/env node
 /**
  * GateSwarm MoMA Router v0.5.2 — CLI Providers + Direct Routing + Plan/Act Mode
  *
@@ -132,8 +132,7 @@ function printUsage() {
   console.log(`
 🧠 GateSwarm MoMA Router v0.5.6 — CLI + TUI + Consumption Intelligence
 
-Ops Commands:
-  ops-guide                                 Show operations guide (debugging, updates, versioning)
+Operations Commands:
   health                                    Quick 10-second health check
   version                                   Show all version stamps and detect skew
 
@@ -678,9 +677,6 @@ async function main() {
   const command = args[0];
 
   switch (command) {
-    case 'ops-guide':
-      await cmdOpsGuide();
-      break;
     case 'health':
       await cmdHealth();
       break;
@@ -782,9 +778,6 @@ async function main() {
       await cmdTui(args.slice(1));
       break;
 
-    case 'ops-guide':
-      await cmdOpsGuide();
-      break;
     case 'health':
       await cmdHealth();
       break;
@@ -796,23 +789,6 @@ async function main() {
       console.error(`❌ Unknown command: ${command}`);
       printUsage();
       process.exit(1);
-  }
-}
-
-// ─── v0.5.6 Operations Commands ──────────────────────────────
-
-async function cmdOpsGuide(): Promise<void> {
-  try {
-    const res = await fetch(`${GATEWAY_URL}/v05/intel/ops-guide`);
-    if (!res.ok) {
-      console.error(`❌ Failed to fetch ops guide: HTTP ${res.status}`);
-      process.exit(1);
-    }
-    const text = await res.text();
-    console.log(text);
-  } catch (e: any) {
-    console.error(`❌ Could not reach gateway at ${GATEWAY_URL}: ${e.message}`);
-    process.exit(1);
   }
 }
 
@@ -928,7 +904,7 @@ async function cmdVersion(): Promise<void> {
     console.log(`  [~/.pi/agent/models.json] ${m ?? '⚠️  no moma provider'}`);
   } catch {}
 
-  console.log('\nIf any line shows ⚠️, the version bump is incomplete. See `gateswarm ops-guide` §5.4.');
+  console.log('\nIf any line shows ⚠️, the version bump is incomplete.');
 }
 
 main().catch(console.error);

@@ -16,6 +16,7 @@ llmfit/datasets/v31_all_results.json
 
 # Secrets / env
 .env
+.env.*.local
 *.key
 *.pem
 
@@ -51,6 +52,12 @@ node_modules/
 
 # Runtime logs
 tee/
+logs/
+*.log
+npm-debug.log*
+.pytest_cache/
+.coverage
+htmlcov/
 
 # Backup files
 *.bak

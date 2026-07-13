@@ -1,7 +1,7 @@
-#!/usr/bin/env tsx
+#!/usr/bin/env node
 import * as dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
-dotenv.config({ path: fileURLToPath(new URL('../.env', import.meta.url)) });
+dotenv.config();
 import { loadVaultEnv } from './secrets/vault-env.js';
 /**
  * GateSwarm MoMA Router v0.5.6 — Multi-Agent API Gateway
@@ -109,6 +109,28 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // ─── Configuration ─────────────────────────────────────
 
 const PORT = parseInt(process.argv.find(a => a === '--port') ? process.argv[process.argv.indexOf('--port') + 1] : '8900', 10);
+const HOST = process.env.GATESWARM_HOST || '127.0.0.1';
+
+function isEnabled(value: string | undefined): boolean {
+  return /^(1|true|yes|on)$/i.test(value || '');
+}
+
+export function isLoopbackHost(host: string): boolean {
+  const normalized = host.trim().toLowerCase();
+  return normalized === 'localhost'
+    || normalized === '127.0.0.1'
+    || normalized === '::1'
+    || normalized === '[::1]'
+    || normalized.startsWith('127.');
+}
+
+export function shouldRefuseUnauthenticatedAdmin(
+  host: string,
+  adminToken = process.env.MOMA_ADMIN_TOKEN,
+  allowUnauthenticatedAdmin = process.env.MOMA_ALLOW_UNAUTHENTICATED_ADMIN,
+): boolean {
+  return !isLoopbackHost(host) && !adminToken && !isEnabled(allowUnauthenticatedAdmin);
+}
 
 // ─── State ─────────────────────────────────────────────
 
@@ -2650,6 +2672,12 @@ async function init() {
     console.log('🔐 [Secrets] no vault and no .env — providers with missing keys will register unconfigured');
   }
 
+  if (shouldRefuseUnauthenticatedAdmin(HOST)) {
+    throw new Error(
+      `Refusing to bind ${HOST} without MOMA_ADMIN_TOKEN. Set MOMA_ADMIN_TOKEN, bind to a loopback host, or explicitly set MOMA_ALLOW_UNAUTHENTICATED_ADMIN=true.`,
+    );
+  }
+
   await benchmarkLogger.initialize();
   await agentRegistry.initialize();
   await modelMatrix.initialize();
@@ -2787,20 +2815,6 @@ async function init() {
           return jsonResponse(res, 404, { error: 'no recent request decisions' });
         }
         return jsonResponse(res, 200, recent[0]);
-      }
-
-      if (url.pathname === '/v05/intel/ops-guide' && method === 'GET') {
-        const fs = await import('fs/promises');
-        const path = await import('path');
-        const guidePath = path.join(__dirname, '..', 'docs', 'OPS_GUIDE.md');
-        try {
-          const content = await fs.readFile(guidePath, 'utf-8');
-          res.writeHead(200, { 'Content-Type': 'text/markdown; charset=utf-8', 'Access-Control-Allow-Origin': '*' });
-          res.end(content);
-          return;
-        } catch (e: any) {
-          return jsonResponse(res, 404, { error: `ops guide not found: ${e.message}` });
-        }
       }
 
       // ─── v0.6: Plan/Act Mode Detection ───────────────────
@@ -3068,7 +3082,7 @@ async function init() {
       // ─── v0.5.1: Direct Chat (alternative endpoint) ───
       if (url.pathname === '/v1/direct/chat' && method === 'POST') {
         const body = await parseBody(req);
-  (req as any)._body = body;
+        (req as any)._body = body;
         let agent: AgentConfig | null = null;
         const apiKey = extractApiKey(req);
         if (apiKey) {
@@ -3111,7 +3125,7 @@ async function init() {
       if (url.pathname === '/v1/agents/register' && method === 'POST') {
         if (!requireAdminAccess(req, res)) return;
         const body = await parseBody(req);
-  (req as any)._body = body;
+        (req as any)._body = body;
         if (!body.name) {
           return jsonResponse(res, 400, { error: { message: 'name is required', type: 'bad_request' } });
         }
@@ -3159,7 +3173,7 @@ async function init() {
           return jsonResponse(res, 404, { error: { message: `Agent ${agentId} not found`, type: 'not_found' } });
         }
         const body = await parseBody(req);
-  (req as any)._body = body;
+        (req as any)._body = body;
         if (body.tierProfile && body.tierProfile in (await import('./agent-registry.js')).DEFAULT_TIER_CONFIGS) {
           const configs = (await import('./agent-registry.js')).DEFAULT_TIER_CONFIGS;
           agent.tierConfig = configs[body.tierProfile];
@@ -3275,7 +3289,7 @@ async function init() {
       // POST /v04/training/enable — Enable/disable training mode
       if (url.pathname === '/v04/training/enable' && method === 'POST') {
         const body = await parseBody(req);
-  (req as any)._body = body;
+        (req as any)._body = body;
         if (!body.agentId) {
           return jsonResponse(res, 400, { error: { message: 'agentId is required', type: 'bad_request' } });
         }
@@ -3290,7 +3304,7 @@ async function init() {
       // POST /v04/training/vote — Record a vote reply
       if (url.pathname === '/v04/training/vote' && method === 'POST') {
         const body = await parseBody(req);
-  (req as any)._body = body;
+        (req as any)._body = body;
         if (!body.voteId || !body.agentId || !body.reply) {
           return jsonResponse(res, 400, { error: { message: 'voteId, agentId, and reply are required', type: 'bad_request' } });
         }
@@ -3307,7 +3321,7 @@ async function init() {
       // POST /v04/training/vote/reply — Check if a message is a vote reply
       if (url.pathname === '/v04/training/vote/reply' && method === 'POST') {
         const body = await parseBody(req);
-  (req as any)._body = body;
+        (req as any)._body = body;
         if (!body.agentId || !body.message) {
           return jsonResponse(res, 400, { error: { message: 'agentId and message are required', type: 'bad_request' } });
         }
@@ -3362,10 +3376,9 @@ async function init() {
   });
 
   // Bind host: default to loopback so a fresh install is not network-exposed.
-  // Set GATESWARM_HOST=0.0.0.0 to expose it (do this only with REQUIRE_AUTH=true).
-  const HOST = process.env.GATESWARM_HOST || '127.0.0.1';
-  if ((HOST === '0.0.0.0' || HOST === '::') && !REQUIRE_AUTH) {
-    console.warn(`⚠️  SECURITY: binding ${HOST} without GATESWARM_REQUIRE_AUTH — anyone on the network can spend your provider quota. Set GATESWARM_REQUIRE_AUTH=true.`);
+  // Non-loopback bindings require MOMA_ADMIN_TOKEN unless explicitly overridden.
+  if (!isLoopbackHost(HOST) && !REQUIRE_AUTH) {
+    console.warn(`⚠️  SECURITY: binding ${HOST} without GATESWARM_REQUIRE_AUTH — network clients can spend provider quota. Set GATESWARM_REQUIRE_AUTH=true.`);
   }
   server.listen(PORT, HOST, () => {
     console.log(`✅ GateSwarm MoMA Router v0.5.6 (Routing Transparency) listening on http://${HOST}:${PORT}`);

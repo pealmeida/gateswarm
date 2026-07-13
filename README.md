@@ -211,7 +211,7 @@ Or use the model field shorthand: `"model": "cc/claude-sonnet-4-6"`.
 gateswarm status             # ensemble weights, tier models, feedback buffer
 gateswarm health             # 11-point health check (gateway + 4 HTTP + 5 CLI)
 gateswarm feedback           # per-tier accuracy, retrain ETA
-gateswarm providers          # all providers + quota + status
+gateswarm providers          # configured providers, quota, and models
 gateswarm version            # verify 7 version stamps align
 ```
 
@@ -246,7 +246,6 @@ gateswarm effort-override heavy "design CRDT"  # force tier once
 
 # Direct + diagnostics
 gateswarm direct claude-cli cc/claude-sonnet-4-6 "What is 2+2?"
-gateswarm ops-guide                            # full ops guide
 ```
 
 Full command reference below. Changes are persisted to `v04_config.json` and hot-reloaded by the gateway.
@@ -320,7 +319,7 @@ If any stamp drifts, the gateway prints which file needs updating.
 
 ### Operational tasks
 
-For full ops — debugging, quota syncing, log analysis, security audit, health decay tuning — see **`docs/OPS_GUIDE.md`**. For architectural deep-dive (9-stage pipeline, TurboQuant levels, 7-phase sanitization, fallback chains) see **`docs/ARCHITECTURE.md`**.
+For architectural detail on the request pipeline, TurboQuant levels, sanitization, fallback chains, and configuration, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ---
 
@@ -359,14 +358,13 @@ Run via `npx tsx src/gateswarm-cli.ts <command>` or alias as `gateswarm`.
 
 | Command | Description |
 |---------|-------------|
-| `providers` | List all registered providers (HTTP + CLI) with type, status, quota, and models |
+| `providers` | List all registered providers (HTTP + CLI) with type, quota, and models |
 | `direct <provider> <model> "<prompt>"` | Send a prompt directly to a specific provider/model, bypassing routing |
 
-### Operations Commands (v0.5.6+)
+### Operations Commands
 
 | Command | Description |
 |---------|-------------|
-| `ops-guide` | Print the full operations guide (updates, debugging, analysis, versioning) |
 | `health` | 11-point health check (service, 4 HTTP providers, 5 CLI providers, last decision) |
 | `version` | Verify all 7 version stamps are aligned across files |
 | `tui` | Launch the gateswarm-bar TUI (Ink-based) |
@@ -385,13 +383,13 @@ Run via `npx tsx src/gateswarm-cli.ts <command>` or alias as `gateswarm`.
 
 ### HTTP Providers
 
-| Provider | ID | Models (subset) | Status |
-|----------|----|------------------|--------|
-| Z.AI (GLM Coding Lite) | `zai` | glm-4.7-flash, glm-4.7, glm-5, glm-5.1 | ✓ Healthy |
-| Ollama Cloud (free tier) | `ollama-cloud` | minimax-m2.7, minimax-m3, kimi-k2.6, kimi-k2.7-code, deepseek-v4-pro | ✓ Healthy |
-| Ollama (local, optional) | `ollama` | qwen2.5:0.5b | Optional — not a trivial/light default |
-| Alibaba Bailian | `bailian` | qwen3.5-plus, qwen3.6-plus, qwen3-coder-plus | ⚠️ Key expired (rotate to re-enable) |
-| OpenCodeGo | `opencodego` | qwen3.7-plus, qwen3.7-max, deepseek-v4-flash/pro, kimi | ⚠️ Quota exhausted (resets in 14d) |
+| Provider | ID | Models (subset) |
+|----------|----|------------------|
+| Z.AI (GLM Coding Lite) | `zai` | glm-4.7-flash, glm-4.7, glm-5, glm-5.1 |
+| Ollama Cloud | `ollama-cloud` | minimax-m2.7, minimax-m3, kimi-k2.6, kimi-k2.7-code, deepseek-v4-pro |
+| Ollama (local, optional) | `ollama` | qwen2.5:0.5b |
+| Alibaba Bailian | `bailian` | qwen3.5-plus, qwen3.6-plus, qwen3-coder-plus |
+| OpenCodeGo | `opencodego` | qwen3.7-plus, qwen3.7-max, deepseek-v4-flash/pro, kimi |
 
 > Provider model catalogs are validated against the routing config by
 > `eval/consistency-check.ts` (enforced in the test suite) — a tier or fallback can never
@@ -441,15 +439,15 @@ cp .env.example .env
 
 | Variable | Description |
 |----------|-------------|
-| `BAILIAN_KEY` | Alibaba Bailian API key (optional; expired as of 2026-06-20) |
+| `BAILIAN_KEY` | Alibaba Bailian API key (optional) |
 | `BAILIAN_BASE` | Bailian base URL |
 | `GLM_API_KEY` / `ZAI_KEY` | Z.AI (GLM) API key — **required for default trivial, moderate, and heavy primaries** |
 | `ZAI_BASE` | Z.AI base URL |
-| `OPENCODEGO_KEY` | OpenCodeGo API key (optional; quota exhausted, resets in 14d) |
+| `OPENCODEGO_KEY` | OpenCodeGo API key (optional) |
 | `OLLAMA_CLOUD_KEY` | Ollama Cloud API key (optional) |
 | `OLLAMA_BASE` | Ollama base URL (default: `http://127.0.0.1:11434/v1`) |
-| `MOMA_ADMIN_TOKEN` | Token required for agent-management and `/v04/retrain`; when unset, those endpoints remain unauthenticated and the gateway emits a loud startup warning |
-| `MOMA_MAX_BODY_BYTES` | Maximum request-body size in bytes (default: `1048576`); larger bodies receive HTTP 413 |
+| `MOMA_ADMIN_TOKEN` | Token required for agent-management and `/v04/retrain`; required when exposing beyond localhost unless `MOMA_ALLOW_UNAUTHENTICATED_ADMIN=true` is explicitly set |
+| `MOMA_MAX_BODY_BYTES` | Maximum request-body size in bytes (default: `1048576`); set an explicit cap when exposing beyond localhost; larger bodies receive HTTP 413 |
 | `PORT` | Gateway port (default: 8900) |
 | `GATESWARM_ROOT` | Path to the router root (set by systemd; used by CLI health probes) |
 
@@ -463,8 +461,6 @@ Full architecture documentation including the 9-stage request pipeline, TurboQua
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-For operations — how to update, debug, analyze, and version this codebase — see [docs/OPS_GUIDE.md](docs/OPS_GUIDE.md).
-
 ---
 
 ## Project Layout
@@ -477,7 +473,6 @@ gateswarm-router/
 ├── CONTRIBUTING.md                     # how to contribute
 ├── CODE_OF_CONDUCT.md                  # community standards
 ├── SECURITY.md                         # vulnerability reporting
-├── QUICKSTART.md                       # 5-minute setup
 ├── PRD.md                              # product requirements
 ├── REQUIREMENTS.md → docs/REQUIREMENTS.md  # technical requirements
 ├── ARCHITECTURE.md → docs/ARCHITECTURE.md   # (root file removed; see docs/)
@@ -522,8 +517,6 @@ gateswarm-router/
 │   └── ...
 ├── docs/                               # documentation
 │   ├── ARCHITECTURE.md
-│   ├── OPS_GUIDE.md                    # updates, debugging, analysis, versioning
-│   ├── SECURITY_AUDIT.md               # pre-release security audit
 │   ├── ROUTING_STRATEGY.md
 │   ├── INTEGRATION.md
 │   ├── GATEWAY_QUICKSTART.md

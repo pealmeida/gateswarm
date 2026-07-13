@@ -1,43 +1,44 @@
 {
   "name": "gateswarm-router",
   "version": "0.5.6",
-  "description": "GateSwarm MoMA Gateway v0.5.2 — Plan/Act Routing + CLI Providers.",
+  "description": "GateSwarm MoMA Gateway for complexity-aware model routing.",
   "type": "module",
-  "main": "dist/moma-gateway.js",
-  "types": "dist/moma-gateway.d.ts",
+  "main": "./dist/src/moma-gateway.js",
+  "types": "./dist/src/moma-gateway.d.ts",
   "exports": {
     ".": {
-      "import": "./src/moma-gateway.ts",
-      "types": "./src/moma-gateway.ts"
+      "import": "./dist/src/moma-gateway.js",
+      "types": "./dist/src/moma-gateway.d.ts"
     },
     "./intent-engine": {
-      "import": "./src/intent-engine-v04.ts",
-      "types": "./src/intent-engine-v04.ts"
+      "import": "./dist/src/intent-engine-v04.js",
+      "types": "./dist/src/intent-engine-v04.d.ts"
     },
     "./ensemble-voter": {
-      "import": "./src/ensemble-voter.ts",
-      "types": "./src/ensemble-voter.ts"
+      "import": "./dist/src/ensemble-voter.js",
+      "types": "./dist/src/ensemble-voter.d.ts"
     },
     "./feature-extractor": {
-      "import": "./src/feature-extractor-v04.ts",
-      "types": "./src/feature-extractor-v04.ts"
+      "import": "./dist/src/feature-extractor-v04.js",
+      "types": "./dist/src/feature-extractor-v04.d.ts"
     },
     "./cli": {
-      "import": "./src/gateswarm-cli.ts",
-      "types": "./src/gateswarm-cli.ts"
+      "import": "./dist/src/gateswarm-cli.js",
+      "types": "./dist/src/gateswarm-cli.d.ts"
     }
   },
   "files": [
-    "src/",
+    "dist/",
     "public/",
-    "docs/"
+    "docs/",
+    "v04_config.json"
   ],
   "bin": {
-    "gateswarm": "./src/gateswarm-cli.ts",
-    "gateswarm-gateway": "./src/moma-gateway.ts"
+    "gateswarm": "./dist/src/gateswarm-cli.js",
+    "gateswarm-gateway": "./dist/src/moma-gateway.js"
   },
   "scripts": {
-    "build": "tsc --outDir dist --declaration",
+    "build": "tsc -p tsconfig.build.json && node scripts/copy-build-assets.mjs",
     "prepublishOnly": "npm run build && npm test",
     "start": "tsx src/moma-gateway.ts --port 8900",
     "dev": "tsx watch src/moma-gateway.ts --port 8900",
@@ -101,6 +102,6 @@
     "url": "https://github.com/pealmeida/gateswarm-router/issues"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.0.0"
   }
 }
