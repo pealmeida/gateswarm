@@ -1,6 +1,6 @@
 {
   "name": "gateswarm-router",
-  "version": "0.5.6",
+  "version": "0.6.0",
   "description": "GateSwarm MoMA Gateway for complexity-aware model routing.",
   "type": "module",
   "main": "./dist/src/moma-gateway.js",

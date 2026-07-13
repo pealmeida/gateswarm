@@ -2736,7 +2736,7 @@ async function init() {
   console.log('🔄 [Intel] Tier recovery check: every 5min');
 
   const agents = agentRegistry.getAgents();
-  console.log(`🚀 GateSwarm MoMA Router v0.5.6 (Routing Transparency) starting on :${PORT}`);
+  console.log(`🚀 GateSwarm MoMA Router v0.6.0 (Trustable Precision) starting on :${PORT}`);
   if (!process.env.MOMA_ADMIN_TOKEN) {
     console.warn('⚠️⚠️  [SECURITY] MOMA_ADMIN_TOKEN is unset; agent-management endpoints are unauthenticated.');
   }
@@ -2775,7 +2775,7 @@ async function init() {
         const agents = agentRegistry.getAgents();
         return jsonResponse(res, 200, {
           status: 'healthy',
-          router: 'GateSwarm MoMA Router v0.5.6 (Routing Transparency)',
+          router: 'GateSwarm MoMA Router v0.6.0 (Trustable Precision)',
           turboquant: 'v3.6',
           ensemble: 'enabled',
           feedback: 'enabled',
@@ -3381,7 +3381,7 @@ async function init() {
     console.warn(`⚠️  SECURITY: binding ${HOST} without GATESWARM_REQUIRE_AUTH — network clients can spend provider quota. Set GATESWARM_REQUIRE_AUTH=true.`);
   }
   server.listen(PORT, HOST, () => {
-    console.log(`✅ GateSwarm MoMA Router v0.5.6 (Routing Transparency) listening on http://${HOST}:${PORT}`);
+    console.log(`✅ GateSwarm MoMA Router v0.6.0 (Trustable Precision) listening on http://${HOST}:${PORT}`);
     console.log(`📡 Endpoint: http://localhost:${PORT}/v1/chat/completions`);
     console.log(`📊 Metrics: http://localhost:${PORT}/metrics`);
     console.log(`🤖 Agents: http://localhost:${PORT}/v1/agents`);

@@ -6,7 +6,7 @@
 
 **Evidence-gated LLM routing gateway.** Scores every prompt, picks the cheapest *capable* model, and collects feedback for safer improvements.
 
-> **Latest stable:** [v0.5.6](https://github.com/pealmeida/gateswarm-router/releases/tag/v0.5.6) — Routing Transparency + Quota-Aware Routing + OSS Hygiene
+> **Latest stable:** [v0.6.0](https://github.com/pealmeida/gateswarm-router/releases/tag/v0.6.0) — Trustable Precision: adversarial-review hardening + honest evals
 > **Releases:** v0.4.4 · v0.5.2 · v0.5.3 · v0.5.4 · v0.5.5 · v0.5.6 (see [Releases](#releases) below)
 
 ---
