@@ -136,7 +136,9 @@ export async function judgeAdequacy(
       port,
       '/v1/chat/completions',
       {
-        model: 'zai/glm-4.7-flash',
+        // Judge must not share a provider with high-volume routed tiers, or the
+        // eval rate-limits its own judge (observed: zai 429s → availability 0%).
+        model: process.env.GATESWARM_EVAL_JUDGE_MODEL || 'zai/glm-4.7-flash',
         stream: false,
         max_tokens: 200,
         messages: [{ role: 'user', content: judgePrompt }],
