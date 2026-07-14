@@ -136,9 +136,11 @@ export async function judgeAdequacy(
       port,
       '/v1/chat/completions',
       {
-        // Judge must not share a provider with high-volume routed tiers, or the
-        // eval rate-limits its own judge (observed: zai 429s → availability 0%).
-        model: process.env.GATESWARM_EVAL_JUDGE_MODEL || 'zai/glm-4.7-flash',
+        // Judge must be a NON-reasoning model: reasoning models emit their JSON
+        // into `reasoning_content` (often truncating `content` to empty), which
+        // breaks parsing. It must also not share a provider with routed tiers,
+        // or the eval self-rate-limits its own judge. hm/glm-4.7 satisfies both.
+        model: process.env.GATESWARM_EVAL_JUDGE_MODEL || 'hm/glm-4.7',
         stream: false,
         max_tokens: 200,
         messages: [{ role: 'user', content: judgePrompt }],
@@ -147,9 +149,14 @@ export async function judgeAdequacy(
       60_000,
     );
     if (status !== 200) return { adequacy: 0, minimumTier: '', reason: `judge_http_${status}`, available: false };
-    const raw = json as { choices?: Array<{ message?: { content?: string } }> };
-    const text = raw?.choices?.[0]?.message?.content || '';
-    const m = text.match(/\{[\s\S]*\}/);
+    const raw = json as { choices?: Array<{ message?: { content?: string; reasoning_content?: string } }> };
+    const msg = raw?.choices?.[0]?.message || {};
+    const text = msg.content || '';
+    let m = text.match(/\{[\s\S]*\}/);
+    if (!m) {
+      const rc = msg.reasoning_content || '';
+      m = rc.match(/\{[\s\S]*\}/);
+    }
     if (!m) return { adequacy: 0, minimumTier: '', reason: 'judge_parse_fail', available: false };
     try {
       const parsed = JSON.parse(m[0]) as { adequacy?: unknown; minimum_tier?: unknown; reason?: unknown };
