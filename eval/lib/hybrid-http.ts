@@ -142,7 +142,7 @@ export async function judgeAdequacy(
         // or the eval self-rate-limits its own judge. hm/glm-4.7 satisfies both.
         model: process.env.GATESWARM_EVAL_JUDGE_MODEL || 'hm/glm-4.7',
         stream: false,
-        max_tokens: 200,
+        max_tokens: 512,
         messages: [{ role: 'user', content: judgePrompt }],
       },
       {},
