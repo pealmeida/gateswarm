@@ -4,7 +4,7 @@
 
 **Goal:** Extract the heuristic complexity scorer into a zero-dependency `gateswarm-lite` package and build an advisory `gateswarm-router` package that picks the best cost/benefit model for the scored tier — while the existing gateway, tests, and eval pipeline keep working unchanged.
 
-**Architecture:** npm workspaces inside the existing repo. `packages/gateswarm-lite` receives the verbatim-moved scorer core (`feature-extractor-v04.ts`, `tier-boundaries.ts`) plus a `scoreComplexity()` facade; old `src/` paths become one-line re-export shims so no consumer changes. `packages/gateswarm-router` depends only on `gateswarm-lite` and returns routing *decisions* (never executes requests). Spec: `docs/superpowers/specs/2026-08-25-gateswarm-lite-router-design.md`.
+**Architecture:** npm workspaces inside the existing repo. `packages/gateswarm-lite` receives the verbatim-moved scorer core (`feature-extractor-v04.ts`, `tier-boundaries.ts`) plus a `scoreComplexity()` facade; old `src/` paths become **named** re-export shims (not `export *`) so no consumer changes and legacy module surfaces stay clean. `packages/gateswarm-router` depends only on `gateswarm-lite` and returns routing *decisions* (never executes requests). Spec: `docs/superpowers/specs/2026-08-25-gateswarm-lite-router-design.md`. Testing/refinement: `docs/superpowers/specs/2026-08-25-gateswarm-lite-router-testing.md`.
 
 **Tech Stack:** TypeScript 5.7 (ES2022 modules), npm workspaces, vitest, tsx. Zero runtime dependencies in both new packages.
 
@@ -17,6 +17,8 @@
 - Prompt truncation guard: 64 KiB (`64 * 1024` chars), same as `src/intent-engine-v04.ts`.
 - All commands below run from repo root `d:\Code\gateswarm-router` (PowerShell).
 - Imports always at top of file; switch statements over unions use a `never`-checked default.
+- Shims use named re-exports only. `packages/gateswarm-lite/src/index.ts` must not import Node APIs.
+- Library latency uses `performance.now()`. CLIs fail immediately when there is no argv prompt and `process.stdin.isTTY` is true.
 
 ---
 
@@ -236,6 +238,8 @@ const FIXTURES = [
   'Summarize the differences between TCP and UDP in one paragraph.',
   'Write a Python function that parses a CSV file and returns the top 5 rows sorted by revenue, with unit tests.',
   'Design a microservices architecture for a real-time trading platform, including failure modes, data consistency strategy, and a migration plan from the current monolith.',
+  'Explain async/await',
+  '',
 ];
 
 describe('gateswarm-lite parity with gateway scorer', () => {
@@ -324,7 +328,7 @@ export interface ComplexityResult {
 }
 
 export function scoreComplexity(prompt: string): ComplexityResult {
-  const start = Date.now();
+  const start = performance.now();
   const p = prompt.length > MAX_PROMPT_SIZE ? prompt.slice(0, MAX_PROMPT_SIZE) : prompt;
   const features = extractFeatures(p);
   const wordCount = countPromptWords(p);
@@ -334,7 +338,7 @@ export function scoreComplexity(prompt: string): ComplexityResult {
     tier: scoreToEffort(score),
     wordCount,
     features,
-    latencyMs: Date.now() - start,
+    latencyMs: performance.now() - start,
   };
 }
 ```
@@ -346,9 +350,15 @@ Create `src/feature-extractor-v04.ts`:
 ```typescript
 /**
  * Shim — implementation moved to packages/gateswarm-lite (2026-08-25).
- * Keeps legacy import paths working for src/, tests/, and eval/.
+ * Named re-exports only: do not `export *` (that would leak scoreComplexity
+ * onto this legacy module surface).
  */
-export * from 'gateswarm-lite';
+export {
+  countPromptWords,
+  extractFeatures,
+  heuristicScoreFromFeatures,
+  type FeatureVector,
+} from 'gateswarm-lite';
 ```
 
 Create `src/tier-boundaries.ts`:
@@ -359,7 +369,16 @@ Create `src/tier-boundaries.ts`:
  * Re-exports the SAME module instance, so setTierBoundaries() calls from
  * retraining/hot-reload keep affecting every consumer.
  */
-export * from 'gateswarm-lite';
+export {
+  DEFAULT_BOUNDARIES,
+  EFFORT_RANGES,
+  getEffortRanges,
+  getTierBoundaries,
+  scoreToEffort,
+  setTierBoundaries,
+  tierMidpoints,
+  type TierBoundaries,
+} from 'gateswarm-lite';
 ```
 
 - [ ] **Step 7: Make src/types.ts source EffortLevel from the lite package**
@@ -425,13 +444,18 @@ async function readStdin(): Promise<string> {
   return Buffer.concat(chunks).toString('utf8').trim();
 }
 
-const arg = process.argv.slice(2).join(' ').trim();
-const prompt = arg.length > 0 ? arg : await readStdin();
-
-if (!prompt) {
-  console.error(JSON.stringify({ error: 'empty prompt: pass it as an argument or via stdin' }));
+function fail(message: string): never {
+  console.error(JSON.stringify({ error: message }));
   process.exit(1);
 }
+
+const arg = process.argv.slice(2).join(' ').trim();
+let prompt = arg;
+if (!prompt) {
+  if (process.stdin.isTTY) fail('empty prompt: pass it as an argument or via stdin');
+  prompt = await readStdin();
+}
+if (!prompt) fail('empty prompt: pass it as an argument or via stdin');
 
 console.log(JSON.stringify(scoreComplexity(prompt), null, 2));
 ```
@@ -447,7 +471,7 @@ Run: `node packages/gateswarm-lite/dist/cli.js "Refactor my authentication modul
 Expected: JSON with `score` (0-1), `tier` (one of the 6 levels), `wordCount`, `features`, `latencyMs`.
 
 Run: `node packages/gateswarm-lite/dist/cli.js`
-Expected: exit code 1, stderr `{"error":"empty prompt: pass it as an argument or via stdin"}` (stdin is empty/closed in non-interactive shells; in an interactive shell pipe empty input: `echo "" | node packages/gateswarm-lite/dist/cli.js`).
+Expected: exit code 1 immediately (must not hang), stderr JSON `{"error":"empty prompt: pass it as an argument or via stdin"}` because stdin is a TTY. If the shell is non-TTY, pipe empty input instead: `"" | node packages/gateswarm-lite/dist/cli.js`.
 
 - [ ] **Step 4: Write the package README**
 
@@ -1013,7 +1037,11 @@ for (let i = 0; i < args.length; i++) {
 }
 
 const arg = promptParts.join(' ').trim();
-const prompt = arg.length > 0 ? arg : await readStdin();
+let prompt = arg;
+if (!prompt) {
+  if (process.stdin.isTTY) fail('empty prompt: pass it as an argument or via stdin');
+  prompt = await readStdin();
+}
 if (!prompt) fail('empty prompt: pass it as an argument or via stdin');
 
 console.log(JSON.stringify(route(prompt, { strategy, matrix }), null, 2));
@@ -1084,14 +1112,90 @@ git commit -m "feat(router): add route() end-to-end API and gateswarm-route CLI"
 
 ---
 
-### Task 6: Full-build verification and root docs
+### Task 6: Golden routing table (addressing lock)
+
+**Files:**
+- Create: `tests/router-golden.test.ts`
+
+**Interfaces:**
+- Consumes: `selectModel`, `route`, `scoreComplexity`, `ModelSpec` from Tasks 2–5.
+- Produces: frozen routing assertions against `GOLDEN_MATRIX` (not `DEFAULT_MATRIX`) so model addressing stays correct when demo prices change. Matches `docs/superpowers/specs/2026-08-25-gateswarm-lite-router-testing.md` Section 4.
+
+- [ ] **Step 1: Write the golden routing test**
+
+Create `tests/router-golden.test.ts`:
+
+```typescript
+import { describe, expect, it } from 'vitest';
+import { scoreComplexity } from 'gateswarm-lite';
+import type { EffortLevel } from 'gateswarm-lite';
+import type { ModelSpec } from 'gateswarm-router';
+import { route, selectModel } from 'gateswarm-router';
+
+const GOLDEN_MATRIX: ModelSpec[] = [
+  { id: 'nano',  provider: 'x', maxEffort: 'light',    costPer1MInput: 0.10, costPer1MOutput: 0.40,  quality: 0.50 },
+  { id: 'small', provider: 'x', maxEffort: 'moderate', costPer1MInput: 0.40, costPer1MOutput: 1.60,  quality: 0.70 },
+  { id: 'mid',   provider: 'x', maxEffort: 'heavy',    costPer1MInput: 0.80, costPer1MOutput: 3.20,  quality: 0.80 },
+  { id: 'big',   provider: 'x', maxEffort: 'extreme',  costPer1MInput: 5.00, costPer1MOutput: 20.00, quality: 0.95 },
+];
+
+const EXPECTED_CHEAPEST: Record<EffortLevel, string> = {
+  trivial: 'nano',
+  light: 'nano',
+  moderate: 'small',
+  heavy: 'mid',
+  intensive: 'big',
+  extreme: 'big',
+};
+
+describe('golden addressing table', () => {
+  it.each(Object.entries(EXPECTED_CHEAPEST))(
+    'cheapest-capable at %s picks %s',
+    (tier, id) => {
+      const { model } = selectModel(tier as EffortLevel, GOLDEN_MATRIX);
+      expect(model.id).toBe(id);
+    },
+  );
+
+  it('route() selection matches selectModel(scoreComplexity(prompt).tier)', () => {
+    const prompts = [
+      'hi',
+      'What is the capital of France?',
+      'Write a Python function that parses a CSV file and returns the top 5 rows sorted by revenue, with unit tests.',
+      'Design a microservices architecture for a real-time trading platform, including failure modes, data consistency strategy, and a migration plan from the current monolith.',
+    ];
+    for (const prompt of prompts) {
+      const decision = route(prompt, { matrix: GOLDEN_MATRIX });
+      const expected = selectModel(scoreComplexity(prompt).tier, GOLDEN_MATRIX);
+      expect(decision.model.id).toBe(expected.model.id);
+    }
+  });
+});
+```
+
+- [ ] **Step 2: Run the test to verify it fails**
+
+Run: `npx vitest run tests/router-golden.test.ts`
+Expected: FAIL if Task 4/5 are not done; PASS once `selectModel`/`route` exist. If this task runs after Task 5, expect PASS on first run — that is acceptable; the lock is the point.
+
+- [ ] **Step 3: Commit**
+
+```powershell
+git add tests/router-golden.test.ts
+git commit -m "test(router): lock golden addressing table against a frozen matrix"
+```
+
+---
+
+### Task 7: Full-build verification and root docs
 
 **Files:**
 - Modify: `README.md` (root — add a section after the intro)
 - Verify (no edits expected): root build, tests, typecheck, consistency check
+- Walk the acceptance checklist in `docs/superpowers/specs/2026-08-25-gateswarm-lite-router-testing.md` Section 5
 
 **Interfaces:**
-- Consumes: everything from Tasks 1-5.
+- Consumes: everything from Tasks 1-6.
 - Produces: verified `npm run build` for the whole repo; root README documents the two-layer split.
 
 - [ ] **Step 1: Run the full verification battery**
@@ -1147,6 +1251,6 @@ git commit -m "docs: document gateswarm-lite + gateswarm-router two-layer split"
 
 ## Plan Self-Review (completed)
 
-- **Spec coverage:** workspaces + rename (Task 1), verbatim extraction + parity + shims + single EffortLevel source (Task 2), lite API/CLI (Tasks 2-3), router types/matrix/selection semantics incl. blended cost, strategies, fallback, minQuality, empty-matrix error (Task 4), route() + CLI with --strategy/--matrix (Task 5), build integration + docs (Task 6). Non-goals respected: no executor, no device profiles, no ML.
+- **Spec coverage:** workspaces + rename (Task 1), verbatim extraction + parity + named shims + single EffortLevel source (Task 2), lite API/CLI with TTY fail-fast (Task 3), router types/matrix/selection semantics incl. blended cost, strategies, fallback, minQuality, empty-matrix error (Task 4), route() + CLI with --strategy/--matrix (Task 5), golden addressing table (Task 6), build integration + docs (Task 7). Testing playbook `2026-08-25-gateswarm-lite-router-testing.md` is the acceptance source. Non-goals respected: no executor, no device profiles, no ML.
 - **Placeholders:** none — every code step contains complete code; every command has an expected result.
 - **Type consistency:** `ComplexityResult`, `ModelSpec`, `RouteOptions`, `RouteDecision`, `Selection`, `EFFORT_RANK`, `blendedCost`, `valueScore`, `selectModel`, `route`, `scoreComplexity` are named identically across tasks 2, 4, and 5.
