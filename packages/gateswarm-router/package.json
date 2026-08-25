@@ -1,0 +1,31 @@
+{
+  "name": "gateswarm-router",
+  "version": "0.1.0",
+  "description": "Advisory model router (GateSwarm layer 2). Scores prompt complexity via gateswarm-lite and returns the best cost/benefit model for the tier. Does not execute requests.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "gateswarm-route": "./dist/cli.js"
+  },
+  "files": [
+    "dist/"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "gateswarm-lite": "0.1.0"
+  },
+  "keywords": ["llm-router", "model-routing", "cost-optimization", "complexity-scoring"],
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

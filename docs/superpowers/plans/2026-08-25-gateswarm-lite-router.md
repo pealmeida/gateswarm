@@ -544,7 +544,7 @@ git commit -m "feat(lite): add scoreComplexity CLI and package README"
   - `blendedCost(m: ModelSpec): number`, `valueScore(m: ModelSpec): number`, `EFFORT_RANK: Record<EffortLevel, number>`, `DEFAULT_MATRIX: ModelSpec[]`
   - Task 5 builds `route()` on top of these exact names.
 
-- [ ] **Step 1: Create the router package manifest and tsconfig**
+- [x] **Step 1: Create the router package manifest and tsconfig**
 
 Create `packages/gateswarm-router/package.json`:
 
@@ -610,7 +610,7 @@ Create `packages/gateswarm-router/tsconfig.json`:
 Then run: `npm install`
 Expected: `node_modules/gateswarm-router` link appears.
 
-- [ ] **Step 2: Write the failing selection tests**
+- [x] **Step 2: Write the failing selection tests**
 
 Create `tests/router-select.test.ts`:
 
@@ -721,12 +721,12 @@ describe('DEFAULT_MATRIX', () => {
 });
 ```
 
-- [ ] **Step 3: Run tests to verify they fail**
+- [x] **Step 3: Run tests to verify they fail**
 
 Run: `npx vitest run tests/router-select.test.ts`
 Expected: FAIL — `packages/gateswarm-router/src/index.ts` does not exist yet (alias resolution error).
 
-- [ ] **Step 4: Implement router types**
+- [x] **Step 4: Implement router types**
 
 Create `packages/gateswarm-router/src/types.ts`:
 
@@ -771,7 +771,7 @@ export interface RouteDecision {
 }
 ```
 
-- [ ] **Step 5: Implement the default matrix**
+- [x] **Step 5: Implement the default matrix**
 
 Create `packages/gateswarm-router/src/matrix.ts`:
 
@@ -795,7 +795,7 @@ export const DEFAULT_MATRIX: ModelSpec[] = [
 ];
 ```
 
-- [ ] **Step 6: Implement selection**
+- [x] **Step 6: Implement selection**
 
 Create `packages/gateswarm-router/src/select.ts`:
 
@@ -874,7 +874,7 @@ export function selectModel(tier: EffortLevel, matrix: ModelSpec[], opts: RouteO
 }
 ```
 
-- [ ] **Step 7: Create a minimal index so the alias resolves**
+- [x] **Step 7: Create a minimal index so the alias resolves**
 
 Create `packages/gateswarm-router/src/index.ts` (extended with `route()` in Task 5):
 
@@ -884,12 +884,12 @@ export { DEFAULT_MATRIX } from './matrix.js';
 export { blendedCost, EFFORT_RANK, selectModel, valueScore, type Selection } from './select.js';
 ```
 
-- [ ] **Step 8: Run tests to verify they pass**
+- [x] **Step 8: Run tests to verify they pass**
 
 Run: `npx vitest run tests/router-select.test.ts`
 Expected: PASS (all cases).
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```powershell
 git add packages/gateswarm-router tests/router-select.test.ts package-lock.json
