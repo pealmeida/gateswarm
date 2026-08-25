@@ -74,6 +74,19 @@ Use these strings in `tests/lite-parity.test.ts`. They are chosen to exercise le
 
 Optional snapshot (add only after the first green parity run): a table of `{ id, score, tier }` written into `tests/fixtures/lite-score-snapshot.json`. On later PRs, fail if any score drifts by more than `1e-12` or the tier changes. That snapshot is regenerated **only** when `feature-extractor.ts` or `DEFAULT_BOUNDARIES` change on purpose, and the PR must say so.
 
+### 3.1 External corpus: MLJAR AI prompts (added 2026-08-25)
+
+`tests/mljar-corpus.test.ts` runs the full [mljar.com/ai-prompts](https://mljar.com/ai-prompts/) library — 678 real-world, role-organized prompts for data/ML/engineering work — through scorer and router:
+
+| Artifact | Purpose |
+|----------|---------|
+| `tests/fixtures/mljar-prompts.json` | The corpus (fetched via `npm run corpus:build`) |
+| `tests/fixtures/mljar-score-snapshot.json` | Frozen `{id → score, tier}` drift lock |
+| `scripts/simulate-mljar-prompts.ts` (`npm run simulate:prompts`) | Distribution/latency/capability report; `-- --write-snapshot` regenerates the snapshot |
+| `tests/mljar-corpus.test.ts` | Integrity + full-corpus parity + router capability invariant + snapshot lock |
+
+Snapshot rules are identical to Section 3: regenerate **only** with an intentional extractor/boundary change, and say so in the PR. Baseline observation at freeze time (2026-08-25): the corpus scores 100% `extreme` (long structured engineering prompts saturate the heuristic; raw-score spread lives in `npm run simulate:prompts` output). Tier saturation is a calibration topic for the eval pipeline — not a router defect.
+
 ---
 
 ## 4. Golden routing table (addressing)

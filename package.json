@@ -63,6 +63,8 @@
     "ssl:label-propagation": "python3 eval/ssl/label_propagation.py",
     "ssl:pipeline": "npm run ssl:build-corpus && npm run ssl:extract-features && npm run ssl:label-propagation",
     "eval:gate": "tsx eval/calibration-gate.ts",
+    "corpus:build": "node scripts/build-mljar-corpus.mjs",
+    "simulate:prompts": "tsx scripts/simulate-mljar-prompts.ts",
     "typecheck": "tsc --noEmit",
     "check:types": "tsc --noEmit",
     "lint": "tsc --noEmit",
