@@ -18,7 +18,8 @@
     "paths": {
       "@/*": ["src/*"],
       "gateswarm-lite": ["packages/gateswarm-lite/src/index.ts"],
-      "gateswarm-router": ["packages/gateswarm-router/src/index.ts"]
+      "gateswarm-router": ["packages/gateswarm-router/src/index.ts"],
+      "gateswarm-mcp": ["packages/gateswarm-mcp/src/index.ts"]
     }
   },
   "include": ["src/**/*.ts", "tests/**/*.ts", "packages/*/src/**/*.ts"],

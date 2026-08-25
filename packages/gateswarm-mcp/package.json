@@ -1,0 +1,32 @@
+{
+  "name": "gateswarm-mcp",
+  "version": "0.1.0",
+  "description": "Model Context Protocol server exposing the GateSwarm advisory router to any MCP-capable CLI/IDE AI agent: show routing decisions, collect correct/wrong verdicts with corrected tiers, persist to the golden-dataset telemetry store.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "gateswarm-mcp": "./dist/cli.js"
+  },
+  "files": [
+    "dist/"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "gateswarm-lite": "0.1.0",
+    "gateswarm-router": "0.1.0"
+  },
+  "keywords": ["mcp", "mcp-server", "llm-router", "model-routing", "ai-agent"],
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

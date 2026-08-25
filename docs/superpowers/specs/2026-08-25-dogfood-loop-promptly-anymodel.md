@@ -59,7 +59,17 @@ Dogfood rule: **no synthetic-only calibration.** Every boundary or matrix change
 - AnyModel → `gateswarm-router@^0.1.0` — advisory only; AnyModel owns execution, keys, retries.
 - Known spec-sanctioned gap worth adding early: **precomputed tier input**. Design §1 says layer 2 accepts "a prompt *(or a precomputed tier)*"; today `route()` takes prompts only. Add `RouteOptions.tier?: EffortLevel` (skip lite scoring when provided) so AnyModel can replay stored tiers and A/B scorers without re-scoring. Small, additive, backward compatible.
 
-### 3.2 InteractionEvent v1 (the atom of the golden dataset)
+### 3.2 Agent plugin: `gateswarm-mcp` (P0+P1 realization)
+
+`packages/gateswarm-mcp` is the dogfood loop's capture surface for any MCP-capable CLI/IDE agent:
+
+- `route_prompt` → decision + `eventId`, appends a `DecisionRecord` (InteractionEvent subset) to `<GATESWARM_TELEMETRY_DIR>/<project>/events.jsonl`
+- `submit_feedback {eventId, verdict, correctTier?}` → appends a `FeedbackRecord`; wrong verdicts return the rerouted model at the corrected tier (the "provide correct complexity tier" UX)
+- `telemetry_summary` → per-project counts
+
+Transport is dependency-free stdio JSON-RPC 2.0; registration snippets live in the package README. Feedback lines join decisions by `eventId`/`promptHash`, so the export step of §4 needs no transformation.
+
+### 3.3 InteractionEvent v1 (the atom of the golden dataset)
 
 One JSON line per request, written **after** outcome resolves. Schema-versioned like `OrganicLabelRow` (writer + reader share the type).
 

@@ -6,6 +6,7 @@ export default defineConfig({
     alias: {
       'gateswarm-lite': fileURLToPath(new URL('./packages/gateswarm-lite/src/index.ts', import.meta.url)),
       'gateswarm-router': fileURLToPath(new URL('./packages/gateswarm-router/src/index.ts', import.meta.url)),
+      'gateswarm-mcp': fileURLToPath(new URL('./packages/gateswarm-mcp/src/index.ts', import.meta.url)),
     },
   },
   build: {

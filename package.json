@@ -41,7 +41,7 @@
     "gateswarm-gateway": "./dist/src/moma-gateway.js"
   },
   "scripts": {
-    "build": "npm run build --workspaces --if-present && tsc -p tsconfig.build.json && node scripts/copy-build-assets.mjs",
+    "build": "npm run build -w gateswarm-lite && npm run build -w gateswarm-router && npm run build -w gateswarm-mcp && tsc -p tsconfig.build.json && node scripts/copy-build-assets.mjs",
     "prepublishOnly": "npm run build && npm test",
     "start": "tsx src/moma-gateway.ts --port 8900",
     "dev": "tsx watch src/moma-gateway.ts --port 8900",
