@@ -910,7 +910,7 @@ git commit -m "feat(router): add advisory model selection with default matrix"
 - Consumes: `scoreComplexity` (gateswarm-lite), `selectModel`/`DEFAULT_MATRIX` (Task 4).
 - Produces: `route(prompt: string, opts?: RouteOptions): RouteDecision` and the `gateswarm-route` bin.
 
-- [ ] **Step 1: Write the failing route test**
+- [x] **Step 1: Write the failing route test**
 
 Create `tests/router-route.test.ts`:
 
@@ -945,12 +945,12 @@ describe('route', () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `npx vitest run tests/router-route.test.ts`
 Expected: FAIL — no export named `route`.
 
-- [ ] **Step 3: Implement route() in the index**
+- [x] **Step 3: Implement route() in the index**
 
 Replace `packages/gateswarm-router/src/index.ts` with:
 
@@ -980,12 +980,12 @@ export function route(prompt: string, opts: RouteOptions = {}): RouteDecision {
 }
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `npx vitest run tests/router-route.test.ts tests/router-select.test.ts`
 Expected: PASS.
 
-- [ ] **Step 5: Write the router CLI**
+- [x] **Step 5: Write the router CLI**
 
 Create `packages/gateswarm-router/src/cli.ts`:
 
@@ -1047,7 +1047,7 @@ if (!prompt) fail('empty prompt: pass it as an argument or via stdin');
 console.log(JSON.stringify(route(prompt, { strategy, matrix }), null, 2));
 ```
 
-- [ ] **Step 6: Build and smoke-test**
+- [x] **Step 6: Build and smoke-test**
 
 Run: `npm run build -w gateswarm-router`
 Expected: exit 0 (builds against the already-built `gateswarm-lite` dist; if it fails on missing dist, run `npm run build -w gateswarm-lite` first).
@@ -1055,7 +1055,7 @@ Expected: exit 0 (builds against the already-built `gateswarm-lite` dist; if it 
 Run: `node packages/gateswarm-router/dist/cli.js "Design a distributed cache with failover" --strategy best-value`
 Expected: JSON `RouteDecision` with `model`, `alternatives`, `complexity`, `strategy: "best-value"`, `reason`.
 
-- [ ] **Step 7: Write the package README**
+- [x] **Step 7: Write the package README**
 
 Create `packages/gateswarm-router/README.md`:
 
@@ -1103,7 +1103,7 @@ gateswarm-route "Summarize this doc" --strategy best-value --matrix my-matrix.js
 ```
 ```
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```powershell
 git add packages/gateswarm-router tests/router-route.test.ts
