@@ -9,6 +9,27 @@
 > **Latest stable:** [v0.6.0](https://github.com/pealmeida/gateswarm-router/releases/tag/v0.6.0) — Trustable Precision: adversarial-review hardening + honest evals
 > **Releases:** v0.4.4 · v0.5.2 · v0.5.3 · v0.5.4 · v0.5.5 · v0.5.6 (see [Releases](#releases) below)
 
+## Lightweight packages: gateswarm-lite + gateswarm-router
+
+The complexity scorer and an advisory router are available as standalone,
+dependency-free packages under `packages/`:
+
+| Package | What it does | Dependencies |
+|---------|--------------|--------------|
+| [`gateswarm-lite`](packages/gateswarm-lite) | Scores prompt complexity (0-1) and maps it to 6 effort tiers. Node/browser/edge. | none |
+| [`gateswarm-router`](packages/gateswarm-router) | Picks the best cost/benefit model for the scored tier from a data-driven matrix. Advisory only — your code executes the request. | gateswarm-lite |
+
+```ts
+import { route } from 'gateswarm-router';
+
+const d = route('Design a distributed cache with failover');
+// d.complexity.tier → 'intensive' · d.model.id → cheapest capable model
+```
+
+The full gateway in this repo (package `gateswarm-gateway`) builds on the same
+scorer via workspace imports; tier boundaries stay calibrated by the eval
+pipeline (`npm run eval:refit-boundaries`).
+
 ---
 
 ## What is it?

@@ -1198,7 +1198,7 @@ git commit -m "test(router): lock golden addressing table against a frozen matri
 - Consumes: everything from Tasks 1-6.
 - Produces: verified `npm run build` for the whole repo; root README documents the two-layer split.
 
-- [ ] **Step 1: Run the full verification battery**
+- [x] **Step 1: Run the full verification battery**
 
 Run each and confirm:
 
@@ -1211,7 +1211,7 @@ Run each and confirm:
 
 If step 4 fails on emit collisions from `dist/packages`, add `"packages"` to the `exclude` array of `tsconfig.build.json` and re-run.
 
-- [ ] **Step 2: Add the two-layer section to the root README**
+- [x] **Step 2: Add the two-layer section to the root README**
 
 In root `README.md`, insert this section right after the opening description/badges block (before the first existing `##` section):
 
@@ -1238,7 +1238,7 @@ scorer via workspace imports; tier boundaries stay calibrated by the eval
 pipeline (`npm run eval:refit-boundaries`).
 ```
 
-- [ ] **Step 3: Final commit**
+- [x] **Step 3: Final commit**
 
 ```powershell
 git add README.md tsconfig.build.json
