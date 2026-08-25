@@ -5,6 +5,8 @@
  * v0.5.1: Clean — no IntentMode, no DataSource, no mode/effortOverride
  */
 
+import type { EffortLevel } from 'gateswarm-lite';
+
 // ─── Backend & Device ───────────────────────────────────
 
 export type BackendType = 'webgpu' | 'webnn' | 'wasm';
@@ -49,7 +51,7 @@ export interface ComplexityScore {
 
 export type Tier = 'local' | 'gatekeeper' | 'cloud';
 
-export type EffortLevel = 'trivial' | 'light' | 'moderate' | 'heavy' | 'intensive' | 'extreme';
+export type { EffortLevel } from 'gateswarm-lite';
 
 export type IntentMode = 'plan' | 'act' | 'auto';
 

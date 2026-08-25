@@ -222,7 +222,7 @@ git commit -m "chore: scaffold npm workspaces and gateswarm-lite package skeleto
 - Consumes: workspace resolution from Task 1.
 - Produces: `scoreComplexity(prompt: string): ComplexityResult` where `ComplexityResult = { score: number; tier: EffortLevel; wordCount: number; features: FeatureVector; latencyMs: number }`. Also re-exports (unchanged signatures): `extractFeatures(prompt: string): FeatureVector`, `heuristicScoreFromFeatures(features: FeatureVector, wordCount: number): number`, `countPromptWords(prompt: string): number`, `scoreToEffort(score: number): EffortLevel`, `setTierBoundaries(b: number[]): boolean`, `getTierBoundaries()`, `getEffortRanges()`, `EFFORT_RANGES`, `DEFAULT_BOUNDARIES`, `tierMidpoints()`, and types `EffortLevel`, `FeatureVector`. Tasks 3-5 import from `gateswarm-lite`.
 
-- [ ] **Step 1: Write the failing parity test**
+- [x] **Step 1: Write the failing parity test**
 
 Create `tests/lite-parity.test.ts`:
 
@@ -267,12 +267,12 @@ describe('gateswarm-lite parity with gateway scorer', () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `npx vitest run tests/lite-parity.test.ts`
 Expected: FAIL — `gateswarm-lite` has no export named `scoreComplexity`.
 
-- [ ] **Step 3: Move the two core files with git mv (verbatim, history preserved)**
+- [x] **Step 3: Move the two core files with git mv (verbatim, history preserved)**
 
 ```powershell
 git mv src/feature-extractor-v04.ts packages/gateswarm-lite/src/feature-extractor.ts
@@ -281,7 +281,7 @@ git mv src/tier-boundaries.ts packages/gateswarm-lite/src/tier-boundaries.ts
 
 Do **not** edit the file contents. `feature-extractor.ts` has zero imports. `tier-boundaries.ts` line 1 (`import type { EffortLevel } from './types.js';`) now resolves to the lite-local types file created next.
 
-- [ ] **Step 4: Create the lite-local types module**
+- [x] **Step 4: Create the lite-local types module**
 
 Create `packages/gateswarm-lite/src/types.ts`:
 
@@ -289,7 +289,7 @@ Create `packages/gateswarm-lite/src/types.ts`:
 export type EffortLevel = 'trivial' | 'light' | 'moderate' | 'heavy' | 'intensive' | 'extreme';
 ```
 
-- [ ] **Step 5: Write the real lite index**
+- [x] **Step 5: Write the real lite index**
 
 Replace `packages/gateswarm-lite/src/index.ts` with:
 
@@ -343,7 +343,7 @@ export function scoreComplexity(prompt: string): ComplexityResult {
 }
 ```
 
-- [ ] **Step 6: Create the re-export shims at the old paths**
+- [x] **Step 6: Create the re-export shims at the old paths**
 
 Create `src/feature-extractor-v04.ts`:
 
@@ -381,7 +381,7 @@ export {
 } from 'gateswarm-lite';
 ```
 
-- [ ] **Step 7: Make src/types.ts source EffortLevel from the lite package**
+- [x] **Step 7: Make src/types.ts source EffortLevel from the lite package**
 
 In `src/types.ts`, add at the top (after the header comment):
 
@@ -395,18 +395,18 @@ and replace line 52 (`export type EffortLevel = 'trivial' | ...;`) with:
 export type { EffortLevel } from 'gateswarm-lite';
 ```
 
-- [ ] **Step 8: Run the parity test to verify it passes**
+- [x] **Step 8: Run the parity test to verify it passes**
 
 Run: `npx vitest run tests/lite-parity.test.ts`
 Expected: PASS (all cases).
 
-- [ ] **Step 9: Run the full suite and typecheck**
+- [x] **Step 9: Run the full suite and typecheck**
 
 Run: `npm test` — Expected: all tests PASS (existing feature-extractor/tier-boundaries tests exercise the shims).
 Run: `npm run typecheck` — Expected: exit 0.
 Run: `npm run check:consistency` — Expected: exit 0 (eval pipeline still resolves the scorer).
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```powershell
 git add -A
