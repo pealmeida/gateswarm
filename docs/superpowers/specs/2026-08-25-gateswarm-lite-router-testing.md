@@ -154,6 +154,29 @@ Rules:
 2. Never add embeddings, cascade, or ordinal loading to `gateswarm-lite`. If a learned scorer ships later, it is a different package or an opt-in export — not the default `scoreComplexity`.
 3. After any extractor or boundary change, regenerate the optional score snapshot (Section 3) and re-run parity.
 
+### 6.1 North star: model-complexity fit (`npm run fit:report`)
+
+The product goal of the scorer is **fit**: boundaries should split real traffic so each band routes to the cheapest capable model for the work actually required in that band. Every scorer/router PR states its effect on fit (or why it is N/A). The review loop:
+
+```
+npm run fit:report            # where does traffic sit vs cut points? what does moving them cost/save?
+        │
+        ▼
+labeling priority queue       # prompts within ±eps of a boundary, ranked by $ swing — judge these first
+        │
+        ▼
+eval:refit-boundaries         # fit candidates on labeled data (train split only)
+eval:calibrate / eval:gate    # approve or reject with metrics
+        │
+        ▼
+own PR: DEFAULT_BOUNDARIES + regenerate BOTH snapshots (§3, §3.1) → full suite green
+        │
+        ▼
+npm run fit:report            # confirm resolution improved; repeat
+```
+
+Interpretation guide: a boundary with no nearby traffic is either safely clear or useless — only labeled data can say which. Saturation above the top boundary means the router cannot differentiate there regardless of matrix quality; that is a scorer-calibration problem, never a `selectModel` problem.
+
 Human-in-the-loop check (optional, not CI): pick 20 real prompts from your traffic, score them, and mark whether the tier feels one band off. Adjacent-band error is historically acceptable (~86% adjacent accuracy in the heuristic comments); exact-tier misses in the mid-band are the usual calibration target.
 
 ---

@@ -65,6 +65,7 @@
     "eval:gate": "tsx eval/calibration-gate.ts",
     "corpus:build": "node scripts/build-mljar-corpus.mjs",
     "simulate:prompts": "tsx scripts/simulate-mljar-prompts.ts",
+    "fit:report": "tsx scripts/model-complexity-fit.ts",
     "typecheck": "tsc --noEmit",
     "check:types": "tsc --noEmit",
     "lint": "tsc --noEmit",
