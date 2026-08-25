@@ -425,7 +425,7 @@ git commit -m "refactor: extract scorer core into gateswarm-lite with parity-loc
 - Consumes: `scoreComplexity` from Task 2.
 - Produces: `gateswarm-lite` bin — prints `ComplexityResult` JSON for a prompt from argv or stdin; exits 1 with `{"error": ...}` JSON on empty input.
 
-- [ ] **Step 1: Write the CLI**
+- [x] **Step 1: Write the CLI**
 
 Create `packages/gateswarm-lite/src/cli.ts`:
 
@@ -465,7 +465,7 @@ console.log(JSON.stringify(scoreComplexity(prompt), null, 2));
 Run: `npm run build -w gateswarm-lite`
 Expected: exit 0; `packages/gateswarm-lite/dist/index.js`, `dist/cli.js`, and `.d.ts` files exist.
 
-- [ ] **Step 3: Smoke-test the built CLI**
+- [x] **Step 3: Smoke-test the built CLI**
 
 Run: `node packages/gateswarm-lite/dist/cli.js "Refactor my authentication module to support OAuth2 and add integration tests"`
 Expected: JSON with `score` (0-1), `tier` (one of the 6 levels), `wordCount`, `features`, `latencyMs`.
@@ -473,7 +473,7 @@ Expected: JSON with `score` (0-1), `tier` (one of the 6 levels), `wordCount`, `f
 Run: `node packages/gateswarm-lite/dist/cli.js`
 Expected: exit code 1 immediately (must not hang), stderr JSON `{"error":"empty prompt: pass it as an argument or via stdin"}` because stdin is a TTY. If the shell is non-TTY, pipe empty input instead: `"" | node packages/gateswarm-lite/dist/cli.js`.
 
-- [ ] **Step 4: Write the package README**
+- [x] **Step 4: Write the package README**
 
 Create `packages/gateswarm-lite/README.md`:
 
@@ -515,7 +515,7 @@ in the parent repo and frozen here as `DEFAULT_BOUNDARIES`.
 Feed the resulting `tier` into `gateswarm-router` to pick the best cost/benefit model.
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```powershell
 git add packages/gateswarm-lite
