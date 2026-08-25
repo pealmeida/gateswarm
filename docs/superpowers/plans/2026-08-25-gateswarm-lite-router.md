@@ -36,7 +36,7 @@
 - Consumes: nothing.
 - Produces: workspace resolution — `import ... from 'gateswarm-lite'` works in `tsc --noEmit`, `tsx`, and `vitest`. Later tasks rely on the `gateswarm-lite` and `gateswarm-router` path/alias mappings created here.
 
-- [ ] **Step 1: Create the lite package manifest**
+- [x] **Step 1: Create the lite package manifest**
 
 Create `packages/gateswarm-lite/package.json`:
 
@@ -71,7 +71,7 @@ Create `packages/gateswarm-lite/package.json`:
 }
 ```
 
-- [ ] **Step 2: Create the lite package tsconfig**
+- [x] **Step 2: Create the lite package tsconfig**
 
 Create `packages/gateswarm-lite/tsconfig.json`:
 
@@ -96,7 +96,7 @@ Create `packages/gateswarm-lite/tsconfig.json`:
 }
 ```
 
-- [ ] **Step 3: Create a placeholder index**
+- [x] **Step 3: Create a placeholder index**
 
 Create `packages/gateswarm-lite/src/index.ts` (replaced with the real API in Task 2):
 
@@ -104,7 +104,7 @@ Create `packages/gateswarm-lite/src/index.ts` (replaced with the real API in Tas
 export const GATESWARM_LITE_VERSION = '0.1.0';
 ```
 
-- [ ] **Step 4: Update the root package.json**
+- [x] **Step 4: Update the root package.json**
 
 In root `package.json` apply exactly these changes:
 
@@ -134,7 +134,7 @@ In root `package.json` apply exactly these changes:
     "build": "npm run build --workspaces --if-present && tsc -p tsconfig.build.json && node scripts/copy-build-assets.mjs",
 ```
 
-- [ ] **Step 5: Add source-level path mappings to root tsconfig.json**
+- [x] **Step 5: Add source-level path mappings to root tsconfig.json**
 
 Replace the existing `"paths"` block (root `tsconfig.json`, lines 18-20):
 
@@ -152,7 +152,7 @@ And extend `"include"` so `npm run typecheck` covers package sources:
   "include": ["src/**/*.ts", "tests/**/*.ts", "packages/*/src/**/*.ts"],
 ```
 
-- [ ] **Step 6: Add vitest/vite aliases**
+- [x] **Step 6: Add vitest/vite aliases**
 
 Replace `vite.config.ts` entirely with:
 
@@ -187,17 +187,17 @@ export default defineConfig({
 });
 ```
 
-- [ ] **Step 7: Install to create workspace links**
+- [x] **Step 7: Install to create workspace links**
 
 Run: `npm install`
 Expected: succeeds; `node_modules/gateswarm-lite` exists as a link to `packages/gateswarm-lite`.
 
-- [ ] **Step 8: Verify nothing broke**
+- [x] **Step 8: Verify nothing broke**
 
 Run: `npm run typecheck` — Expected: exit 0.
 Run: `npm test` — Expected: all existing tests PASS (same count as before this task).
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```powershell
 git add packages/gateswarm-lite package.json package-lock.json tsconfig.json vite.config.ts

@@ -1,8 +1,11 @@
 {
-  "name": "gateswarm-router",
+  "name": "gateswarm-gateway",
   "version": "0.6.0",
   "description": "GateSwarm MoMA Gateway for complexity-aware model routing.",
   "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
   "main": "./dist/src/moma-gateway.js",
   "types": "./dist/src/moma-gateway.d.ts",
   "exports": {
@@ -38,7 +41,7 @@
     "gateswarm-gateway": "./dist/src/moma-gateway.js"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && node scripts/copy-build-assets.mjs",
+    "build": "npm run build --workspaces --if-present && tsc -p tsconfig.build.json && node scripts/copy-build-assets.mjs",
     "prepublishOnly": "npm run build && npm test",
     "start": "tsx src/moma-gateway.ts --port 8900",
     "dev": "tsx watch src/moma-gateway.ts --port 8900",
@@ -67,6 +70,7 @@
   },
   "dependencies": {
     "dotenv": "^17.4.2",
+    "gateswarm-lite": "0.1.0",
     "idb-keyval": "^6.2.1",
     "tiktoken": "^1.0.22"
   },

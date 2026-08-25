@@ -1,0 +1,28 @@
+{
+  "name": "gateswarm-lite",
+  "version": "0.1.0",
+  "description": "Zero-dependency prompt complexity scorer (GateSwarm layer 1). Scores a prompt 0-1 and maps it to one of 6 effort tiers.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "gateswarm-lite": "./dist/cli.js"
+  },
+  "files": [
+    "dist/"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "keywords": ["complexity-scoring", "prompt-routing", "llm-router", "zero-dependency"],
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

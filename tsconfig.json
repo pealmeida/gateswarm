@@ -16,9 +16,11 @@
     "rootDir": ".",
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["src/*"],
+      "gateswarm-lite": ["packages/gateswarm-lite/src/index.ts"],
+      "gateswarm-router": ["packages/gateswarm-router/src/index.ts"]
     }
   },
-  "include": ["src/**/*.ts", "tests/**/*.ts"],
+  "include": ["src/**/*.ts", "tests/**/*.ts", "packages/*/src/**/*.ts"],
   "exclude": ["node_modules", "dist", "src-tauri"]
 }

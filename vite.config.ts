@@ -1,6 +1,13 @@
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
 
 export default defineConfig({
+  resolve: {
+    alias: {
+      'gateswarm-lite': fileURLToPath(new URL('./packages/gateswarm-lite/src/index.ts', import.meta.url)),
+      'gateswarm-router': fileURLToPath(new URL('./packages/gateswarm-router/src/index.ts', import.meta.url)),
+    },
+  },
   build: {
     outDir: 'dist',
     emptyOutDir: true,
