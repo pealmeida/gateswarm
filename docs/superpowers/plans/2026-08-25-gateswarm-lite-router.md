@@ -1121,7 +1121,7 @@ git commit -m "feat(router): add route() end-to-end API and gateswarm-route CLI"
 - Consumes: `selectModel`, `route`, `scoreComplexity`, `ModelSpec` from Tasks 2–5.
 - Produces: frozen routing assertions against `GOLDEN_MATRIX` (not `DEFAULT_MATRIX`) so model addressing stays correct when demo prices change. Matches `docs/superpowers/specs/2026-08-25-gateswarm-lite-router-testing.md` Section 4.
 
-- [ ] **Step 1: Write the golden routing test**
+- [x] **Step 1: Write the golden routing test**
 
 Create `tests/router-golden.test.ts`:
 
@@ -1173,12 +1173,12 @@ describe('golden addressing table', () => {
 });
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `npx vitest run tests/router-golden.test.ts`
 Expected: FAIL if Task 4/5 are not done; PASS once `selectModel`/`route` exist. If this task runs after Task 5, expect PASS on first run — that is acceptable; the lock is the point.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```powershell
 git add tests/router-golden.test.ts
