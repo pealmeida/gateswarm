@@ -115,7 +115,7 @@ function persistCalibrationState(): void {
   let descriptor: number | undefined;
   try {
     writeFileSync(temporaryFile, JSON.stringify(getCalibrationState(), null, 2), 'utf-8');
-    descriptor = openSync(temporaryFile, 'r');
+    descriptor = openSync(temporaryFile, 'r+');
     fsyncSync(descriptor);
     closeSync(descriptor);
     descriptor = undefined;
