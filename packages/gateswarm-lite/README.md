@@ -13,7 +13,7 @@ Pure TypeScript. Runs in Node >= 20, browsers, and edge runtimes. No model downl
 import { scoreComplexity } from 'gateswarm-lite';
 
 const r = scoreComplexity('Design a microservices architecture for real-time trading');
-// { score: 0.52, tier: 'extreme', wordCount: 8, features: {...}, latencyMs: 0 }
+// { score: 0.338, tier: 'heavy', wordCount: 7, features: {...}, latencyMs: 0 }
 ```
 
 CLI:

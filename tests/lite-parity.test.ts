@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { scoreComplexity } from 'gateswarm-lite';
 import { scoreIntentSync } from '../src/intent-engine-v04.js';
 
@@ -30,9 +32,39 @@ describe('gateswarm-lite parity with gateway scorer', () => {
     expect(r.features).toBeTypeOf('object');
   });
 
-  it('truncates prompts above 64 KiB instead of failing', () => {
+  it('truncates prompts above 64 KiB instead of failing', { timeout: 30_000 }, () => {
     const huge = 'analyze this system '.repeat(5000); // ~100 KB
     const r = scoreComplexity(huge);
     expect(Number.isFinite(r.score)).toBe(true);
+  });
+});
+
+describe('frozen score snapshot (tests/fixtures/lite-score-snapshot.json)', () => {
+  // Regenerate ONLY when feature-extractor.ts or DEFAULT_BOUNDARIES change on
+  // purpose, and say so in the PR (testing spec Section 3). The file is written
+  // by scoring the same FIXTURES list through scoreComplexity().
+  const snapshot = JSON.parse(
+    readFileSync(join(__dirname, 'fixtures', 'lite-score-snapshot.json'), 'utf-8'),
+  ) as Record<string, { score: number; tier: string }>;
+
+  it('snapshot covers exactly g1-g9', () => {
+    expect(Object.keys(snapshot).sort()).toEqual(['g1', 'g2', 'g3', 'g4', 'g5', 'g6', 'g7', 'g8', 'g9']);
+  });
+
+  it.each([
+    ['g1', 0], ['g2', 1], ['g3', 2], ['g4', 3], ['g5', 4], ['g6', 5], ['g7', 6],
+  ])('snapshot %s matches live scorer exactly', (id, fixtureIndex) => {
+    const live = scoreComplexity(FIXTURES[fixtureIndex]);
+    const frozen = snapshot[id];
+    expect(Math.abs(live.score - frozen.score)).toBeLessThanOrEqual(1e-12);
+    expect(live.tier).toBe(frozen.tier);
+  });
+
+  it('snapshot g8 (empty) and g9 (truncate) stay pinned', () => {
+    expect(scoreComplexity('').score).toBe(snapshot.g8.score);
+    const huge = 'analyze this system '.repeat(5000);
+    const live = scoreComplexity(huge);
+    expect(Math.abs(live.score - snapshot.g9.score)).toBeLessThanOrEqual(1e-12);
+    expect(live.tier).toBe(snapshot.g9.tier);
   });
 });

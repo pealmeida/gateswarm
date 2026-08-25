@@ -1,0 +1,38 @@
+{
+  "g1": {
+    "score": 0.07031277903401206,
+    "tier": "trivial"
+  },
+  "g2": {
+    "score": 0.1824752475517608,
+    "tier": "trivial"
+  },
+  "g3": {
+    "score": 0.244981164740079,
+    "tier": "light"
+  },
+  "g4": {
+    "score": 0.22289134508632222,
+    "tier": "light"
+  },
+  "g5": {
+    "score": 0.3892041241203343,
+    "tier": "intensive"
+  },
+  "g6": {
+    "score": 0.48602205518089947,
+    "tier": "extreme"
+  },
+  "g7": {
+    "score": 0.21108371807886336,
+    "tier": "light"
+  },
+  "g8": {
+    "score": 0,
+    "tier": "trivial"
+  },
+  "g9": {
+    "score": 0.43000000000000005,
+    "tier": "intensive"
+  }
+}
