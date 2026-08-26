@@ -66,7 +66,7 @@ npm run eval:gate               # approve/reject with held-out evidence
 
 Approved boundaries land as their own PR (`DEFAULT_BOUNDARIES`) — applied at runtime instantly via `setTierBoundaries()`. Both frozen snapshots (`lite-score-snapshot.json`, `mljar-score-snapshot.json`) guard against accidental drift.
 
-Full architecture: [`docs/superpowers/specs/2026-08-25-dogfood-loop-promptly-anymodel.md`](docs/superpowers/specs/2026-08-25-dogfood-loop-promptly-anymodel.md).
+Full architecture: [`docs/superpowers/specs/2026-08-25-dogfood-loop-golden-dataset.md`](docs/superpowers/specs/2026-08-25-dogfood-loop-golden-dataset.md).
 
 The full gateway in this repo (package `gateswarm-gateway`) builds on the same scorer via workspace imports.
 

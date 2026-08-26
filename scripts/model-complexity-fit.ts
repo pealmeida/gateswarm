@@ -11,7 +11,7 @@
  *   npm run fit:report                                   # MLJAR corpus, DEFAULT_MATRIX
  *   npm run fit:report -- --fixture path.json [--eps 0.02] [--top 20]
  *
- * The loop this feeds: fit:report → label the queue in Promptly →
+ * The loop this feeds: fit:report → label the queue in your review tooling →
  * eval:refit-boundaries → eval:gate → own-PR boundary update → regen snapshots.
  */
 import { readFileSync } from 'node:fs';

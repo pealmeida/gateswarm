@@ -10,7 +10,7 @@ The agent gains three tools:
 | `submit_feedback` | Human verdict on a decision: `correct`, or `wrong` + `correctTier`. For wrong verdicts it immediately shows which model the router *would* pick at the corrected tier. Appends a `feedback` record. |
 | `telemetry_summary` | Per-project counts: decisions by tier, feedback verdicts. |
 
-Feedback records are golden-dataset labels — they feed `eval:refit-boundaries` via the dogfood loop (see `docs/superpowers/specs/2026-08-25-dogfood-loop-promptly-anymodel.md`).
+Feedback records are golden-dataset labels — they feed `eval:refit-boundaries` via the dogfood loop (see `docs/superpowers/specs/2026-08-25-dogfood-loop-golden-dataset.md`).
 
 Advisory only: no provider calls, no API keys. Execute the request yourself or through the GateSwarm gateway proxy.
 

@@ -2,7 +2,7 @@
  * Append-only telemetry store for routing decisions and human verdicts.
  * One JSONL file per project under GATESWARM_TELEMETRY_DIR (default
  * ~/.gateswarm/telemetry). Records follow the InteractionEvent shape from
- * docs/superpowers/specs/2026-08-25-dogfood-loop-promptly-anymodel.md so the
+ * docs/superpowers/specs/2026-08-25-dogfood-loop-golden-dataset.md so the
  * golden-dataset export joins without transformation.
  */
 import { createHash } from 'node:crypto';

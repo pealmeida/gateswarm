@@ -1,9 +1,9 @@
-# Dogfood Loop Architecture — Promptly × AnyModel × GateSwarm
+# Dogfood Loop Architecture — GateSwarm Golden-Dataset Flywheel
 
 **Date:** 2026-08-25
 **Status:** Proposal — architecture for "eat your own dog food" data flywheel
 **Builds on:** `2026-08-25-gateswarm-lite-router-design.md`, testing playbook §6–§7
-**Principle:** GateSwarm scores and routes Promptly/AnyModel traffic in production, captures every interaction, and turns that traffic into the labeled golden dataset that recalibrates the scorer — the system improves by using itself.
+**Principle:** GateSwarm scores and routes real application traffic in production, captures every interaction, and turns that traffic into the labeled golden dataset that recalibrates the scorer — the system improves by using itself.
 
 ---
 
@@ -11,7 +11,7 @@
 
 | Component | Role | Consumes | Emits |
 |---|---|---|---|
-| **Promptly** | Prompt library + review UI. Saves prompts with project/use-case tags, versions them, hosts the human labeling queue. | `gateswarm-lite` only (browser-safe) | saved prompts, gold/judged labels |
+| **Prompt library** (generic) | Any front end that saves prompts with project/use-case tags, versions them, and hosts the human labeling queue. | `gateswarm-lite` only (browser-safe) | saved prompts, gold/judged labels |
 | **AnyModel** | Executor plugin layer. Takes a routing *decision*, executes across providers, standardizes outcomes. | `gateswarm-router` (+ lite transitively) | outcomes, costs, failure signals |
 | **gateswarm-lite** | The scorer under test. | prompt | `ComplexityResult` |
 | **gateswarm-router** | The policy under test. | tier + matrix | `RouteDecision` |
@@ -23,7 +23,7 @@ Dogfood rule: **no synthetic-only calibration.** Every boundary or matrix change
 
 ```
                     ┌────────────────────────────────────────────┐
-                    │                PROMPTLY                     │
+                    │            PROMPT LIBRARY / REVIEW UI        │
                     │  save/tag/version prompts · review queue    │
                     └───────┬───────────────────────▲────────────┘
                             │ prompt + context      │ gold/judged labels
@@ -55,7 +55,7 @@ Dogfood rule: **no synthetic-only calibration.** Every boundary or matrix change
 
 ### 3.1 Package dependencies (unchanged public APIs)
 
-- Promptly → `gateswarm-lite@^0.1.0` — zero deps, runs in browser.
+- Prompt-library front ends → `gateswarm-lite@^0.1.0` — zero deps, runs in browser.
 - AnyModel → `gateswarm-router@^0.1.0` — advisory only; AnyModel owns execution, keys, retries.
 - Known spec-sanctioned gap worth adding early: **precomputed tier input**. Design §1 says layer 2 accepts "a prompt *(or a precomputed tier)*"; today `route()` takes prompts only. Add `RouteOptions.tier?: EffortLevel` (skip lite scoring when provided) so AnyModel can replay stored tiers and A/B scorers without re-scoring. Small, additive, backward compatible.
 
@@ -78,7 +78,7 @@ interface InteractionEventV1 {
   version: 1;
   eventId: string;            // uuid
   ts: number;                 // epoch ms
-  project: string;            // use-case/project slug ("promptly-blog", "anymodel-support")
+  project: string;            // use-case/project slug ("my-app-blog", "support-desk")
   useCase?: string;           // free tag ("summarize", "code-review")
   promptHash: string;         // sha256(prompt) — dedupe/join key
   promptChars: number;
@@ -111,7 +111,7 @@ interface InteractionEventV1 {
   regenerated?: boolean;      // user hit regenerate → implicit negative
   acceptedFirst?: boolean;    // response kept without edit → implicit positive
   thumbsUp?: boolean;         // explicit
-  judgedTier?: EffortLevel;   // human review verdict (Promptly queue)
+  judgedTier?: EffortLevel;   // human review verdict (review queue)
 }
 ```
 
@@ -128,13 +128,13 @@ Reuses the provenance model already implemented in `src/label-combiner.ts` (bron
 |---|---|---|---|
 | bronze | execution outcomes only | ok/error/latency/cost signals | ✅ |
 | silver | weak user signal | `regenerated` (negative), `acceptedFirst` (positive) | ✅ |
-| gold | human judgment | Promptly review queue sets `judgedTier`; maps to `provenance: 'judged' \| 'gold'` | 🧑 |
+| gold | human judgment | The review queue sets `judgedTier`; maps to `provenance: 'judged' \| 'gold'` | 🧑 |
 
 Golden dataset = all events with `judgedTier` present, joined with their scoring observations. Export shape matches the organic pipeline:
 
 ```
 { promptHash, prompt, predictedTier, actualTier, agreed,
-  agentId: "promptly:<project>", ts }   // ← OrganicLabelRow-compatible
+  agentId: "review:<project>", ts }   // ← OrganicLabelRow-compatible
 ```
 
 Phase gating stays honest: consensus/calibration features stay `disabled` until interaction counts cross the existing thresholds — do not shortcut them.
@@ -157,11 +157,11 @@ Phase gating stays honest: consensus/calibration features stay `disabled` until 
 ## 6. Calibration closed loop (scorer)
 
 1. `npm run corpus:simulate` style reporting extended with `--project <slug>` slices (simulate script already computes distributions; add input = telemetry export).
-2. Export golden set from Promptly reviews → adapter feeds `eval/lib/dataset.js` loaders (same shape refit already consumes).
+2. Export golden set from the review queue → adapter feeds `eval/lib/dataset.js` loaders (same shape refit already consumes).
 3. `npm run eval:refit-boundaries` → candidate cut points + CV metrics into `eval/reports`.
 4. `npm run eval:gate` approves/rejects.
 5. Apply: runtime hot-reload via `setTierBoundaries()` for experiments; promoted cut points land as an **own PR** editing `DEFAULT_BOUNDARIES`, regenerating BOTH snapshots (`lite-score-snapshot.json`, `mljar-score-snapshot.json`), suite green.
-6. Parity invariant is untouched: Promptly/AnyModel call the same `scoreComplexity` module the gateway shims expose — one module instance everywhere (workspace link).
+6. Parity invariant is untouched: every surface calls the same `scoreComplexity` module the gateway shims expose — one module instance everywhere (workspace link).
 
 ## 7. Policy closed loop (matrix/providers)
 
@@ -186,7 +186,7 @@ Per project matrix files (`matrix.<project>.json`), reviewed like data (testing 
 | P0 | `InteractionEventV1` schema + JSONL sink util (new small module, e.g. `packages/gateswarm-telemetry` or gateway-side `src/telemetry.ts`) | events append + redact + hash round-trip tested |
 | P1 | Wire capture in gateway path + AnyModel executor callback | every routed request yields exactly one event |
 | P2 | Dogfood internally: route this repo's own dev/eval prompts through the stack | 500+ real events across ≥3 projects |
-| P3 | Promptly review queue (batch tier judgments) writing gold labels | ≥100 gold labels |
+| P3 | Review-queue UI (batch tier judgments) writing gold labels | ≥100 gold labels |
 | P4 | Eval adapter + first boundary-refit PR from organic gold set | gate-approved proposal merged with eval numbers |
 | P5 | Per-project matrices + cost dashboards from events | measurable cost-per-solved-task delta |
 
