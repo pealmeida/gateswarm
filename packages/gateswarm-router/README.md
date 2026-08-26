@@ -9,8 +9,10 @@ the actual API call. No provider SDKs, no API keys, no proxying.
 
 > **Naming note:** through the v0.6.0 line the name `gateswarm-router`
 > identified the full GateSwarm gateway, which continues as `gateswarm-gateway`.
-> This lightweight advisory router — extracted from that v0.6.0 codebase —
-> carries version **0.6.0** deliberately, marking the release it was split from.
+> This lightweight advisory router is a **new API** extracted from that codebase,
+> so it starts at **0.1.0** — version numbers here track this package's own
+> maturity, not the gateway lineage. (Nothing was ever published to npm under
+> the old name, so there is no registry collision.)
 
 ## Usage
 

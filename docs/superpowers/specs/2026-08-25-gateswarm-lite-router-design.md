@@ -87,9 +87,9 @@ tests/
 ## 4. Naming and versioning
 
 - Layer 1 package: **`gateswarm-lite`**, version `0.1.0`.
-- Layer 2 package: **`gateswarm-router`**, version `0.1.0` locally.
+- Layer 2 package: **`gateswarm-router`**, version `0.1.0`.
 - The root gateway package is renamed **`gateswarm-gateway`** (its bin was already `gateswarm-gateway`), freeing the `gateswarm-router` name for layer 2.
-- Publishing caveat: if npm `gateswarm-router` was ever published as the gateway at v0.6.0, the repurposed layer-2 package must start above that version (e.g. `0.7.0`) and the README must state the repurpose. If never published, `0.1.0` is correct.
+- **Versioning policy (decided 2026-08-26):** independent SemVer per package — version numbers communicate each package's own API maturity, never the gateway lineage. The gateway was never published to npm (GitHub releases only), so there is no registry collision and `0.1.0` is correct for both new packages. Full policy (caret ranges, mutable-state coupling rule, lite 1.0 criteria): `docs/superpowers/specs/2026-08-26-package-structure-assessment.md` §Versioning.
 
 ## 5. Public API — `gateswarm-lite`
 

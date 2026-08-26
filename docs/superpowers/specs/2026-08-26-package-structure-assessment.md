@@ -28,7 +28,7 @@ Everything else stays where it is. In particular: **scoring stays in lite, selec
 ```
 lite (0.1.0, zero deps)          ← unchanged, MUST stay leaf
   ▲
-router (0.6.0, dep: lite)        ← unchanged
+router (0.1.0, dep: lite)        ← unchanged
   ▲
 core (0.1.0, dep: lite+router)   ← NEW
   • InteractionEventV1 / DecisionRecord / FeedbackRecord (moved from mcp/store.ts)
@@ -70,10 +70,23 @@ Dependency rules that keep this sane:
 | 5 packages = release orchestration | changesets + tag-per-package CI (evolution strategy §2); core changes are additive |
 | Premature abstraction (only mcp consumes today) | justified by *architecture*, not hope: gateway capture is Phase 1/2-committed; wrong-direction dependency is the cost of waiting |
 | API split churn for early mcp users | mcp keeps re-exporting store symbols — zero breaking change |
-| Version lineage confusion (router 0.6.0 shared line) | core starts 0.1.0 like lite/mcp; README lineage note already covers router |
+| Version lineage confusion | resolved 2026-08-26: no lineage inheritance — every package versions independently from 0.1.0 (see §Versioning below) |
+
+## Versioning policy (decided 2026-08-26)
+
+**Independent SemVer per package, no lineage inheritance.** A version number communicates the maturity of *that package's API* — never brand history. The gateway's v0.5.x/v0.6.0 line lives in GitHub releases only (nothing was ever published to npm), so new packages start at `0.1.0` regardless of which codebase they were extracted from. The earlier "split lineage" experiment (router at 0.6.0) was reverted for this reason: a consumer seeing `0.6.0` assumes six cycles of API evolution that never happened.
+
+Rules:
+
+1. **Independent cadence.** Each package releases on its own schedule via changesets + one tag per package (`lite@x.y.z`, `router@x.y.z`, `mcp@x.y.z`). No lockstep: lite changes rarely (calibration-gated), router changes with strategies/matrix, mcp follows its dependencies. Lockstep would force empty releases of exactly the package whose stability we most want to signal.
+2. **Caret ranges for internal deps** (`"gateswarm-lite": "^0.1.0"`, not exact pins). This lets npm dedupe to a single module instance across the tree. This matters more here than in most projects: `tier-boundaries` holds **mutable module state** (`setTierBoundaries`) — two installed copies of lite means retraining updates silently stop propagating to the router's copy.
+3. **Coordinated major exception.** When lite crosses a major, router/mcp/core bump a major in the same release window even if their own APIs are unchanged, so caret ranges keep resolving to one lite instance. This is the only sanctioned deviation from full independence.
+4. **Lite graduates to 1.0.0 early.** Its API is tiny (`scoreComplexity`, `scoreSession`, boundary functions) and already locked by parity tests + frozen snapshots. Criteria for 1.0: first npm publish + one calibration cycle completed through the eval pipeline without API change. After 1.0: **patch** = fix with zero score change (snapshot-verified) · **minor** = additive API or documented boundary recalibration (own PR with eval numbers, per testing spec §6) · **major** = contract change (`ComplexityResult`, signatures).
+5. **Gateway keeps its own line** (0.6.0+ → phased retirement per the discontinuation assessment). It never constrains package versions.
 
 ## Decision
 
+- [x] Versioning policy above (applied in PR #5: router reset to 0.1.0, caret ranges)
 - [ ] Approve core as telemetry-contract package (this doc)
 - [ ] Execute migration (half-day, suite-gated)
 - [ ] Defer: gateway Phase 1 wiring of core capture (next release, per discontinuation phases)

@@ -55,4 +55,4 @@ Today every artifact requires cloning this repo and `npm run build`. Target stat
 
 ## 7. Anti-goals (unchanged)
 
-No ML/embeddings in lite · router stays advisory (no execution) · eval pipeline stays in this repo · no version gymnastics beyond the documented lineage (lite 0.1.0 · router 0.6.0 · gateway 0.6.0+).
+No ML/embeddings in lite · router stays advisory (no execution) · eval pipeline stays in this repo · no version gymnastics: independent SemVer per package (lite 0.1.0 · router 0.1.0 · mcp 0.1.0 · gateway 0.6.0+), no lineage inheritance (policy: package-structure assessment §Versioning).

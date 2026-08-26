@@ -74,7 +74,7 @@
   },
   "dependencies": {
     "dotenv": "^17.4.2",
-    "gateswarm-lite": "0.1.0",
+    "gateswarm-lite": "^0.1.0",
     "idb-keyval": "^6.2.1",
     "tiktoken": "^1.0.22"
   },
