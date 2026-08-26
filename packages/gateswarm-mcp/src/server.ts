@@ -20,6 +20,7 @@ import {
 
 export const PROTOCOL_VERSION = '2024-11-05';
 const SUPPORTED = ['2025-06-18', '2025-03-26', '2024-11-05'];
+const TIERS = ['trivial', 'light', 'moderate', 'heavy', 'intensive', 'extreme'] as const;
 
 export interface ServerState {
   decisions: Map<string, DecisionRecord>;
@@ -77,7 +78,7 @@ function loadMatrix(path: string): ModelSpec[] {
 }
 
 function toolSchemas() {
-  const tierEnum = ['trivial', 'light', 'moderate', 'heavy', 'intensive', 'extreme'];
+  const tierEnum = [...TIERS];
   return [
     {
       name: 'route_prompt',
@@ -87,7 +88,7 @@ function toolSchemas() {
         type: 'object',
         properties: {
           prompt: { type: 'string', description: 'The user prompt to score and route.' },
-          project: { type: 'string', description: 'Project/use-case slug for telemetry grouping.', default: 'default' },
+          project: { type: 'string', description: 'Project/use-case slug for telemetry grouping (letters, digits, ".", "_" or "-").', default: 'default' },
           strategy: { type: 'string', enum: ['cheapest-capable', 'best-value'], default: 'cheapest-capable' },
           matrixPath: { type: 'string', description: 'Optional path to a custom ModelSpec[] JSON matrix.' },
         },
@@ -280,9 +281,15 @@ function handleFeedback(id: unknown, args: Record<string, unknown>, state: Serve
   let reroutedModelId: string | undefined;
   let reroutedProvider: string | undefined;
   if (verdict === 'wrong') {
-    correctTier = args.correctTier as EffortLevel | undefined;
+    correctTier = (TIERS as readonly string[]).includes(args.correctTier as string)
+      ? (args.correctTier as EffortLevel)
+      : undefined;
     if (!correctTier) {
-      return textResult(id, JSON.stringify({ error: 'verdict "wrong" requires correctTier' }), true);
+      return textResult(
+        id,
+        JSON.stringify({ error: `verdict "wrong" requires a valid correctTier (${TIERS.join('|')})` }),
+        true,
+      );
     }
     const rerouted = selectReroute(correctTier, original.matrix);
     reroutedModelId = rerouted.id;

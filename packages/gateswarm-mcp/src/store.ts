@@ -52,7 +52,18 @@ export function telemetryDir(envDir?: string): string {
   return envDir ?? process.env.GATESWARM_TELEMETRY_DIR ?? join(homedir(), '.gateswarm', 'telemetry');
 }
 
+/**
+ * Project names are caller-controlled path segments — restrict them to a slug
+ * so no tool argument can escape the telemetry directory (path traversal).
+ */
+const SAFE_PROJECT = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+
 export function projectFile(project: string, envDir?: string): string {
+  if (!SAFE_PROJECT.test(project)) {
+    throw new Error(
+      `invalid project "${project}": use a slug of letters, digits, ".", "_" or "-" (no path separators)`,
+    );
+  }
   return join(telemetryDir(envDir), project, 'events.jsonl');
 }
 

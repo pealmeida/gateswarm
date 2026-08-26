@@ -7,10 +7,11 @@
 import { createState, handleMessage } from './server.js';
 
 const state = createState();
-const encoding = 'utf-8';
 
-process.stdin.setEncoding(encoding);
-process.stdout.setEncoding(encoding);
+// stdin is a Readable — setEncoding is valid and keeps chunks as strings.
+// stdout is a Writable: it has no setEncoding (calling it crashes when stdout
+// is redirected to a file/nul), and write() already defaults to utf-8.
+process.stdin.setEncoding('utf-8');
 
 let buffer = '';
 for await (const chunk of process.stdin) {

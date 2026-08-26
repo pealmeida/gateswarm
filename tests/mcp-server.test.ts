@@ -118,6 +118,27 @@ describe('MCP protocol', () => {
     expect(callTool(state, 'submit_feedback', { eventId: 'nope', verdict: 'correct' }).isError).toBe(true);
   });
 
+  it('rejects path-traversal project names on every tool', () => {
+    const state = createState();
+    for (const project of ['../../evil', '../escape', 'a/b', 'a\\b', '..', '.', '']) {
+      expect(callTool(state, 'route_prompt', { prompt: 'hi', project }).isError).toBe(true);
+      expect(callTool(state, 'route_session', { turns: ['hi'], project }).isError).toBe(true);
+      expect(callTool(state, 'telemetry_summary', { project }).isError).toBe(true);
+    }
+    // Nothing may be written outside the telemetry directory.
+    const routed = callTool(state, 'route_prompt', { prompt: 'hi', project: '../../evil' });
+    expect(routed.text).toContain('invalid project');
+    expect(existsSync(join(envDir, '..', 'evil'))).toBe(false);
+  });
+
+  it('rejects verdict "wrong" with an invalid correctTier', () => {
+    const state = createState();
+    const { eventId } = callTool(state, 'route_prompt', { prompt: 'hi', project: 'test-p4' }).json! as { eventId: string };
+    const bad = callTool(state, 'submit_feedback', { eventId, verdict: 'wrong', correctTier: 'super-hard', project: 'test-p4' });
+    expect(bad.isError).toBe(true);
+    expect(bad.text).toContain('requires a valid correctTier');
+  });
+
   it('records correct verdicts and reroutes wrong ones to the corrected tier', () => {
     const state = createState();
     const routed = callTool(state, 'route_prompt', { prompt: 'Write a Python function that parses a CSV file', project: 'test-p3' });

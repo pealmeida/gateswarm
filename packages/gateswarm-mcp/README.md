@@ -39,7 +39,7 @@ claude mcp add gateswarm -- node /path/to/gateswarm-router/packages/gateswarm-mc
 
 ## Configuration
 
-- `GATESWARM_TELEMETRY_DIR` — telemetry root (default `~/.gateswarm/telemetry`). One JSONL file per project: `<dir>/<project>/events.jsonl`.
+- `GATESWARM_TELEMETRY_DIR` — telemetry root (default `~/.gateswarm/telemetry`). One JSONL file per project: `<dir>/<project>/events.jsonl`. `project` must be a slug (letters, digits, `.`, `_`, `-`); anything else is rejected.
 - Records follow the `InteractionEvent` shape from the dogfood spec; export is `cat`.
 
 ## Typical agent flow
