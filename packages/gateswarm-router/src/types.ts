@@ -26,6 +26,12 @@ export interface RouteOptions {
   matrix?: ModelSpec[];
   /** Exclude models below this quality. Default: 0. */
   minQuality?: number;
+  /**
+   * Selection-tier override (replay/experiments): route as if the prompt had
+   * scored this tier, while decision.complexity still reports the actual
+   * scoring of the prompt text.
+   */
+  tier?: EffortLevel;
 }
 
 export interface RouteDecision {

@@ -177,6 +177,21 @@ npm run fit:report            # confirm resolution improved; repeat
 
 Interpretation guide: a boundary with no nearby traffic is either safely clear or useless — only labeled data can say which. Saturation above the top boundary means the router cannot differentiate there regardless of matrix quality; that is a scorer-calibration problem, never a `selectModel` problem.
 
+## 6.2 Sequential sessions, large context, heavy usage (consistency contract)
+
+Real agent traffic is sequences of prompts with growing context. Contract, enforced by `tests/sequence-consistency.test.ts`:
+
+| Guarantee | Mechanism |
+|---|---|
+| Stateless per call — same input, same decision | pure functions; boundaries hash available for fingerprinting |
+| Bounded worst-case work per call | `scoreSession()` windows joined turns to `maxChars` (default 64 KiB); measured flat ~2.5 s at 64 KB **and** at 1 MB sessions (`npm run bench:scorer`) |
+| Recency-aware routing for evolving context | default window keeps the **tail** — recent turns dominate; `keep:'head'` opt-in matches gateway truncation semantics |
+| Single-prompt parity untouched | `scoreComplexity` head-truncates exactly like `scoreIntentSync`; session API is additive |
+| Precomputed-tier replay | `RouteOptions.tier` routes as if a stored tier had been scored (reported `complexity` still shows actual) |
+| No drift under load | repeated mixed-load passes produce identical model picks; `getTierBoundaries()` stable across runs |
+
+Operational guidance: prefer `routeSession(turns)` for multi-turn agents (score once per turn over accumulated context) instead of re-sending only the newest message; reserve plain `route(prompt)` for one-shot prompts. Latency scales with window size (see `npm run bench:scorer`) — keep windows ≤16 KiB where latency matters more than context fidelity.
+
 Human-in-the-loop check (optional, not CI): pick 20 real prompts from your traffic, score them, and mark whether the tier feels one band off. Adjacent-band error is historically acceptable (~86% adjacent accuracy in the heuristic comments); exact-tier misses in the mid-band are the usual calibration target.
 
 ---

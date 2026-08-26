@@ -9,27 +9,15 @@ import {
   countPromptWords,
   extractFeatures,
   heuristicScoreFromFeatures,
-  type FeatureVector,
 } from './feature-extractor.js';
 import { scoreToEffort } from './tier-boundaries.js';
-import type { EffortLevel } from './types.js';
+import { MAX_PROMPT_SIZE, type ComplexityResult } from './types.js';
 
 export * from './feature-extractor.js';
+export * from './session.js';
 export * from './tier-boundaries.js';
-export type { EffortLevel } from './types.js';
-
-/** Prompts longer than this are truncated before scoring (same guard as the gateway). */
-export const MAX_PROMPT_SIZE = 64 * 1024;
-
-export interface ComplexityResult {
-  /** Heuristic complexity score in [0, 1]. */
-  score: number;
-  /** Effort tier derived from the calibrated boundaries. */
-  tier: EffortLevel;
-  wordCount: number;
-  features: FeatureVector;
-  latencyMs: number;
-}
+export { MAX_PROMPT_SIZE } from './types.js';
+export type { ComplexityResult, EffortLevel } from './types.js';
 
 export function scoreComplexity(prompt: string): ComplexityResult {
   const start = performance.now();
