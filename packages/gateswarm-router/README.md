@@ -7,10 +7,10 @@ heuristic, 6 effort tiers) and picks the model with the best cost/benefit for th
 from a data-driven matrix. **Advisory only:** it returns a decision — your code makes
 the actual API call. No provider SDKs, no API keys, no proxying.
 
-> **Naming & version note:** through v0.6.0 the name/version `gateswarm-router`
-> identified the full GateSwarm gateway (now `gateswarm-gateway`, whose releases
-> continue from v0.6.0). This lightweight advisory router therefore starts at
-> **0.7.0** — above every gateway release — so version ranges stay unambiguous.
+> **Naming note:** through the v0.6.0 line the name `gateswarm-router`
+> identified the full GateSwarm gateway, which continues as `gateswarm-gateway`.
+> This lightweight advisory router — extracted from that v0.6.0 codebase —
+> carries version **0.6.0** deliberately, marking the release it was split from.
 
 ## Usage
 
