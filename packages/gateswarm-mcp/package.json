@@ -22,7 +22,7 @@
   },
   "dependencies": {
     "gateswarm-lite": "0.1.0",
-    "gateswarm-router": "0.1.0"
+    "gateswarm-router": "0.7.0"
   },
   "keywords": ["mcp", "mcp-server", "llm-router", "model-routing", "ai-agent"],
   "license": "MIT",

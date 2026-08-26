@@ -9,9 +9,9 @@
 > **Latest stable:** [v0.6.0](https://github.com/pealmeida/gateswarm-router/releases/tag/v0.6.0) — Trustable Precision: adversarial-review hardening + honest evals
 > **Releases:** v0.4.4 · v0.5.2 · v0.5.3 · v0.5.4 · v0.5.5 · v0.5.6 (see [Releases](#releases) below)
 
-## Two new packages: score + route (v0.1.0) — and your own golden dataset
+## Two new packages: score + route (lite 0.1.0 · router 0.7.0) — and your own golden dataset
 
-The complexity scorer and the advisory router now ship as standalone packages under `packages/`, optimized for one purpose: **let you build a golden dataset from your own traffic and use it to improve evaluator accuracy.**
+The complexity scorer and the advisory router now ship as standalone packages under `packages/`, optimized for one purpose: **let you build a golden dataset from your own traffic and use it to improve evaluator accuracy.** (Version note: `gateswarm-router` starts at 0.7.0 — above every gateway release — because the name previously identified the gateway, now `gateswarm-gateway`.)
 
 | Package | What it does | Dependencies |
 |---------|--------------|--------------|
