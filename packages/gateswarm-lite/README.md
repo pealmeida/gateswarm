@@ -23,6 +23,18 @@ gateswarm-lite "Summarize this article in one paragraph"
 echo "prompt" | gateswarm-lite
 ```
 
+## Sessions (multi-turn / large context)
+
+```ts
+import { scoreSession } from 'gateswarm-lite';
+
+const r = scoreSession([turn1, turn2, turn3]); // oldest first
+// r.tier reflects the accumulated context; oversized sessions are windowed
+// to a bounded budget (default 64 KiB) keeping the most recent turns.
+```
+
+Single-prompt `scoreComplexity` stays byte-compatible with the gateway scorer.
+
 ## Advanced
 
 - `extractFeatures(prompt)` / `heuristicScoreFromFeatures(features, wordCount)` — building blocks.

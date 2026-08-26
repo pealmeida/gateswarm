@@ -17,7 +17,20 @@ function fail(message: string): never {
   process.exit(1);
 }
 
-const arg = process.argv.slice(2).join(' ').trim();
+const argv = process.argv.slice(2);
+if (argv.includes('-h') || argv.includes('--help')) {
+  console.log(`gateswarm-lite — prompt complexity scorer
+
+Usage:
+  gateswarm-lite "your prompt"      score a prompt (args joined with spaces)
+  echo "prompt" | gateswarm-lite    score from stdin
+  gateswarm-lite --help             this help
+
+Output: ComplexityResult JSON { score, tier, wordCount, features, latencyMs }`);
+  process.exit(0);
+}
+
+const arg = argv.join(' ').trim();
 let prompt = arg;
 if (!prompt) {
   if (process.stdin.isTTY) fail('empty prompt: pass it as an argument or via stdin');

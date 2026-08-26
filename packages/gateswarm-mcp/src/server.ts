@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { getTierBoundaries } from 'gateswarm-lite';
 import type { EffortLevel } from 'gateswarm-lite';
-import { DEFAULT_MATRIX, blendedCost, route, selectModel } from 'gateswarm-router';
+import { DEFAULT_MATRIX, blendedCost, route, routeSession, selectModel } from 'gateswarm-router';
 import type { ModelSpec, RouteOptions, RoutingStrategy } from 'gateswarm-router';
 import {
   appendRecord,
@@ -92,6 +92,23 @@ function toolSchemas() {
           matrixPath: { type: 'string', description: 'Optional path to a custom ModelSpec[] JSON matrix.' },
         },
         required: ['prompt'],
+      },
+    },
+    {
+      name: 'route_session',
+      description:
+        'Sequence-aware routing for multi-turn conversations: pass the accumulated turns (oldest first); the newest context is windowed to a bounded budget (recency-biased) and routed. Use this instead of route_prompt when prior conversation context should influence model selection.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          turns: { type: 'array', items: { type: 'string' }, minItems: 1, description: 'Conversation turns, oldest first. The last entry is the newest user message.' },
+          project: { type: 'string', default: 'default' },
+          strategy: { type: 'string', enum: ['cheapest-capable', 'best-value'], default: 'cheapest-capable' },
+          matrixPath: { type: 'string' },
+          maxChars: { type: 'number', description: 'Window budget in characters. Default 65536.' },
+          keep: { type: 'string', enum: ['head', 'tail'], default: 'tail' },
+        },
+        required: ['turns'],
       },
     },
     {
@@ -183,6 +200,70 @@ function handleRoutePrompt(id: unknown, args: Record<string, unknown>, state: Se
   );
 }
 
+function handleRouteSession(id: unknown, args: Record<string, unknown>, state: ServerState): string {
+  const rawTurns = args.turns;
+  if (!Array.isArray(rawTurns) || rawTurns.length === 0) {
+    return textResult(id, JSON.stringify({ error: 'turns must be a non-empty array of strings' }), true);
+  }
+  const turns = rawTurns.map((t) => String(t ?? ''));
+  if (turns.every((t) => !t.trim())) {
+    return textResult(id, JSON.stringify({ error: 'all turns are empty' }), true);
+  }
+  const project = String(args.project ?? 'default');
+  const strategy = (args.strategy ?? 'cheapest-capable') as RoutingStrategy;
+  if (strategy !== 'cheapest-capable' && strategy !== 'best-value') {
+    return textResult(id, JSON.stringify({ error: `invalid strategy "${strategy}"` }), true);
+  }
+  let matrix = DEFAULT_MATRIX;
+  if (typeof args.matrixPath === 'string') {
+    try {
+      matrix = loadMatrix(args.matrixPath);
+    } catch (err) {
+      return textResult(id, JSON.stringify({ error: err instanceof Error ? err.message : String(err) }), true);
+    }
+  }
+  const maxChars = typeof args.maxChars === 'number' ? args.maxChars : undefined;
+  const keep = args.keep === 'head' ? ('head' as const) : ('tail' as const);
+
+  const decision = routeSession(turns, { strategy, matrix, maxChars, keep });
+  const eventId = randomUUID();
+  const newest = turns[turns.length - 1];
+  const record: DecisionRecord = {
+    type: 'decision',
+    eventId,
+    ts: Date.now(),
+    project,
+    promptHash: promptHash(turns.join('\n\n')),
+    promptSnippet: snippet(`${turns.length} turns; newest: ${newest}`),
+    score: decision.complexity.score,
+    tier: decision.complexity.tier,
+    boundariesHash: Buffer.from(getTierBoundaries().join(',')).toString('base64url').slice(0, 12),
+    strategy: decision.strategy,
+    modelId: decision.model.id,
+    provider: decision.model.provider,
+    alternatives: decision.alternatives.map((a) => a.id),
+    reason: decision.reason,
+    matrix,
+    turnsCount: decision.complexity.turnsCount,
+    windowChars: decision.complexity.windowChars,
+  };
+  state.decisions.set(eventId, record);
+  appendRecord(project, record);
+
+  const readable = [
+    `Routing decision - SESSION (${record.turnsCount} turns, window ${record.windowChars} chars${decision.complexity.truncated ? ', truncated' : ''})`,
+    ...formatDecision(record, blendedCost(decision.model)).split('\n').slice(1),
+  ].join('\n');
+
+  return decisionResult(
+    id,
+    `${readable}
+
+If this tier looks wrong for the conversation, call submit_feedback with eventId "${eventId}".`,
+    { eventId, ...decision },
+  );
+}
+
 function handleFeedback(id: unknown, args: Record<string, unknown>, state: ServerState): string {
   const eventId = String(args.eventId ?? '');
   const verdict = args.verdict === 'correct' || args.verdict === 'wrong' ? args.verdict : null;
@@ -245,7 +326,7 @@ function handleSummary(id: unknown, args: Record<string, unknown>): string {
     if (f.type === 'feedback' && f.verdict in verdicts) verdicts[f.verdict as keyof typeof verdicts]++;
   }
   return textResult(
-    null,
+    id,
     JSON.stringify({ project, decisions: decisions.length, byTier, feedback: feedback.length, verdicts }, null, 2),
   );
 }
@@ -283,6 +364,8 @@ export function handleMessage(state: ServerState, line: string): string | null {
         switch (name) {
           case 'route_prompt':
             return handleRoutePrompt(id, args, state);
+          case 'route_session':
+            return handleRouteSession(id, args, state);
           case 'submit_feedback':
             return handleFeedback(id, args, state);
           case 'telemetry_summary':

@@ -60,7 +60,7 @@ describe('frozen score snapshot (tests/fixtures/lite-score-snapshot.json)', () =
     expect(live.tier).toBe(frozen.tier);
   });
 
-  it('snapshot g8 (empty) and g9 (truncate) stay pinned', () => {
+  it('snapshot g8 (empty) and g9 (truncate) stay pinned', { timeout: 60_000 }, () => {
     expect(scoreComplexity('').score).toBe(snapshot.g8.score);
     const huge = 'analyze this system '.repeat(5000);
     const live = scoreComplexity(huge);

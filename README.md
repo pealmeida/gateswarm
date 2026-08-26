@@ -16,8 +16,9 @@ dependency-free packages under `packages/`:
 
 | Package | What it does | Dependencies |
 |---------|--------------|--------------|
-| [`gateswarm-lite`](packages/gateswarm-lite) | Scores prompt complexity (0-1) and maps it to 6 effort tiers. Node/browser/edge. | none |
+| [`gateswarm-lite`](packages/gateswarm-lite) | Scores prompt complexity (0-1) and maps it to 6 effort tiers. Node/browser/edge. Session API for multi-turn context. | none |
 | [`gateswarm-router`](packages/gateswarm-router) | Picks the best cost/benefit model for the scored tier from a data-driven matrix. Advisory only — your code executes the request. | gateswarm-lite |
+| [`gateswarm-mcp`](packages/gateswarm-mcp) | MCP server: routing decisions + human verdicts inside any CLI/IDE AI agent. | lite + router |
 
 ```ts
 import { route } from 'gateswarm-router';

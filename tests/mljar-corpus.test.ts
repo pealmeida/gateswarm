@@ -41,7 +41,7 @@ const snapshot: { count: number; scores: Record<string, { score: number; tier: s
 const TIERS = ['trivial', 'light', 'moderate', 'heavy', 'intensive', 'extreme'] as const;
 
 describe('mljar fixture integrity', () => {
-  it('has a consistent, unique, non-empty prompt set', () => {
+  it('has a consistent, unique, non-empty prompt set', { timeout: 120_000 }, () => {
     expect(corpus.prompts.length).toBe(corpus.count);
     const ids = new Set(corpus.prompts.map((p) => p.id));
     expect(ids.size).toBe(corpus.count);

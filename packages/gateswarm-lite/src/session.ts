@@ -34,7 +34,9 @@ export interface SessionComplexityResult extends ComplexityResult {
 
 export function scoreSession(turns: string[], opts: SessionScoreOptions = {}): SessionComplexityResult {
   const start = performance.now();
-  const maxChars = opts.maxChars ?? MAX_PROMPT_SIZE;
+  // Clamp: maxChars <= 0 would make slice(-0) return the FULL string,
+  // silently disabling the bounded-work guarantee.
+  const maxChars = Math.max(1, Math.floor(opts.maxChars ?? MAX_PROMPT_SIZE));
   const keep = opts.keep ?? 'tail';
 
   const turnsList = (Array.isArray(turns) ? turns : []).map((t) => String(t ?? ''));

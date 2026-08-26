@@ -19,7 +19,24 @@ function fail(message: string): never {
   process.exit(1);
 }
 
-const args = process.argv.slice(2);
+const rawArgs = process.argv.slice(2);
+if (rawArgs.includes('-h') || rawArgs.includes('--help')) {
+  console.log(`gateswarm-route — advisory model router
+
+Usage:
+  gateswarm-route "your prompt" [options]
+  echo "prompt" | gateswarm-route [options]
+
+Options:
+  --strategy <cheapest-capable|best-value>   routing strategy (default cheapest-capable)
+  --matrix <path.json>                       custom ModelSpec[] matrix file
+  -h, --help                                 this help
+
+Output: RouteDecision JSON { model, alternatives, complexity, strategy, reason }
+Advisory only: the decision is returned; your code executes the request.`);
+  process.exit(0);
+}
+const args = rawArgs;
 let strategy: RoutingStrategy = 'cheapest-capable';
 let matrix: ModelSpec[] | undefined;
 const promptParts: string[] = [];

@@ -12,6 +12,10 @@ import type { DecisionRecord } from 'gateswarm-mcp';
  * an isolated telemetry directory.
  */
 
+const TOKEN = 'silvercalibrationuniquetoken'; // unused here; keeps diff noise low if moved
+const ARCH_PROMPT =
+  'Design a microservices architecture for a real-time trading platform, including failure modes, data consistency strategy, and a migration plan from the current monolith.';
+
 let envDir: string;
 const originalEnv = process.env.GATESWARM_TELEMETRY_DIR;
 
@@ -69,7 +73,7 @@ describe('MCP protocol', () => {
 
     const tools = call(state, 'tools/list');
     const names = ((tools.result as { tools: Array<{ name: string }> }).tools).map((t) => t.name);
-    expect(names).toEqual(['route_prompt', 'submit_feedback', 'telemetry_summary']);
+    expect(names).toEqual(['route_prompt', 'route_session', 'submit_feedback', 'telemetry_summary']);
 
     expect(handleMessage(state, JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }))).toBeNull();
   });
@@ -84,6 +88,28 @@ describe('MCP protocol', () => {
     expect(decision.complexity.tier).toBeTypeOf('string');
     expect(decision.model.id).toBeTypeOf('string');
     expect(decision.strategy).toBe('cheapest-capable');
+  });
+
+  it('routes multi-turn sessions and links feedback to the session decision', () => {
+    const state = createState();
+    const turns = ['hey there', ARCH_PROMPT];
+    const r = callTool(state, 'route_session', { turns, project: 'test-s1' });
+    expect(r.isError).toBe(false);
+    const payload = r.json! as { eventId: string; complexity: { turnsCount: number; windowChars: number } };
+    expect(payload.complexity.turnsCount).toBe(2);
+    expect(payload.complexity.windowChars).toBeGreaterThan(0);
+
+    const bad = callTool(state, 'submit_feedback', {
+      eventId: payload.eventId,
+      verdict: 'wrong',
+      correctTier: 'trivial',
+      project: 'test-s1',
+    });
+    expect(bad.isError).toBe(false);
+    expect(bad.text).toContain('would choose: gemini-flash-lite');
+
+    expect(callTool(state, 'route_session', { turns: [], project: 'test-s1' }).isError).toBe(true);
+    expect(callTool(state, 'route_session', { turns: ['  ', '  '], project: 'test-s1' }).isError).toBe(true);
   });
 
   it('rejects empty prompts and unknown eventIds as tool errors', () => {
@@ -156,6 +182,6 @@ describe('MCP stdio transport (real agent-style session)', () => {
     const responses = r.stdout.trim().split('\n').map((l) => JSON.parse(l) as { id: number });
     expect(responses.map((m) => m.id)).toEqual([1, 2, 3]);
     const toolsMsg = responses[1] as unknown as { result: { tools: unknown[] } };
-    expect(toolsMsg.result.tools).toHaveLength(3);
+    expect(toolsMsg.result.tools).toHaveLength(4);
   }, 90_000);
 });

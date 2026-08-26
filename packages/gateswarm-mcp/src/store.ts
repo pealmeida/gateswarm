@@ -28,6 +28,9 @@ export interface DecisionRecord {
   alternatives: string[];
   reason: string;
   matrix: ModelSpec[];
+  /** Present for session-scoped decisions (route_session). */
+  turnsCount?: number;
+  windowChars?: number;
 }
 
 export interface FeedbackRecord {
