@@ -9,27 +9,66 @@
 > **Latest stable:** [v0.6.0](https://github.com/pealmeida/gateswarm-router/releases/tag/v0.6.0) — Trustable Precision: adversarial-review hardening + honest evals
 > **Releases:** v0.4.4 · v0.5.2 · v0.5.3 · v0.5.4 · v0.5.5 · v0.5.6 (see [Releases](#releases) below)
 
-## Lightweight packages: gateswarm-lite + gateswarm-router
+## Two new packages: score + route (v0.1.0) — and your own golden dataset
 
-The complexity scorer and an advisory router are available as standalone,
-dependency-free packages under `packages/`:
+The complexity scorer and the advisory router now ship as standalone packages under `packages/`, optimized for one purpose: **let you build a golden dataset from your own traffic and use it to improve evaluator accuracy.**
 
 | Package | What it does | Dependencies |
 |---------|--------------|--------------|
-| [`gateswarm-lite`](packages/gateswarm-lite) | Scores prompt complexity (0-1) and maps it to 6 effort tiers. Node/browser/edge. Session API for multi-turn context. | none |
-| [`gateswarm-router`](packages/gateswarm-router) | Picks the best cost/benefit model for the scored tier from a data-driven matrix. Advisory only — your code executes the request. | gateswarm-lite |
-| [`gateswarm-mcp`](packages/gateswarm-mcp) | MCP server: routing decisions + human verdicts inside any CLI/IDE AI agent. | lite + router |
+| [`gateswarm-lite`](packages/gateswarm-lite) | Scores prompt complexity (0-1) → 6 effort tiers. Node/browser/edge, zero deps. `scoreSession()` for multi-turn context. | none |
+| [`gateswarm-router`](packages/gateswarm-router) | Picks the best cost/benefit model per tier from a data matrix you control. Advisory only — your code executes the request. | gateswarm-lite |
+| [`gateswarm-mcp`](packages/gateswarm-mcp) | MCP server: routing decisions + human verdicts inside any CLI/IDE AI agent (Claude Code, Cursor, Cline, opencode…). | lite + router |
 
 ```ts
 import { route } from 'gateswarm-router';
+import { scoreSession } from 'gateswarm-lite';
 
-const d = route('Design a distributed cache with failover');
-// d.complexity.tier → 'intensive' · d.model.id → cheapest capable model
+route('Design a distributed cache with failover');
+// { complexity: { tier: 'intensive' }, model: 'gemini-pro', reason: '…', alternatives: […] }
+
+routeSession([turn1, turn2, turn3]); // recency-windowed routing for evolving conversations
 ```
 
-The full gateway in this repo (package `gateswarm-gateway`) builds on the same
-scorer via workspace imports; tier boundaries stay calibrated by the eval
-pipeline (`npm run eval:refit-boundaries`).
+### The golden-dataset flywheel
+
+Every routed prompt can become a training label. The loop:
+
+```
+route real traffic ──► human verdicts ──► golden dataset ──► refit boundaries ──► better routing
+      (MCP/gateway)      (correct/wrong        (events.jsonl)     (eval pipeline)      (own PR +
+                          + correctTier)                                              snapshots)
+```
+
+**1. Capture.** Register the MCP plugin in your agent — every decision is persisted to `<GATESWARM_TELEMETRY_DIR>/<project>/events.jsonl`:
+
+```sh
+claude mcp add gateswarm -- node packages/gateswarm-mcp/dist/cli.js
+# Cursor/Cline/opencode: see packages/gateswarm-mcp/README.md
+```
+
+When the tier looks wrong, the agent calls `submit_feedback {eventId, verdict:"wrong", correctTier}` and immediately sees which model *should* have been used. That verdict **is** a golden label.
+
+**2. Measure fit.** Find where your traffic sits relative to the cut points and which prompts are worth labeling first:
+
+```sh
+npm run fit:report          # boundary swing pricing ($/prompt) + labeling priority queue
+npm run simulate:prompts    # tier distribution over the 678-prompt MLJAR corpus
+npm run bench:scorer        # latency envelope vs context size
+```
+
+**3. Refit on labeled data.** Export your events, then run the calibration pipeline:
+
+```sh
+npm run eval:refit-boundaries   # candidate cut points from YOUR labels (train split only)
+npm run eval:calibrate          # metrics vs labels
+npm run eval:gate               # approve/reject with held-out evidence
+```
+
+Approved boundaries land as their own PR (`DEFAULT_BOUNDARIES`) — applied at runtime instantly via `setTierBoundaries()`. Both frozen snapshots (`lite-score-snapshot.json`, `mljar-score-snapshot.json`) guard against accidental drift.
+
+Full architecture: [`docs/superpowers/specs/2026-08-25-dogfood-loop-promptly-anymodel.md`](docs/superpowers/specs/2026-08-25-dogfood-loop-promptly-anymodel.md).
+
+The full gateway in this repo (package `gateswarm-gateway`) builds on the same scorer via workspace imports.
 
 ---
 
