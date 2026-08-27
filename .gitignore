@@ -95,3 +95,9 @@ v05_ordinal_weights.json
 # SSL experiment artifacts (regenerated) + downloaded corpora
 eval/ssl/out/
 eval/ssl/data/
+
+# Never allow compiled shadows next to package sources (breaks resolution)
+packages/*/src/**/*.js
+packages/*/src/**/*.js.map
+packages/*/src/**/*.d.ts
+packages/*/src/**/*.d.ts.map
