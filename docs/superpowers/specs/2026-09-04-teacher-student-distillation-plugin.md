@@ -945,3 +945,131 @@ which the repo itself documents as "a reviewed starting point, NOT a source of
 truth". The headroom, the boundary values, and the concentration figures all
 move with the real matrix. Re-run this evaluation against the models you can
 actually reach before acting on it.
+
+
+---
+
+## 11. Does the classifier earn its keep? — measured 2026-09-04
+
+Separate the question, because the two halves have opposite answers.
+
+### 11.1 A router: yes, decisively
+
+Routing is worth **-63.3%** against no router, costs **0.19 ms** and **$0** per
+prompt, makes no network call, and is fully interpretable. Nothing else in the
+system delivers a return like that. §10's small *remaining headroom* (5.8pp)
+has been read as "the router is marginal" — it is the opposite claim: the router
+has already taken almost all of the money that was there to take.
+
+### 11.2 This classifier, as 35 features: not on the available evidence
+
+Same 5-fold CV, cut points refit per fold, only the score function swapped:
+
+| scoring function | tier acc | model acc | $/prompt | under-routed |
+|---|---|---|---|---|
+| **full 35-feature scorer** | 63.3% | 73.3% | $4.168 | 8.9% |
+| **`log(word count)` alone** | **70.0%** | **84.4%** | $4.122 | 1.1% |
+| **`log(character count)` alone** | **85.6%** | **86.7%** | **$3.869** | 2.2% |
+| random score | 20.0% | 22.2% | $8.194 | 17.8% |
+| always cheapest | 16.7% | 33.3% | $0.325 | **66.7%** |
+| always most capable | 16.7% | 16.7% | $12.000 | 0.0% |
+| oracle | 100% | 100% | $3.708 | 0.0% |
+
+**A one-line character count beats the entire feature apparatus by 22pp on tier
+accuracy and 13pp on model accuracy, while costing less and under-routing less.**
+It lands within 4% of the oracle's cost.
+
+### 11.3 Why — and why the eval cannot settle it
+
+The golden set is length-separated by construction:
+
+| tier | interquartile char range |
+|---|---|
+| trivial | 22 - 27 |
+| light | 57 - 98 |
+| moderate | 86 - 94 |
+| heavy | 114 - 127 |
+| intensive | 160 - 176 |
+| extreme | 192 - 203 |
+
+**Only 1 of 15 tier pairs has overlapping interquartile length ranges.** Whoever
+wrote `eval/dataset.json` wrote longer prompts for harder tiers, so the benchmark
+encodes "harder = longer" as a near-deterministic rule and rewards any model that
+learns exactly that.
+
+Two things follow, and both matter:
+
+1. **The 85.6% is not evidence that length measures complexity.** It is evidence
+   that the dataset was built that way.
+2. **Every accuracy number this project has ever reported — 45.6%, 61.1%, 62.2% —
+   was measured on a benchmark a one-liner scores 85.6% on.** The 35-feature
+   scorer does not merely fail to beat the trivial baseline; it loses to it by a
+   wide margin on its own benchmark.
+
+On real traffic the rule the golden set teaches is simply false:
+
+| declared level | median chars |
+|---|---|
+| Beginner | 1504 |
+| Intermediate | **1965** |
+| Advanced | 1895 |
+
+Non-monotonic — Intermediate prompts are longer than Advanced ones. And measured
+earlier, length correlates with real difficulty at rho 0.131 while the full
+composite reaches only ~0.15. **On neither dataset is there evidence that the 35
+features beat length.**
+
+This also completes the root-cause chain for §7:
+
+```
+golden set written with length ≈ difficulty
+   -> scorer calibrated length-dominant (weight 0.34, "strongest available signal")
+      -> real traffic breaks the assumption (length ⊥ difficulty)
+         -> every real prompt saturates -> 100% routed to `extreme`
+```
+
+The saturation bug was not a coding error. It was the benchmark's construction
+propagating into production.
+
+### 11.4 What this changes
+
+**Keep the router. Stop treating the feature set as earned.** Concretely:
+
+1. **Add a length-only baseline to `eval/leaderboard.ts` immediately.** It is
+   ~20 lines against the existing `TierClassifier` interface, and it is the
+   guard the eval has never had: *any* model that cannot beat `log(chars)` is not
+   paying for its complexity. Had this existed, the 35 features would never have
+   shipped unchallenged.
+2. **The golden dataset needs length-decorrelated examples** — short-and-hard
+   ("prove this is NP-complete"), long-and-easy (a 2000-character templated
+   formatting request. This is the highest-value labelling work available, and
+   it **revives the teacher/HITL programme of §3-§6 with a different target**:
+   not more labels, but *adversarial* labels that break the length confound.
+   §10 retired that programme as a cost play; this reinstates it as a validity
+   play, which is a better justification than the one it originally had.
+3. **Keep the classifier as the capable-set selector.** Even under §10.5's
+   constrained-allocation architecture, something must decide which models are
+   eligible before quota spillover can choose among them. That job survives
+   regardless of how the score is computed — and today it could be computed by
+   `log(chars)` with no measured loss.
+
+### 11.5 The cascade question, quantified
+
+Try the cheapest model first, escalate to the top on failure, paying for both:
+
+- beats today's real-traffic $3.083/prompt if the cheapest model handles
+  **>= 77.0%** of prompts unaided;
+- beats the golden-set $4.398/prompt if it handles **>= 66.1%**.
+
+Both ignore verifier cost and escalation latency, which favour the classifier.
+Whether `gemini-flash-lite` clears 77% is exactly the kind of question
+`submit_outcome` (§9) now collects data for, and it cannot be answered from
+anything currently in this repository.
+
+### 11.6 Answer
+
+**Yes, keep a classifier — but a much smaller one than this, and stop reporting
+its accuracy against a benchmark that cannot distinguish it from counting
+characters.** The routing layer is the most valuable component in the system.
+The 35-feature complexity model inside it is, on all available evidence,
+unearned.
