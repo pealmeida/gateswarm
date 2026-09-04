@@ -58,7 +58,7 @@ describe('scoreComplexity on realistic prompts', () => {
     expect(TIERS).toContain(r.tier);
     expect(r.wordCount).toBeGreaterThanOrEqual(0);
     expect(r.features).toBeTypeOf('object');
-    expect(Object.keys(r.features).length).toBe(35);
+    expect(Object.keys(r.features).length).toBe(37);
     expect(Number.isFinite(r.latencyMs)).toBe(true);
     expect(r.latencyMs).toBeGreaterThanOrEqual(0);
   });

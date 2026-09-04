@@ -2,2716 +2,2716 @@
  "count": 678,
  "scores": {
   "analytics-engineer-dbt-1": {
-   "score": 0.9100000000000001,
-   "tier": "extreme"
+   "score": 0.4021226855121258,
+   "tier": "intensive"
   },
   "analytics-engineer-dbt-10": {
-   "score": 0.9299999999999999,
-   "tier": "extreme"
+   "score": 0.34138627617943473,
+   "tier": "heavy"
   },
   "analytics-engineer-dbt-11": {
-   "score": 0.8499999999999999,
-   "tier": "extreme"
+   "score": 0.3286161901532068,
+   "tier": "heavy"
   },
   "analytics-engineer-dbt-12": {
-   "score": 0.8500000000000001,
-   "tier": "extreme"
+   "score": 0.3649002702702302,
+   "tier": "heavy"
   },
   "analytics-engineer-dbt-13": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.4202076896912077,
+   "tier": "intensive"
   },
   "analytics-engineer-dbt-14": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.3723904936183069,
+   "tier": "intensive"
   },
   "analytics-engineer-dbt-15": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.3856164390808673,
+   "tier": "intensive"
   },
   "analytics-engineer-dbt-16": {
-   "score": 0.67,
-   "tier": "extreme"
+   "score": 0.25555914133026514,
+   "tier": "light"
   },
   "analytics-engineer-dbt-17": {
-   "score": 0.7999999999999999,
-   "tier": "extreme"
+   "score": 0.3061310120058356,
+   "tier": "moderate"
   },
   "analytics-engineer-dbt-18": {
-   "score": 0.8499999999999999,
-   "tier": "extreme"
+   "score": 0.3048533764380229,
+   "tier": "moderate"
   },
   "analytics-engineer-dbt-19": {
-   "score": 0.79,
-   "tier": "extreme"
+   "score": 0.30479085096432146,
+   "tier": "moderate"
   },
   "analytics-engineer-dbt-2": {
-   "score": 0.9100000000000001,
-   "tier": "extreme"
+   "score": 0.36403062446503276,
+   "tier": "heavy"
   },
   "analytics-engineer-dbt-20": {
-   "score": 0.7750000000000001,
-   "tier": "extreme"
+   "score": 0.4454781156286545,
+   "tier": "intensive"
   },
   "analytics-engineer-dbt-3": {
-   "score": 0.8300000000000001,
-   "tier": "extreme"
+   "score": 0.3295989563227393,
+   "tier": "heavy"
   },
   "analytics-engineer-dbt-4": {
-   "score": 0.94,
-   "tier": "extreme"
+   "score": 0.3148556474763062,
+   "tier": "moderate"
   },
   "analytics-engineer-dbt-5": {
-   "score": 0.88,
-   "tier": "extreme"
+   "score": 0.29444333206165796,
+   "tier": "moderate"
   },
   "analytics-engineer-dbt-6": {
-   "score": 0.71,
-   "tier": "extreme"
+   "score": 0.2571587447881024,
+   "tier": "light"
   },
   "analytics-engineer-dbt-7": {
-   "score": 0.86,
-   "tier": "extreme"
+   "score": 0.35492552968451657,
+   "tier": "heavy"
   },
   "analytics-engineer-dbt-8": {
-   "score": 0.8900000000000001,
-   "tier": "extreme"
+   "score": 0.33936139649391917,
+   "tier": "heavy"
   },
   "analytics-engineer-dbt-9": {
-   "score": 0.75,
-   "tier": "extreme"
+   "score": 0.2662490436186493,
+   "tier": "moderate"
   },
   "business-analyst-1": {
-   "score": 0.79,
-   "tier": "extreme"
+   "score": 0.3476954765229202,
+   "tier": "heavy"
   },
   "business-analyst-10": {
-   "score": 0.6100000000000001,
-   "tier": "extreme"
+   "score": 0.2569856025561079,
+   "tier": "light"
   },
   "business-analyst-11": {
-   "score": 0.68,
-   "tier": "extreme"
+   "score": 0.34461932756993763,
+   "tier": "heavy"
   },
   "business-analyst-12": {
-   "score": 0.52,
-   "tier": "extreme"
+   "score": 0.3322340567908971,
+   "tier": "heavy"
   },
   "business-analyst-13": {
-   "score": 0.62,
-   "tier": "extreme"
+   "score": 0.26447406310618404,
+   "tier": "moderate"
   },
   "business-analyst-14": {
-   "score": 0.5850000000000001,
-   "tier": "extreme"
+   "score": 0.34274293613815565,
+   "tier": "heavy"
   },
   "business-analyst-15": {
-   "score": 0.6800000000000002,
-   "tier": "extreme"
+   "score": 0.29660755113158155,
+   "tier": "moderate"
   },
   "business-analyst-16": {
-   "score": 0.5850000000000001,
-   "tier": "extreme"
+   "score": 0.5037939196766862,
+   "tier": "intensive"
   },
   "business-analyst-17": {
-   "score": 0.71,
-   "tier": "extreme"
+   "score": 0.36851182115506553,
+   "tier": "intensive"
   },
   "business-analyst-18": {
-   "score": 0.6450000000000001,
-   "tier": "extreme"
+   "score": 0.315804782545411,
+   "tier": "moderate"
   },
   "business-analyst-19": {
-   "score": 0.7,
-   "tier": "extreme"
+   "score": 0.29309257888273,
+   "tier": "moderate"
   },
   "business-analyst-2": {
-   "score": 0.57,
-   "tier": "extreme"
+   "score": 0.2901842421656907,
+   "tier": "moderate"
   },
   "business-analyst-20": {
-   "score": 0.62,
-   "tier": "extreme"
+   "score": 0.25948058243528227,
+   "tier": "light"
   },
   "business-analyst-21": {
-   "score": 0.82,
-   "tier": "extreme"
+   "score": 0.3029726303787126,
+   "tier": "moderate"
   },
   "business-analyst-22": {
-   "score": 0.64,
-   "tier": "extreme"
+   "score": 0.3645501938676695,
+   "tier": "heavy"
   },
   "business-analyst-23": {
-   "score": 0.76,
-   "tier": "extreme"
+   "score": 0.3462432640385913,
+   "tier": "heavy"
   },
   "business-analyst-24": {
-   "score": 0.675,
-   "tier": "extreme"
+   "score": 0.30441806760819506,
+   "tier": "moderate"
   },
   "business-analyst-25": {
-   "score": 0.74,
-   "tier": "extreme"
+   "score": 0.45387588043010085,
+   "tier": "intensive"
   },
   "business-analyst-26": {
-   "score": 0.675,
-   "tier": "extreme"
+   "score": 0.29280715573988336,
+   "tier": "moderate"
   },
   "business-analyst-27": {
-   "score": 0.6499999999999999,
-   "tier": "extreme"
+   "score": 0.2735047004518444,
+   "tier": "moderate"
   },
   "business-analyst-28": {
-   "score": 0.7450000000000001,
-   "tier": "extreme"
+   "score": 0.323163018440476,
+   "tier": "moderate"
   },
   "business-analyst-29": {
-   "score": 0.8800000000000001,
-   "tier": "extreme"
+   "score": 0.3506733421576056,
+   "tier": "heavy"
   },
   "business-analyst-3": {
-   "score": 0.7000000000000001,
-   "tier": "extreme"
+   "score": 0.37630115028976696,
+   "tier": "intensive"
   },
   "business-analyst-30": {
-   "score": 0.7100000000000001,
-   "tier": "extreme"
+   "score": 0.42223224568313117,
+   "tier": "intensive"
   },
   "business-analyst-31": {
-   "score": 0.68,
-   "tier": "extreme"
+   "score": 0.3435290939776577,
+   "tier": "heavy"
   },
   "business-analyst-32": {
-   "score": 0.6250000000000001,
-   "tier": "extreme"
+   "score": 0.4763929414841082,
+   "tier": "intensive"
   },
   "business-analyst-33": {
-   "score": 0.6200000000000001,
-   "tier": "extreme"
+   "score": 0.2567286736028316,
+   "tier": "light"
   },
   "business-analyst-34": {
-   "score": 0.74,
-   "tier": "extreme"
+   "score": 0.31672882231614385,
+   "tier": "moderate"
   },
   "business-analyst-35": {
-   "score": 0.7100000000000001,
-   "tier": "extreme"
+   "score": 0.33021020133610074,
+   "tier": "heavy"
   },
   "business-analyst-36": {
-   "score": 0.65,
-   "tier": "extreme"
+   "score": 0.26577143872593845,
+   "tier": "moderate"
   },
   "business-analyst-37": {
-   "score": 0.77,
-   "tier": "extreme"
+   "score": 0.35627018679742717,
+   "tier": "heavy"
   },
   "business-analyst-38": {
-   "score": 0.66,
-   "tier": "extreme"
+   "score": 0.2710805737376858,
+   "tier": "moderate"
   },
   "business-analyst-39": {
-   "score": 0.8,
-   "tier": "extreme"
+   "score": 0.3624465931378953,
+   "tier": "heavy"
   },
   "business-analyst-4": {
-   "score": 0.56,
-   "tier": "extreme"
+   "score": 0.2537673276582627,
+   "tier": "light"
   },
   "business-analyst-40": {
-   "score": 0.905,
+   "score": 0.5427433150338135,
    "tier": "extreme"
   },
   "business-analyst-41": {
-   "score": 0.8150000000000001,
-   "tier": "extreme"
+   "score": 0.3301047236852316,
+   "tier": "heavy"
   },
   "business-analyst-42": {
-   "score": 0.73,
-   "tier": "extreme"
+   "score": 0.38748831300433095,
+   "tier": "intensive"
   },
   "business-analyst-43": {
-   "score": 0.75,
-   "tier": "extreme"
+   "score": 0.31718849961929596,
+   "tier": "moderate"
   },
   "business-analyst-44": {
-   "score": 0.5950000000000001,
-   "tier": "extreme"
+   "score": 0.25701367020434984,
+   "tier": "light"
   },
   "business-analyst-45": {
-   "score": 0.68,
-   "tier": "extreme"
+   "score": 0.320739420163833,
+   "tier": "moderate"
   },
   "business-analyst-46": {
-   "score": 0.7050000000000001,
-   "tier": "extreme"
+   "score": 0.29193159264420465,
+   "tier": "moderate"
   },
   "business-analyst-47": {
-   "score": 0.555,
-   "tier": "extreme"
+   "score": 0.23366000739701223,
+   "tier": "light"
   },
   "business-analyst-48": {
-   "score": 0.555,
-   "tier": "extreme"
+   "score": 0.24567224618481084,
+   "tier": "light"
   },
   "business-analyst-49": {
-   "score": 0.78,
-   "tier": "extreme"
+   "score": 0.36895209898164355,
+   "tier": "intensive"
   },
   "business-analyst-5": {
-   "score": 0.6699999999999999,
-   "tier": "extreme"
+   "score": 0.2623928011006691,
+   "tier": "light"
   },
   "business-analyst-50": {
-   "score": 0.6400000000000001,
-   "tier": "extreme"
+   "score": 0.4494283024587245,
+   "tier": "intensive"
   },
   "business-analyst-6": {
-   "score": 0.655,
-   "tier": "extreme"
+   "score": 0.30721402666296815,
+   "tier": "moderate"
   },
   "business-analyst-7": {
-   "score": 0.62,
-   "tier": "extreme"
+   "score": 0.26141345662087145,
+   "tier": "light"
   },
   "business-analyst-8": {
-   "score": 0.69,
-   "tier": "extreme"
+   "score": 0.5108520681399676,
+   "tier": "intensive"
   },
   "business-analyst-9": {
-   "score": 0.6300000000000001,
-   "tier": "extreme"
+   "score": 0.3547710205549685,
+   "tier": "heavy"
   },
   "citizen-data-scientist-1": {
-   "score": 0.64,
-   "tier": "extreme"
+   "score": 0.2460419182551911,
+   "tier": "light"
   },
   "citizen-data-scientist-10": {
-   "score": 0.56,
-   "tier": "extreme"
+   "score": 0.20917556054208555,
+   "tier": "light"
   },
   "citizen-data-scientist-11": {
-   "score": 0.6800000000000002,
-   "tier": "extreme"
+   "score": 0.25256537000602064,
+   "tier": "light"
   },
   "citizen-data-scientist-12": {
-   "score": 0.84,
-   "tier": "extreme"
+   "score": 0.28411378366425233,
+   "tier": "moderate"
   },
   "citizen-data-scientist-13": {
-   "score": 0.7000000000000001,
-   "tier": "extreme"
+   "score": 0.25941937209434474,
+   "tier": "light"
   },
   "citizen-data-scientist-14": {
-   "score": 0.63,
-   "tier": "extreme"
+   "score": 0.23107374363901248,
+   "tier": "light"
   },
   "citizen-data-scientist-15": {
-   "score": 0.71,
-   "tier": "extreme"
+   "score": 0.26230216024439135,
+   "tier": "light"
   },
   "citizen-data-scientist-16": {
-   "score": 0.6450000000000001,
-   "tier": "extreme"
+   "score": 0.2319130077836212,
+   "tier": "light"
   },
   "citizen-data-scientist-17": {
-   "score": 0.7100000000000001,
-   "tier": "extreme"
+   "score": 0.23470723861007856,
+   "tier": "light"
   },
   "citizen-data-scientist-18": {
-   "score": 0.7100000000000001,
-   "tier": "extreme"
+   "score": 0.24597534598683785,
+   "tier": "light"
   },
   "citizen-data-scientist-19": {
-   "score": 0.67,
-   "tier": "extreme"
+   "score": 0.23000942315815812,
+   "tier": "light"
   },
   "citizen-data-scientist-2": {
-   "score": 0.685,
-   "tier": "extreme"
+   "score": 0.3668198846150552,
+   "tier": "intensive"
   },
   "citizen-data-scientist-20": {
-   "score": 0.645,
-   "tier": "extreme"
+   "score": 0.22627646822758068,
+   "tier": "light"
   },
   "citizen-data-scientist-21": {
-   "score": 0.8500000000000001,
-   "tier": "extreme"
+   "score": 0.2575966054377782,
+   "tier": "light"
   },
   "citizen-data-scientist-22": {
-   "score": 0.72,
-   "tier": "extreme"
+   "score": 0.2728526356520093,
+   "tier": "moderate"
   },
   "citizen-data-scientist-23": {
-   "score": 0.78,
-   "tier": "extreme"
+   "score": 0.28457553400629176,
+   "tier": "moderate"
   },
   "citizen-data-scientist-24": {
-   "score": 0.72,
-   "tier": "extreme"
+   "score": 0.23605101371075074,
+   "tier": "light"
   },
   "citizen-data-scientist-3": {
-   "score": 0.655,
-   "tier": "extreme"
+   "score": 0.24118073856349578,
+   "tier": "light"
   },
   "citizen-data-scientist-4": {
-   "score": 0.6450000000000001,
-   "tier": "extreme"
+   "score": 0.24719883857127106,
+   "tier": "light"
   },
   "citizen-data-scientist-5": {
-   "score": 0.6250000000000001,
-   "tier": "extreme"
+   "score": 0.24327862563059163,
+   "tier": "light"
   },
   "citizen-data-scientist-6": {
-   "score": 0.8,
-   "tier": "extreme"
+   "score": 0.26298227128866114,
+   "tier": "light"
   },
   "citizen-data-scientist-7": {
-   "score": 0.7000000000000001,
-   "tier": "extreme"
+   "score": 0.24125972010350985,
+   "tier": "light"
   },
   "citizen-data-scientist-8": {
-   "score": 0.8500000000000001,
-   "tier": "extreme"
+   "score": 0.2981662164714875,
+   "tier": "moderate"
   },
   "citizen-data-scientist-9": {
-   "score": 0.8600000000000001,
-   "tier": "extreme"
+   "score": 0.2890809608370025,
+   "tier": "moderate"
   },
   "cloud-data-engineer-1": {
-   "score": 0.96,
-   "tier": "extreme"
+   "score": 0.4076668467007529,
+   "tier": "intensive"
   },
   "cloud-data-engineer-10": {
-   "score": 0.98,
-   "tier": "extreme"
+   "score": 0.37859950903703277,
+   "tier": "intensive"
   },
   "cloud-data-engineer-11": {
-   "score": 0.83,
-   "tier": "extreme"
+   "score": 0.32380033436006206,
+   "tier": "moderate"
   },
   "cloud-data-engineer-12": {
-   "score": 0.97,
-   "tier": "extreme"
+   "score": 0.32869999779301745,
+   "tier": "heavy"
   },
   "cloud-data-engineer-13": {
-   "score": 0.97,
-   "tier": "extreme"
+   "score": 0.3122480280283017,
+   "tier": "moderate"
   },
   "cloud-data-engineer-14": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.44424441327972863,
+   "tier": "intensive"
   },
   "cloud-data-engineer-15": {
-   "score": 0.9900000000000001,
-   "tier": "extreme"
+   "score": 0.3175024878331298,
+   "tier": "moderate"
   },
   "cloud-data-engineer-16": {
-   "score": 0.81,
-   "tier": "extreme"
+   "score": 0.2926593304314483,
+   "tier": "moderate"
   },
   "cloud-data-engineer-17": {
-   "score": 0.9099999999999999,
-   "tier": "extreme"
+   "score": 0.36532508017118726,
+   "tier": "heavy"
   },
   "cloud-data-engineer-18": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.40354906851368433,
+   "tier": "intensive"
   },
   "cloud-data-engineer-19": {
-   "score": 0.86,
-   "tier": "extreme"
+   "score": 0.28434115011811356,
+   "tier": "moderate"
   },
   "cloud-data-engineer-2": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.4359138228671999,
+   "tier": "intensive"
   },
   "cloud-data-engineer-20": {
-   "score": 0.9450000000000001,
+   "score": 0.583596592453601,
    "tier": "extreme"
   },
   "cloud-data-engineer-3": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.39146948403848714,
+   "tier": "intensive"
   },
   "cloud-data-engineer-4": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.3961139538045199,
+   "tier": "intensive"
   },
   "cloud-data-engineer-5": {
-   "score": 0.98,
-   "tier": "extreme"
+   "score": 0.3588185737167173,
+   "tier": "heavy"
   },
   "cloud-data-engineer-6": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.392788334852498,
+   "tier": "intensive"
   },
   "cloud-data-engineer-7": {
-   "score": 0.9100000000000001,
-   "tier": "extreme"
+   "score": 0.3620444510379552,
+   "tier": "heavy"
   },
   "cloud-data-engineer-8": {
-   "score": 0.9700000000000002,
-   "tier": "extreme"
+   "score": 0.36920481448152853,
+   "tier": "intensive"
   },
   "cloud-data-engineer-9": {
-   "score": 0.83,
-   "tier": "extreme"
+   "score": 0.2916293008033742,
+   "tier": "moderate"
   },
   "compliance-privacy-analyst-1": {
-   "score": 0.85,
-   "tier": "extreme"
+   "score": 0.260180528136139,
+   "tier": "light"
   },
   "compliance-privacy-analyst-10": {
-   "score": 0.73,
-   "tier": "extreme"
+   "score": 0.22053576695544416,
+   "tier": "light"
   },
   "compliance-privacy-analyst-11": {
-   "score": 0.71,
-   "tier": "extreme"
+   "score": 0.2284586157607046,
+   "tier": "light"
   },
   "compliance-privacy-analyst-12": {
-   "score": 0.81,
-   "tier": "extreme"
+   "score": 0.43301122258167735,
+   "tier": "intensive"
   },
   "compliance-privacy-analyst-2": {
-   "score": 0.99,
-   "tier": "extreme"
+   "score": 0.30851664015553737,
+   "tier": "moderate"
   },
   "compliance-privacy-analyst-3": {
-   "score": 0.76,
-   "tier": "extreme"
+   "score": 0.232868017001823,
+   "tier": "light"
   },
   "compliance-privacy-analyst-4": {
-   "score": 0.72,
-   "tier": "extreme"
+   "score": 0.2187914296240238,
+   "tier": "light"
   },
   "compliance-privacy-analyst-5": {
-   "score": 0.74,
-   "tier": "extreme"
+   "score": 0.22017256973246754,
+   "tier": "light"
   },
   "compliance-privacy-analyst-6": {
-   "score": 0.8099999999999999,
-   "tier": "extreme"
+   "score": 0.23778696554045572,
+   "tier": "light"
   },
   "compliance-privacy-analyst-7": {
-   "score": 0.7899999999999999,
-   "tier": "extreme"
+   "score": 0.23308938432599038,
+   "tier": "light"
   },
   "compliance-privacy-analyst-8": {
-   "score": 0.84,
-   "tier": "extreme"
+   "score": 0.22220498934218066,
+   "tier": "light"
   },
   "compliance-privacy-analyst-9": {
-   "score": 0.76,
-   "tier": "extreme"
+   "score": 0.2214034267410723,
+   "tier": "light"
   },
   "data-analyst-1": {
-   "score": 0.5382778037082085,
-   "tier": "extreme"
+   "score": 0.35275364287957545,
+   "tier": "heavy"
   },
   "data-analyst-10": {
-   "score": 0.68,
-   "tier": "extreme"
+   "score": 0.3626991067177052,
+   "tier": "heavy"
   },
   "data-analyst-11": {
-   "score": 0.61,
-   "tier": "extreme"
+   "score": 0.4294047480393793,
+   "tier": "intensive"
   },
   "data-analyst-12": {
-   "score": 0.5850000000000001,
+   "score": 0.5449182897269733,
    "tier": "extreme"
   },
   "data-analyst-13": {
-   "score": 0.7650000000000001,
-   "tier": "extreme"
+   "score": 0.44997471466407657,
+   "tier": "intensive"
   },
   "data-analyst-14": {
-   "score": 0.54,
-   "tier": "extreme"
+   "score": 0.41843198533259446,
+   "tier": "intensive"
   },
   "data-analyst-15": {
-   "score": 0.61,
+   "score": 0.5445571141844391,
    "tier": "extreme"
   },
   "data-analyst-16": {
-   "score": 0.58,
-   "tier": "extreme"
+   "score": 0.28522625670046386,
+   "tier": "moderate"
   },
   "data-analyst-17": {
-   "score": 0.624,
-   "tier": "extreme"
+   "score": 0.41004207202516574,
+   "tier": "intensive"
   },
   "data-analyst-18": {
-   "score": 0.5,
-   "tier": "extreme"
+   "score": 0.2996281445829864,
+   "tier": "moderate"
   },
   "data-analyst-19": {
-   "score": 0.69,
-   "tier": "extreme"
+   "score": 0.4783789460992689,
+   "tier": "intensive"
   },
   "data-analyst-2": {
-   "score": 0.6100000000000001,
-   "tier": "extreme"
+   "score": 0.4927591317206206,
+   "tier": "intensive"
   },
   "data-analyst-20": {
-   "score": 0.6000000000000001,
-   "tier": "extreme"
+   "score": 0.4345841779507485,
+   "tier": "intensive"
   },
   "data-analyst-21": {
-   "score": 0.6799999999999999,
-   "tier": "extreme"
+   "score": 0.4861619903992218,
+   "tier": "intensive"
   },
   "data-analyst-22": {
-   "score": 0.67,
-   "tier": "extreme"
+   "score": 0.3824304998717587,
+   "tier": "intensive"
   },
   "data-analyst-23": {
-   "score": 0.67,
-   "tier": "extreme"
+   "score": 0.49102033330021644,
+   "tier": "intensive"
   },
   "data-analyst-24": {
-   "score": 0.7400000000000001,
-   "tier": "extreme"
+   "score": 0.4555647677270567,
+   "tier": "intensive"
   },
   "data-analyst-25": {
-   "score": 0.8650000000000002,
+   "score": 0.5914005268340081,
    "tier": "extreme"
   },
   "data-analyst-26": {
-   "score": 0.765,
-   "tier": "extreme"
+   "score": 0.518431127056814,
+   "tier": "intensive"
   },
   "data-analyst-27": {
-   "score": 0.8,
-   "tier": "extreme"
+   "score": 0.42318885047395327,
+   "tier": "intensive"
   },
   "data-analyst-28": {
-   "score": 0.6900000000000001,
-   "tier": "extreme"
+   "score": 0.3958216593354676,
+   "tier": "intensive"
   },
   "data-analyst-29": {
-   "score": 0.537,
-   "tier": "extreme"
+   "score": 0.27429627298579695,
+   "tier": "moderate"
   },
   "data-analyst-3": {
-   "score": 0.535,
-   "tier": "extreme"
+   "score": 0.2742373034358587,
+   "tier": "moderate"
   },
   "data-analyst-30": {
-   "score": 0.64,
-   "tier": "extreme"
+   "score": 0.44435893689358646,
+   "tier": "intensive"
   },
   "data-analyst-31": {
-   "score": 0.5700000000000001,
-   "tier": "extreme"
+   "score": 0.42770011106118283,
+   "tier": "intensive"
   },
   "data-analyst-32": {
-   "score": 0.64,
-   "tier": "extreme"
+   "score": 0.3742761243441131,
+   "tier": "intensive"
   },
   "data-analyst-33": {
-   "score": 0.5750000000000001,
-   "tier": "extreme"
+   "score": 0.3055397372489028,
+   "tier": "moderate"
   },
   "data-analyst-34": {
-   "score": 0.52,
-   "tier": "extreme"
+   "score": 0.40062402087651067,
+   "tier": "intensive"
   },
   "data-analyst-35": {
-   "score": 0.5720000000000001,
-   "tier": "extreme"
+   "score": 0.46786172408429394,
+   "tier": "intensive"
   },
   "data-analyst-36": {
-   "score": 0.6100000000000001,
-   "tier": "extreme"
+   "score": 0.42759286013114217,
+   "tier": "intensive"
   },
   "data-analyst-37": {
-   "score": 0.6499999999999999,
-   "tier": "extreme"
+   "score": 0.3350342817129811,
+   "tier": "heavy"
   },
   "data-analyst-38": {
-   "score": 0.56,
-   "tier": "extreme"
+   "score": 0.3438872473853761,
+   "tier": "heavy"
   },
   "data-analyst-39": {
-   "score": 0.535,
-   "tier": "extreme"
+   "score": 0.2742373034358587,
+   "tier": "moderate"
   },
   "data-analyst-4": {
-   "score": 0.5750000000000001,
-   "tier": "extreme"
+   "score": 0.33429185531825767,
+   "tier": "heavy"
   },
   "data-analyst-40": {
-   "score": 0.6500000000000001,
-   "tier": "extreme"
+   "score": 0.4666827717752543,
+   "tier": "intensive"
   },
   "data-analyst-41": {
-   "score": 0.5850000000000001,
-   "tier": "extreme"
+   "score": 0.4471372837582748,
+   "tier": "intensive"
   },
   "data-analyst-42": {
-   "score": 0.6399999999999999,
-   "tier": "extreme"
+   "score": 0.4565353549632072,
+   "tier": "intensive"
   },
   "data-analyst-43": {
-   "score": 0.6250000000000001,
-   "tier": "extreme"
+   "score": 0.4457995261133109,
+   "tier": "intensive"
   },
   "data-analyst-44": {
-   "score": 0.555,
-   "tier": "extreme"
+   "score": 0.43373649625054106,
+   "tier": "intensive"
   },
   "data-analyst-45": {
-   "score": 0.64,
-   "tier": "extreme"
+   "score": 0.43947280618842155,
+   "tier": "intensive"
   },
   "data-analyst-46": {
-   "score": 0.535,
-   "tier": "extreme"
+   "score": 0.41114639296065913,
+   "tier": "intensive"
   },
   "data-analyst-47": {
-   "score": 0.625,
-   "tier": "extreme"
+   "score": 0.40356093962165746,
+   "tier": "intensive"
   },
   "data-analyst-48": {
-   "score": 0.6150000000000001,
-   "tier": "extreme"
+   "score": 0.29314017900681877,
+   "tier": "moderate"
   },
   "data-analyst-49": {
-   "score": 0.52,
-   "tier": "extreme"
+   "score": 0.37258663769894057,
+   "tier": "intensive"
   },
   "data-analyst-5": {
-   "score": 0.53,
-   "tier": "extreme"
+   "score": 0.28748314711548506,
+   "tier": "moderate"
   },
   "data-analyst-50": {
-   "score": 0.67,
-   "tier": "extreme"
+   "score": 0.4696860634609393,
+   "tier": "intensive"
   },
   "data-analyst-51": {
-   "score": 0.61,
-   "tier": "extreme"
+   "score": 0.44367354759931066,
+   "tier": "intensive"
   },
   "data-analyst-52": {
-   "score": 0.5750000000000001,
-   "tier": "extreme"
+   "score": 0.45284133122076226,
+   "tier": "intensive"
   },
   "data-analyst-53": {
-   "score": 0.6100000000000001,
-   "tier": "extreme"
+   "score": 0.4427234118782183,
+   "tier": "intensive"
   },
   "data-analyst-54": {
-   "score": 0.7,
-   "tier": "extreme"
+   "score": 0.45398752889754757,
+   "tier": "intensive"
   },
   "data-analyst-55": {
-   "score": 0.7000000000000001,
-   "tier": "extreme"
+   "score": 0.48176530667532536,
+   "tier": "intensive"
   },
   "data-analyst-56": {
-   "score": 0.6100000000000001,
-   "tier": "extreme"
+   "score": 0.4316213836382701,
+   "tier": "intensive"
   },
   "data-analyst-57": {
-   "score": 0.555,
-   "tier": "extreme"
+   "score": 0.39341855898082784,
+   "tier": "intensive"
   },
   "data-analyst-58": {
-   "score": 0.6300000000000001,
-   "tier": "extreme"
+   "score": 0.44710772721547953,
+   "tier": "intensive"
   },
   "data-analyst-59": {
-   "score": 0.64,
-   "tier": "extreme"
+   "score": 0.44186480538539996,
+   "tier": "intensive"
   },
   "data-analyst-6": {
-   "score": 0.5750000000000001,
-   "tier": "extreme"
+   "score": 0.3015341887222984,
+   "tier": "moderate"
   },
   "data-analyst-60": {
-   "score": 0.54,
-   "tier": "extreme"
+   "score": 0.3529333839208401,
+   "tier": "heavy"
   },
   "data-analyst-61": {
-   "score": 0.6,
-   "tier": "extreme"
+   "score": 0.43458417795074855,
+   "tier": "intensive"
   },
   "data-analyst-62": {
-   "score": 0.7550000000000001,
-   "tier": "extreme"
+   "score": 0.42318368748686797,
+   "tier": "intensive"
   },
   "data-analyst-63": {
-   "score": 0.73,
-   "tier": "extreme"
+   "score": 0.4763920784147685,
+   "tier": "intensive"
   },
   "data-analyst-64": {
-   "score": 0.52,
-   "tier": "extreme"
+   "score": 0.3934087238723207,
+   "tier": "intensive"
   },
   "data-analyst-65": {
-   "score": 0.5950000000000001,
-   "tier": "extreme"
+   "score": 0.4578543835222046,
+   "tier": "intensive"
   },
   "data-analyst-66": {
-   "score": 0.6000000000000001,
-   "tier": "extreme"
+   "score": 0.4178345742751105,
+   "tier": "intensive"
   },
   "data-analyst-67": {
-   "score": 0.55,
-   "tier": "extreme"
+   "score": 0.3059517011633245,
+   "tier": "moderate"
   },
   "data-analyst-68": {
-   "score": 0.71,
-   "tier": "extreme"
+   "score": 0.3969267601149668,
+   "tier": "intensive"
   },
   "data-analyst-69": {
-   "score": 0.5700000000000001,
-   "tier": "extreme"
+   "score": 0.3392797866406749,
+   "tier": "heavy"
   },
   "data-analyst-7": {
-   "score": 0.6050000000000001,
-   "tier": "extreme"
+   "score": 0.31951493099029993,
+   "tier": "moderate"
   },
   "data-analyst-70": {
-   "score": 0.6250000000000001,
-   "tier": "extreme"
+   "score": 0.34531959415069713,
+   "tier": "heavy"
   },
   "data-analyst-71": {
-   "score": 0.665,
-   "tier": "extreme"
+   "score": 0.35298643224305615,
+   "tier": "heavy"
   },
   "data-analyst-72": {
-   "score": 0.6450000000000001,
-   "tier": "extreme"
+   "score": 0.4551446249375611,
+   "tier": "intensive"
   },
   "data-analyst-8": {
-   "score": 0.55,
-   "tier": "extreme"
+   "score": 0.4290677927704165,
+   "tier": "intensive"
   },
   "data-analyst-9": {
-   "score": 0.6699999999999999,
+   "score": 0.5413362761555228,
    "tier": "extreme"
   },
   "data-engineer-1": {
-   "score": 0.9500000000000001,
-   "tier": "extreme"
+   "score": 0.4268126914917897,
+   "tier": "intensive"
   },
   "data-engineer-10": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.3782105307280843,
+   "tier": "intensive"
   },
   "data-engineer-11": {
-   "score": 0.9199999999999999,
-   "tier": "extreme"
+   "score": 0.36315615388851064,
+   "tier": "heavy"
   },
   "data-engineer-12": {
-   "score": 0.8,
-   "tier": "extreme"
+   "score": 0.36151545880906694,
+   "tier": "heavy"
   },
   "data-engineer-13": {
-   "score": 0.99,
-   "tier": "extreme"
+   "score": 0.3845428076037448,
+   "tier": "intensive"
   },
   "data-engineer-14": {
-   "score": 0.9500000000000002,
-   "tier": "extreme"
+   "score": 0.32140105237655137,
+   "tier": "moderate"
   },
   "data-engineer-15": {
-   "score": 0.8700000000000001,
-   "tier": "extreme"
+   "score": 0.3425315223613514,
+   "tier": "heavy"
   },
   "data-engineer-16": {
-   "score": 0.74,
-   "tier": "extreme"
+   "score": 0.2971906965942315,
+   "tier": "moderate"
   },
   "data-engineer-17": {
-   "score": 0.66,
-   "tier": "extreme"
+   "score": 0.24409060517979722,
+   "tier": "light"
   },
   "data-engineer-18": {
-   "score": 0.7949999999999999,
+   "score": 0.6091737850069809,
    "tier": "extreme"
   },
   "data-engineer-19": {
-   "score": 0.96,
-   "tier": "extreme"
+   "score": 0.33582405172562746,
+   "tier": "heavy"
   },
   "data-engineer-2": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.4263982949104266,
+   "tier": "intensive"
   },
   "data-engineer-20": {
-   "score": 0.79,
-   "tier": "extreme"
+   "score": 0.293647394290365,
+   "tier": "moderate"
   },
   "data-engineer-21": {
-   "score": 0.8699999999999999,
-   "tier": "extreme"
+   "score": 0.301207503127781,
+   "tier": "moderate"
   },
   "data-engineer-22": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.3562090607604077,
+   "tier": "heavy"
   },
   "data-engineer-23": {
-   "score": 0.97,
-   "tier": "extreme"
+   "score": 0.34373825310789496,
+   "tier": "heavy"
   },
   "data-engineer-24": {
-   "score": 0.795,
-   "tier": "extreme"
+   "score": 0.45203009506085945,
+   "tier": "intensive"
   },
   "data-engineer-25": {
-   "score": 0.845,
-   "tier": "extreme"
+   "score": 0.3009848086571364,
+   "tier": "moderate"
   },
   "data-engineer-26": {
-   "score": 0.9100000000000001,
-   "tier": "extreme"
+   "score": 0.33301004105633447,
+   "tier": "heavy"
   },
   "data-engineer-27": {
-   "score": 0.79,
-   "tier": "extreme"
+   "score": 0.3040126498009912,
+   "tier": "moderate"
   },
   "data-engineer-28": {
-   "score": 0.8999999999999999,
-   "tier": "extreme"
+   "score": 0.3241634374520239,
+   "tier": "moderate"
   },
   "data-engineer-29": {
-   "score": 0.9500000000000002,
-   "tier": "extreme"
+   "score": 0.3666033053692209,
+   "tier": "intensive"
   },
   "data-engineer-3": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.4124872674770435,
+   "tier": "intensive"
   },
   "data-engineer-30": {
-   "score": 0.77,
-   "tier": "extreme"
+   "score": 0.3011446773899031,
+   "tier": "moderate"
   },
   "data-engineer-31": {
-   "score": 0.9600000000000001,
-   "tier": "extreme"
+   "score": 0.3523643703924618,
+   "tier": "heavy"
   },
   "data-engineer-32": {
-   "score": 0.9100000000000001,
-   "tier": "extreme"
+   "score": 0.33360266224011703,
+   "tier": "heavy"
   },
   "data-engineer-33": {
-   "score": 0.9400000000000001,
-   "tier": "extreme"
+   "score": 0.3329618751101875,
+   "tier": "heavy"
   },
   "data-engineer-34": {
-   "score": 0.955,
-   "tier": "extreme"
+   "score": 0.33518011779517565,
+   "tier": "heavy"
   },
   "data-engineer-35": {
-   "score": 0.87,
-   "tier": "extreme"
+   "score": 0.453994208048889,
+   "tier": "intensive"
   },
   "data-engineer-4": {
-   "score": 0.9500000000000002,
-   "tier": "extreme"
+   "score": 0.33444421084677267,
+   "tier": "heavy"
   },
   "data-engineer-5": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.42893075241084627,
+   "tier": "intensive"
   },
   "data-engineer-6": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.4223641765993932,
+   "tier": "intensive"
   },
   "data-engineer-7": {
-   "score": 0.77,
-   "tier": "extreme"
+   "score": 0.3419536859797953,
+   "tier": "heavy"
   },
   "data-engineer-8": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.44907449461493787,
+   "tier": "intensive"
   },
   "data-engineer-9": {
-   "score": 1,
+   "score": 0.6750401438056605,
    "tier": "extreme"
   },
   "data-scientist-1": {
-   "score": 0.63,
-   "tier": "extreme"
+   "score": 0.35781483726258045,
+   "tier": "heavy"
   },
   "data-scientist-10": {
-   "score": 0.75,
-   "tier": "extreme"
+   "score": 0.5153156324447012,
+   "tier": "intensive"
   },
   "data-scientist-11": {
-   "score": 0.71,
-   "tier": "extreme"
+   "score": 0.3781721116543785,
+   "tier": "intensive"
   },
   "data-scientist-12": {
-   "score": 0.6499999999999999,
-   "tier": "extreme"
+   "score": 0.3863792367523175,
+   "tier": "intensive"
   },
   "data-scientist-13": {
-   "score": 0.765,
+   "score": 0.6130615300208531,
    "tier": "extreme"
   },
   "data-scientist-14": {
-   "score": 0.76,
-   "tier": "extreme"
+   "score": 0.4879917198133853,
+   "tier": "intensive"
   },
   "data-scientist-15": {
-   "score": 0.8,
+   "score": 0.5371070679241494,
    "tier": "extreme"
   },
   "data-scientist-16": {
-   "score": 0.69,
-   "tier": "extreme"
+   "score": 0.3950363064267825,
+   "tier": "intensive"
   },
   "data-scientist-17": {
-   "score": 0.6900000000000001,
-   "tier": "extreme"
+   "score": 0.49989825227079787,
+   "tier": "intensive"
   },
   "data-scientist-18": {
-   "score": 0.62,
-   "tier": "extreme"
+   "score": 0.5162837292080712,
+   "tier": "intensive"
   },
   "data-scientist-19": {
-   "score": 0.6900000000000001,
-   "tier": "extreme"
+   "score": 0.3867271885809519,
+   "tier": "intensive"
   },
   "data-scientist-2": {
-   "score": 0.66,
-   "tier": "extreme"
+   "score": 0.34505389701110045,
+   "tier": "heavy"
   },
   "data-scientist-20": {
-   "score": 0.735,
-   "tier": "extreme"
+   "score": 0.47303500112437835,
+   "tier": "intensive"
   },
   "data-scientist-21": {
-   "score": 0.625,
-   "tier": "extreme"
+   "score": 0.45010422981024634,
+   "tier": "intensive"
   },
   "data-scientist-22": {
-   "score": 0.915,
-   "tier": "extreme"
+   "score": 0.4955276790753806,
+   "tier": "intensive"
   },
   "data-scientist-23": {
-   "score": 0.62,
-   "tier": "extreme"
+   "score": 0.41902550611409506,
+   "tier": "intensive"
   },
   "data-scientist-24": {
-   "score": 0.64,
-   "tier": "extreme"
+   "score": 0.3055098504455165,
+   "tier": "moderate"
   },
   "data-scientist-25": {
-   "score": 0.6500000000000001,
-   "tier": "extreme"
+   "score": 0.4435749475469046,
+   "tier": "intensive"
   },
   "data-scientist-26": {
-   "score": 0.5750000000000001,
-   "tier": "extreme"
+   "score": 0.3409190493929953,
+   "tier": "heavy"
   },
   "data-scientist-27": {
-   "score": 0.5950000000000001,
-   "tier": "extreme"
+   "score": 0.4140755079261949,
+   "tier": "intensive"
   },
   "data-scientist-28": {
-   "score": 0.615,
-   "tier": "extreme"
+   "score": 0.431433569695297,
+   "tier": "intensive"
   },
   "data-scientist-29": {
-   "score": 0.62,
-   "tier": "extreme"
+   "score": 0.3850736815608095,
+   "tier": "intensive"
   },
   "data-scientist-3": {
-   "score": 0.66,
-   "tier": "extreme"
+   "score": 0.37748504527768256,
+   "tier": "intensive"
   },
   "data-scientist-30": {
-   "score": 0.6050000000000001,
-   "tier": "extreme"
+   "score": 0.28596320242642803,
+   "tier": "moderate"
   },
   "data-scientist-31": {
-   "score": 0.6000000000000001,
-   "tier": "extreme"
+   "score": 0.3766315764632589,
+   "tier": "intensive"
   },
   "data-scientist-32": {
-   "score": 0.72,
-   "tier": "extreme"
+   "score": 0.48974682630831995,
+   "tier": "intensive"
   },
   "data-scientist-33": {
-   "score": 0.6200000000000001,
-   "tier": "extreme"
+   "score": 0.33540594173324634,
+   "tier": "heavy"
   },
   "data-scientist-34": {
-   "score": 0.75,
+   "score": 0.5685972111435448,
    "tier": "extreme"
   },
   "data-scientist-35": {
-   "score": 0.665,
-   "tier": "extreme"
+   "score": 0.4817281595846291,
+   "tier": "intensive"
   },
   "data-scientist-36": {
-   "score": 0.6499999999999999,
-   "tier": "extreme"
+   "score": 0.3005860546592288,
+   "tier": "moderate"
   },
   "data-scientist-37": {
-   "score": 0.5800000000000001,
-   "tier": "extreme"
+   "score": 0.34272463198267256,
+   "tier": "heavy"
   },
   "data-scientist-38": {
-   "score": 0.655,
-   "tier": "extreme"
+   "score": 0.43940470276460664,
+   "tier": "intensive"
   },
   "data-scientist-39": {
-   "score": 0.6799999999999999,
-   "tier": "extreme"
+   "score": 0.4312048056693527,
+   "tier": "intensive"
   },
   "data-scientist-4": {
-   "score": 0.58,
-   "tier": "extreme"
+   "score": 0.3870305131125441,
+   "tier": "intensive"
   },
   "data-scientist-40": {
-   "score": 0.5750000000000001,
-   "tier": "extreme"
+   "score": 0.3906131901021427,
+   "tier": "intensive"
   },
   "data-scientist-41": {
-   "score": 0.6900000000000001,
-   "tier": "extreme"
+   "score": 0.34073003300338983,
+   "tier": "heavy"
   },
   "data-scientist-42": {
-   "score": 0.6599999999999999,
+   "score": 0.5642107893336615,
    "tier": "extreme"
   },
   "data-scientist-43": {
-   "score": 0.5700000000000001,
-   "tier": "extreme"
+   "score": 0.34547987346466064,
+   "tier": "heavy"
   },
   "data-scientist-44": {
-   "score": 0.655,
-   "tier": "extreme"
+   "score": 0.41632029656383784,
+   "tier": "intensive"
   },
   "data-scientist-45": {
-   "score": 0.6300000000000001,
-   "tier": "extreme"
+   "score": 0.407061640725178,
+   "tier": "intensive"
   },
   "data-scientist-46": {
-   "score": 0.73,
-   "tier": "extreme"
+   "score": 0.3327106904548298,
+   "tier": "heavy"
   },
   "data-scientist-47": {
-   "score": 0.6699999999999999,
-   "tier": "extreme"
+   "score": 0.4453293082726363,
+   "tier": "intensive"
   },
   "data-scientist-48": {
-   "score": 0.64,
-   "tier": "extreme"
+   "score": 0.39741820279351103,
+   "tier": "intensive"
   },
   "data-scientist-49": {
-   "score": 0.7000000000000001,
-   "tier": "extreme"
+   "score": 0.4192959387820748,
+   "tier": "intensive"
   },
   "data-scientist-5": {
-   "score": 0.73,
-   "tier": "extreme"
+   "score": 0.33586409190656563,
+   "tier": "heavy"
   },
   "data-scientist-50": {
-   "score": 0.655,
-   "tier": "extreme"
+   "score": 0.29168231276416634,
+   "tier": "moderate"
   },
   "data-scientist-6": {
-   "score": 0.5950000000000001,
-   "tier": "extreme"
+   "score": 0.2971284003162393,
+   "tier": "moderate"
   },
   "data-scientist-7": {
-   "score": 0.76,
-   "tier": "extreme"
+   "score": 0.4816367451285528,
+   "tier": "intensive"
   },
   "data-scientist-8": {
-   "score": 0.77,
-   "tier": "extreme"
+   "score": 0.5031537748746182,
+   "tier": "intensive"
   },
   "data-scientist-9": {
-   "score": 0.84,
-   "tier": "extreme"
+   "score": 0.49679697485680197,
+   "tier": "intensive"
   },
   "data-visualization-specialist-1": {
-   "score": 0.76,
-   "tier": "extreme"
+   "score": 0.24289975163632146,
+   "tier": "light"
   },
   "data-visualization-specialist-10": {
-   "score": 0.74,
-   "tier": "extreme"
+   "score": 0.23868025657687028,
+   "tier": "light"
   },
   "data-visualization-specialist-11": {
-   "score": 0.77,
-   "tier": "extreme"
+   "score": 0.2692290392015644,
+   "tier": "moderate"
   },
   "data-visualization-specialist-12": {
-   "score": 0.8600000000000001,
-   "tier": "extreme"
+   "score": 0.2932951249197502,
+   "tier": "moderate"
   },
   "data-visualization-specialist-13": {
-   "score": 0.8650000000000001,
-   "tier": "extreme"
+   "score": 0.28527754777422965,
+   "tier": "moderate"
   },
   "data-visualization-specialist-14": {
-   "score": 0.84,
-   "tier": "extreme"
+   "score": 0.25689049972489597,
+   "tier": "light"
   },
   "data-visualization-specialist-15": {
-   "score": 0.8500000000000001,
-   "tier": "extreme"
+   "score": 0.2756436735621174,
+   "tier": "moderate"
   },
   "data-visualization-specialist-16": {
-   "score": 0.9000000000000001,
-   "tier": "extreme"
+   "score": 0.29173137347145406,
+   "tier": "moderate"
   },
   "data-visualization-specialist-17": {
-   "score": 0.7699999999999999,
-   "tier": "extreme"
+   "score": 0.2443441240620853,
+   "tier": "light"
   },
   "data-visualization-specialist-18": {
-   "score": 0.92,
-   "tier": "extreme"
+   "score": 0.2885988144425128,
+   "tier": "moderate"
   },
   "data-visualization-specialist-19": {
-   "score": 0.8,
-   "tier": "extreme"
+   "score": 0.275250432484481,
+   "tier": "moderate"
   },
   "data-visualization-specialist-2": {
-   "score": 0.68,
-   "tier": "extreme"
+   "score": 0.2296854276302799,
+   "tier": "light"
   },
   "data-visualization-specialist-20": {
-   "score": 0.9499999999999998,
-   "tier": "extreme"
+   "score": 0.3074223732669194,
+   "tier": "moderate"
   },
   "data-visualization-specialist-21": {
-   "score": 0.73,
-   "tier": "extreme"
+   "score": 0.27228397020363215,
+   "tier": "moderate"
   },
   "data-visualization-specialist-22": {
-   "score": 0.755,
-   "tier": "extreme"
+   "score": 0.2693954352740671,
+   "tier": "moderate"
   },
   "data-visualization-specialist-23": {
-   "score": 0.8200000000000001,
-   "tier": "extreme"
+   "score": 0.48987370508128236,
+   "tier": "intensive"
   },
   "data-visualization-specialist-3": {
-   "score": 0.8,
-   "tier": "extreme"
+   "score": 0.2661673379201512,
+   "tier": "moderate"
   },
   "data-visualization-specialist-4": {
-   "score": 0.74,
-   "tier": "extreme"
+   "score": 0.264930804205892,
+   "tier": "moderate"
   },
   "data-visualization-specialist-5": {
-   "score": 0.74,
-   "tier": "extreme"
+   "score": 0.2464947773526098,
+   "tier": "light"
   },
   "data-visualization-specialist-6": {
-   "score": 0.75,
-   "tier": "extreme"
+   "score": 0.2680772790335155,
+   "tier": "moderate"
   },
   "data-visualization-specialist-7": {
-   "score": 0.9049999999999999,
-   "tier": "extreme"
+   "score": 0.2991579589271987,
+   "tier": "moderate"
   },
   "data-visualization-specialist-8": {
-   "score": 0.93,
-   "tier": "extreme"
+   "score": 0.3114368619063438,
+   "tier": "moderate"
   },
   "data-visualization-specialist-9": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.3235753990813191,
+   "tier": "moderate"
   },
   "database-engineer-1": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.3544729463795173,
+   "tier": "heavy"
   },
   "database-engineer-10": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.332962833139391,
+   "tier": "heavy"
   },
   "database-engineer-11": {
-   "score": 0.9099999999999999,
-   "tier": "extreme"
+   "score": 0.31599223821459804,
+   "tier": "moderate"
   },
   "database-engineer-12": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.3156820739093663,
+   "tier": "moderate"
   },
   "database-engineer-13": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.3916322090291142,
+   "tier": "intensive"
   },
   "database-engineer-14": {
-   "score": 0.87,
-   "tier": "extreme"
+   "score": 0.38053557141580374,
+   "tier": "intensive"
   },
   "database-engineer-15": {
-   "score": 0.95,
-   "tier": "extreme"
+   "score": 0.40990595762437826,
+   "tier": "intensive"
   },
   "database-engineer-16": {
-   "score": 0.9500000000000002,
-   "tier": "extreme"
+   "score": 0.36768325811437785,
+   "tier": "intensive"
   },
   "database-engineer-17": {
-   "score": 0.7999999999999999,
-   "tier": "extreme"
+   "score": 0.3001834713409616,
+   "tier": "moderate"
   },
   "database-engineer-18": {
-   "score": 1,
+   "score": 0.603981043392448,
    "tier": "extreme"
   },
   "database-engineer-2": {
-   "score": 0.7999999999999999,
-   "tier": "extreme"
+   "score": 0.3060184373787861,
+   "tier": "moderate"
   },
   "database-engineer-3": {
-   "score": 0.9900000000000001,
-   "tier": "extreme"
+   "score": 0.3346290406428558,
+   "tier": "heavy"
   },
   "database-engineer-4": {
-   "score": 0.9850000000000001,
-   "tier": "extreme"
+   "score": 0.2977802181133881,
+   "tier": "moderate"
   },
   "database-engineer-5": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.39061584648496517,
+   "tier": "intensive"
   },
   "database-engineer-6": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.3621243655167491,
+   "tier": "heavy"
   },
   "database-engineer-7": {
-   "score": 0.77,
-   "tier": "extreme"
+   "score": 0.2889598614379406,
+   "tier": "moderate"
   },
   "database-engineer-8": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.35511296234101986,
+   "tier": "heavy"
   },
   "database-engineer-9": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.3352498685536335,
+   "tier": "heavy"
   },
   "dataops-engineer-1": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.33861026563077795,
+   "tier": "heavy"
   },
   "dataops-engineer-10": {
-   "score": 0.9900000000000001,
-   "tier": "extreme"
+   "score": 0.4063348139486938,
+   "tier": "intensive"
   },
   "dataops-engineer-11": {
-   "score": 0.88,
-   "tier": "extreme"
+   "score": 0.321027648314798,
+   "tier": "moderate"
   },
   "dataops-engineer-12": {
-   "score": 0.98,
-   "tier": "extreme"
+   "score": 0.3382578550427959,
+   "tier": "heavy"
   },
   "dataops-engineer-13": {
-   "score": 0.9400000000000001,
-   "tier": "extreme"
+   "score": 0.32507202023301274,
+   "tier": "heavy"
   },
   "dataops-engineer-14": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.33278471271486443,
+   "tier": "heavy"
   },
   "dataops-engineer-15": {
-   "score": 0.98,
-   "tier": "extreme"
+   "score": 0.358926757323783,
+   "tier": "heavy"
   },
   "dataops-engineer-16": {
-   "score": 0.76,
-   "tier": "extreme"
+   "score": 0.46396639959884306,
+   "tier": "intensive"
   },
   "dataops-engineer-2": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.37359040562097845,
+   "tier": "intensive"
   },
   "dataops-engineer-3": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.38216901177649587,
+   "tier": "intensive"
   },
   "dataops-engineer-4": {
-   "score": 0.9100000000000001,
-   "tier": "extreme"
+   "score": 0.3255859248240093,
+   "tier": "heavy"
   },
   "dataops-engineer-5": {
-   "score": 0.8350000000000001,
-   "tier": "extreme"
+   "score": 0.2796968120684109,
+   "tier": "moderate"
   },
   "dataops-engineer-6": {
-   "score": 0.9900000000000001,
-   "tier": "extreme"
+   "score": 0.29841194034598806,
+   "tier": "moderate"
   },
   "dataops-engineer-7": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.33371407089667204,
+   "tier": "heavy"
   },
   "dataops-engineer-8": {
-   "score": 0.9500000000000002,
-   "tier": "extreme"
+   "score": 0.344487791934887,
+   "tier": "heavy"
   },
   "dataops-engineer-9": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.35818027944226405,
+   "tier": "heavy"
   },
   "ecommerce-analyst-1": {
-   "score": 0.62,
-   "tier": "extreme"
+   "score": 0.23221474990357632,
+   "tier": "light"
   },
   "ecommerce-analyst-10": {
-   "score": 0.74,
-   "tier": "extreme"
+   "score": 0.2528909945696136,
+   "tier": "light"
   },
   "ecommerce-analyst-11": {
-   "score": 0.68,
-   "tier": "extreme"
+   "score": 0.2441005728204266,
+   "tier": "light"
   },
   "ecommerce-analyst-12": {
-   "score": 0.78,
-   "tier": "extreme"
+   "score": 0.2897763107149284,
+   "tier": "moderate"
   },
   "ecommerce-analyst-13": {
-   "score": 0.62,
-   "tier": "extreme"
+   "score": 0.2421497143960345,
+   "tier": "light"
   },
   "ecommerce-analyst-14": {
-   "score": 0.77,
-   "tier": "extreme"
+   "score": 0.2624581290841941,
+   "tier": "light"
   },
   "ecommerce-analyst-15": {
-   "score": 0.7100000000000001,
-   "tier": "extreme"
+   "score": 0.26050547226922144,
+   "tier": "light"
   },
   "ecommerce-analyst-16": {
-   "score": 0.68,
-   "tier": "extreme"
+   "score": 0.2406886055329633,
+   "tier": "light"
   },
   "ecommerce-analyst-17": {
-   "score": 0.7000000000000001,
-   "tier": "extreme"
+   "score": 0.25124170927813705,
+   "tier": "light"
   },
   "ecommerce-analyst-18": {
-   "score": 0.76,
-   "tier": "extreme"
+   "score": 0.2719047755218655,
+   "tier": "moderate"
   },
   "ecommerce-analyst-19": {
-   "score": 0.7300000000000001,
-   "tier": "extreme"
+   "score": 0.27131138876350963,
+   "tier": "moderate"
   },
   "ecommerce-analyst-2": {
-   "score": 0.9600000000000001,
-   "tier": "extreme"
+   "score": 0.3392917033492974,
+   "tier": "heavy"
   },
   "ecommerce-analyst-20": {
-   "score": 0.76,
-   "tier": "extreme"
+   "score": 0.47411919335011515,
+   "tier": "intensive"
   },
   "ecommerce-analyst-3": {
-   "score": 0.75,
-   "tier": "extreme"
+   "score": 0.2470910300378171,
+   "tier": "light"
   },
   "ecommerce-analyst-4": {
-   "score": 0.7100000000000001,
-   "tier": "extreme"
+   "score": 0.2582129923561876,
+   "tier": "light"
   },
   "ecommerce-analyst-5": {
-   "score": 0.7000000000000001,
-   "tier": "extreme"
+   "score": 0.23768042047783086,
+   "tier": "light"
   },
   "ecommerce-analyst-6": {
-   "score": 0.62,
-   "tier": "extreme"
+   "score": 0.22445659739410626,
+   "tier": "light"
   },
   "ecommerce-analyst-7": {
-   "score": 0.67,
-   "tier": "extreme"
+   "score": 0.24927793608385332,
+   "tier": "light"
   },
   "ecommerce-analyst-8": {
-   "score": 0.67,
-   "tier": "extreme"
+   "score": 0.24509989782374483,
+   "tier": "light"
   },
   "ecommerce-analyst-9": {
-   "score": 0.8099999999999999,
-   "tier": "extreme"
+   "score": 0.3136547736838944,
+   "tier": "moderate"
   },
   "financial-analyst-1": {
-   "score": 0.74,
-   "tier": "extreme"
+   "score": 0.255007859038168,
+   "tier": "light"
   },
   "financial-analyst-10": {
-   "score": 0.78,
-   "tier": "extreme"
+   "score": 0.2732866324238816,
+   "tier": "moderate"
   },
   "financial-analyst-11": {
-   "score": 0.64,
-   "tier": "extreme"
+   "score": 0.26563560684783727,
+   "tier": "moderate"
   },
   "financial-analyst-12": {
-   "score": 0.73,
-   "tier": "extreme"
+   "score": 0.277223136420808,
+   "tier": "moderate"
   },
   "financial-analyst-13": {
-   "score": 0.68,
-   "tier": "extreme"
+   "score": 0.24386364896774684,
+   "tier": "light"
   },
   "financial-analyst-14": {
-   "score": 0.64,
-   "tier": "extreme"
+   "score": 0.25372147392320027,
+   "tier": "light"
   },
   "financial-analyst-15": {
-   "score": 0.56,
-   "tier": "extreme"
+   "score": 0.223443819842205,
+   "tier": "light"
   },
   "financial-analyst-16": {
-   "score": 0.65,
-   "tier": "extreme"
+   "score": 0.23267663452501489,
+   "tier": "light"
   },
   "financial-analyst-17": {
-   "score": 0.7100000000000001,
-   "tier": "extreme"
+   "score": 0.2507279845211974,
+   "tier": "light"
   },
   "financial-analyst-18": {
-   "score": 0.68,
-   "tier": "extreme"
+   "score": 0.243357644190378,
+   "tier": "light"
   },
   "financial-analyst-19": {
-   "score": 0.66,
-   "tier": "extreme"
+   "score": 0.24220062664393696,
+   "tier": "light"
   },
   "financial-analyst-2": {
-   "score": 0.8,
-   "tier": "extreme"
+   "score": 0.27879329194303915,
+   "tier": "moderate"
   },
   "financial-analyst-20": {
-   "score": 0.64,
-   "tier": "extreme"
+   "score": 0.23286240309740522,
+   "tier": "light"
   },
   "financial-analyst-21": {
-   "score": 0.66,
-   "tier": "extreme"
+   "score": 0.28731157646168015,
+   "tier": "moderate"
   },
   "financial-analyst-22": {
-   "score": 0.67,
-   "tier": "extreme"
+   "score": 0.39904666794372745,
+   "tier": "intensive"
   },
   "financial-analyst-3": {
-   "score": 0.8200000000000001,
-   "tier": "extreme"
+   "score": 0.2870149059082323,
+   "tier": "moderate"
   },
   "financial-analyst-4": {
-   "score": 0.7100000000000001,
-   "tier": "extreme"
+   "score": 0.24611698306058835,
+   "tier": "light"
   },
   "financial-analyst-5": {
-   "score": 0.77,
-   "tier": "extreme"
+   "score": 0.2765875796007998,
+   "tier": "moderate"
   },
   "financial-analyst-6": {
-   "score": 0.62,
-   "tier": "extreme"
+   "score": 0.23808927137998834,
+   "tier": "light"
   },
   "financial-analyst-7": {
-   "score": 0.68,
-   "tier": "extreme"
+   "score": 0.2523474047836254,
+   "tier": "light"
   },
   "financial-analyst-8": {
-   "score": 0.9100000000000001,
-   "tier": "extreme"
+   "score": 0.3460174328805057,
+   "tier": "heavy"
   },
   "financial-analyst-9": {
-   "score": 0.73,
-   "tier": "extreme"
+   "score": 0.29414027069748994,
+   "tier": "moderate"
   },
   "healthcare-data-analyst-1": {
-   "score": 0.535,
-   "tier": "extreme"
+   "score": 0.25410291189045386,
+   "tier": "light"
   },
   "healthcare-data-analyst-10": {
-   "score": 0.67,
-   "tier": "extreme"
+   "score": 0.44609912108166205,
+   "tier": "intensive"
   },
   "healthcare-data-analyst-11": {
-   "score": 0.71,
-   "tier": "extreme"
+   "score": 0.30702799113800416,
+   "tier": "moderate"
   },
   "healthcare-data-analyst-12": {
-   "score": 0.57,
-   "tier": "extreme"
+   "score": 0.25934406606342614,
+   "tier": "light"
   },
   "healthcare-data-analyst-13": {
-   "score": 0.6250000000000001,
-   "tier": "extreme"
+   "score": 0.29364669818907846,
+   "tier": "moderate"
   },
   "healthcare-data-analyst-14": {
-   "score": 0.78,
-   "tier": "extreme"
+   "score": 0.5050587885188256,
+   "tier": "intensive"
   },
   "healthcare-data-analyst-15": {
-   "score": 0.6699999999999999,
-   "tier": "extreme"
+   "score": 0.2842205355105405,
+   "tier": "moderate"
   },
   "healthcare-data-analyst-16": {
-   "score": 0.76,
-   "tier": "extreme"
+   "score": 0.3982817964518101,
+   "tier": "intensive"
   },
   "healthcare-data-analyst-17": {
-   "score": 0.75,
-   "tier": "extreme"
+   "score": 0.3039570690496157,
+   "tier": "moderate"
   },
   "healthcare-data-analyst-18": {
-   "score": 0.7300000000000001,
-   "tier": "extreme"
+   "score": 0.2856020062534733,
+   "tier": "moderate"
   },
   "healthcare-data-analyst-19": {
-   "score": 0.74,
-   "tier": "extreme"
+   "score": 0.31672882231614374,
+   "tier": "moderate"
   },
   "healthcare-data-analyst-2": {
-   "score": 0.66,
-   "tier": "extreme"
+   "score": 0.4556071467124735,
+   "tier": "intensive"
   },
   "healthcare-data-analyst-20": {
-   "score": 0.55,
-   "tier": "extreme"
+   "score": 0.2691025290766328,
+   "tier": "moderate"
   },
   "healthcare-data-analyst-21": {
-   "score": 0.535,
-   "tier": "extreme"
+   "score": 0.24088334539517733,
+   "tier": "light"
   },
   "healthcare-data-analyst-22": {
-   "score": 0.6400000000000001,
-   "tier": "extreme"
+   "score": 0.44578244633755204,
+   "tier": "intensive"
   },
   "healthcare-data-analyst-23": {
-   "score": 0.6799999999999999,
-   "tier": "extreme"
+   "score": 0.28593794993859356,
+   "tier": "moderate"
   },
   "healthcare-data-analyst-24": {
-   "score": 0.6250000000000001,
-   "tier": "extreme"
+   "score": 0.27698652334149965,
+   "tier": "moderate"
   },
   "healthcare-data-analyst-25": {
-   "score": 0.5850000000000001,
-   "tier": "extreme"
+   "score": 0.39879034543966563,
+   "tier": "intensive"
   },
   "healthcare-data-analyst-3": {
-   "score": 0.58,
-   "tier": "extreme"
+   "score": 0.32030296694341354,
+   "tier": "moderate"
   },
   "healthcare-data-analyst-4": {
-   "score": 0.725,
-   "tier": "extreme"
+   "score": 0.39889512064979116,
+   "tier": "intensive"
   },
   "healthcare-data-analyst-5": {
-   "score": 0.6600000000000001,
-   "tier": "extreme"
+   "score": 0.3296561603546364,
+   "tier": "heavy"
   },
   "healthcare-data-analyst-6": {
-   "score": 0.72,
-   "tier": "extreme"
+   "score": 0.31945326559107445,
+   "tier": "moderate"
   },
   "healthcare-data-analyst-7": {
-   "score": 0.7100000000000001,
-   "tier": "extreme"
+   "score": 0.34821809092445866,
+   "tier": "heavy"
   },
   "healthcare-data-analyst-8": {
-   "score": 0.6900000000000001,
-   "tier": "extreme"
+   "score": 0.2985257923433311,
+   "tier": "moderate"
   },
   "healthcare-data-analyst-9": {
-   "score": 0.64,
-   "tier": "extreme"
+   "score": 0.2871764530975365,
+   "tier": "moderate"
   },
   "llm-engineer-1": {
-   "score": 0.94,
-   "tier": "extreme"
+   "score": 0.28999597198913424,
+   "tier": "moderate"
   },
   "llm-engineer-10": {
-   "score": 0.9,
-   "tier": "extreme"
+   "score": 0.3240901163136798,
+   "tier": "moderate"
   },
   "llm-engineer-11": {
-   "score": 0.7899999999999999,
-   "tier": "extreme"
+   "score": 0.29380913744341314,
+   "tier": "moderate"
   },
   "llm-engineer-12": {
-   "score": 0.8999999999999999,
-   "tier": "extreme"
+   "score": 0.2887367907469014,
+   "tier": "moderate"
   },
   "llm-engineer-13": {
-   "score": 0.9950000000000001,
-   "tier": "extreme"
+   "score": 0.31084600108534194,
+   "tier": "moderate"
   },
   "llm-engineer-14": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.37207891739546195,
+   "tier": "intensive"
   },
   "llm-engineer-15": {
-   "score": 0.9199999999999999,
-   "tier": "extreme"
+   "score": 0.39446832444410007,
+   "tier": "intensive"
   },
   "llm-engineer-16": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.36325108602820944,
+   "tier": "heavy"
   },
   "llm-engineer-17": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.36745973937618215,
+   "tier": "intensive"
   },
   "llm-engineer-18": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.33711230913472306,
+   "tier": "heavy"
   },
   "llm-engineer-19": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.4005384778202979,
+   "tier": "intensive"
   },
   "llm-engineer-2": {
-   "score": 0.99,
-   "tier": "extreme"
+   "score": 0.32822014815885064,
+   "tier": "heavy"
   },
   "llm-engineer-20": {
-   "score": 1,
+   "score": 0.6901826841515417,
    "tier": "extreme"
   },
   "llm-engineer-3": {
-   "score": 0.9099999999999999,
-   "tier": "extreme"
+   "score": 0.3007484992896947,
+   "tier": "moderate"
   },
   "llm-engineer-4": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.3414297216016844,
+   "tier": "heavy"
   },
   "llm-engineer-5": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.3727496292852741,
+   "tier": "intensive"
   },
   "llm-engineer-6": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.32502291181872944,
+   "tier": "heavy"
   },
   "llm-engineer-7": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.3291493317025541,
+   "tier": "heavy"
   },
   "llm-engineer-8": {
-   "score": 0.98,
-   "tier": "extreme"
+   "score": 0.29590228653367323,
+   "tier": "moderate"
   },
   "llm-engineer-9": {
-   "score": 0.8799999999999999,
-   "tier": "extreme"
+   "score": 0.293209118516309,
+   "tier": "moderate"
   },
   "marketing-analyst-1": {
-   "score": 0.635,
-   "tier": "extreme"
+   "score": 0.24106776441784203,
+   "tier": "light"
   },
   "marketing-analyst-10": {
-   "score": 0.7,
-   "tier": "extreme"
+   "score": 0.25100656832494916,
+   "tier": "light"
   },
   "marketing-analyst-11": {
-   "score": 0.66,
-   "tier": "extreme"
+   "score": 0.24597457854298585,
+   "tier": "light"
   },
   "marketing-analyst-12": {
-   "score": 0.7100000000000001,
-   "tier": "extreme"
+   "score": 0.25530733186206556,
+   "tier": "light"
   },
   "marketing-analyst-13": {
-   "score": 0.66,
-   "tier": "extreme"
+   "score": 0.23750389461776303,
+   "tier": "light"
   },
   "marketing-analyst-14": {
-   "score": 0.74,
-   "tier": "extreme"
+   "score": 0.2669193433547631,
+   "tier": "moderate"
   },
   "marketing-analyst-15": {
-   "score": 0.7000000000000001,
-   "tier": "extreme"
+   "score": 0.2692591943474733,
+   "tier": "moderate"
   },
   "marketing-analyst-16": {
-   "score": 0.6,
-   "tier": "extreme"
+   "score": 0.22887338570709417,
+   "tier": "light"
   },
   "marketing-analyst-17": {
-   "score": 0.73,
-   "tier": "extreme"
+   "score": 0.3008779261373978,
+   "tier": "moderate"
   },
   "marketing-analyst-18": {
-   "score": 0.7650000000000001,
-   "tier": "extreme"
+   "score": 0.2639337072051182,
+   "tier": "light"
   },
   "marketing-analyst-19": {
-   "score": 0.555,
-   "tier": "extreme"
+   "score": 0.21606567577516503,
+   "tier": "light"
   },
   "marketing-analyst-2": {
-   "score": 0.74,
-   "tier": "extreme"
+   "score": 0.2692406679431445,
+   "tier": "moderate"
   },
   "marketing-analyst-20": {
-   "score": 0.5750000000000001,
-   "tier": "extreme"
+   "score": 0.2216641236127783,
+   "tier": "light"
   },
   "marketing-analyst-21": {
-   "score": 0.7200000000000001,
-   "tier": "extreme"
+   "score": 0.2867955620612489,
+   "tier": "moderate"
   },
   "marketing-analyst-22": {
-   "score": 0.66,
-   "tier": "extreme"
+   "score": 0.22855333543810377,
+   "tier": "light"
   },
   "marketing-analyst-23": {
-   "score": 0.64,
-   "tier": "extreme"
+   "score": 0.23114243652949348,
+   "tier": "light"
   },
   "marketing-analyst-24": {
-   "score": 0.7100000000000001,
-   "tier": "extreme"
+   "score": 0.2638533384238518,
+   "tier": "light"
   },
   "marketing-analyst-25": {
-   "score": 0.89,
-   "tier": "extreme"
+   "score": 0.2849350894403009,
+   "tier": "moderate"
   },
   "marketing-analyst-26": {
-   "score": 0.8300000000000001,
-   "tier": "extreme"
+   "score": 0.2908669245053036,
+   "tier": "moderate"
   },
   "marketing-analyst-27": {
-   "score": 0.82,
-   "tier": "extreme"
+   "score": 0.3055755839423635,
+   "tier": "moderate"
   },
   "marketing-analyst-28": {
-   "score": 0.64,
-   "tier": "extreme"
+   "score": 0.23757943852126664,
+   "tier": "light"
   },
   "marketing-analyst-29": {
-   "score": 0.77,
-   "tier": "extreme"
+   "score": 0.300224041939158,
+   "tier": "moderate"
   },
   "marketing-analyst-3": {
-   "score": 0.76,
-   "tier": "extreme"
+   "score": 0.26714333809530044,
+   "tier": "moderate"
   },
   "marketing-analyst-30": {
-   "score": 0.6400000000000001,
-   "tier": "extreme"
+   "score": 0.47115928914720984,
+   "tier": "intensive"
   },
   "marketing-analyst-4": {
-   "score": 0.76,
-   "tier": "extreme"
+   "score": 0.2603516590255933,
+   "tier": "light"
   },
   "marketing-analyst-5": {
-   "score": 0.86,
-   "tier": "extreme"
+   "score": 0.3083442301130429,
+   "tier": "moderate"
   },
   "marketing-analyst-6": {
-   "score": 0.77,
-   "tier": "extreme"
+   "score": 0.29637677121567757,
+   "tier": "moderate"
   },
   "marketing-analyst-7": {
-   "score": 0.6699999999999999,
-   "tier": "extreme"
+   "score": 0.25628547946472036,
+   "tier": "light"
   },
   "marketing-analyst-8": {
-   "score": 0.7,
-   "tier": "extreme"
+   "score": 0.279040435180155,
+   "tier": "moderate"
   },
   "marketing-analyst-9": {
-   "score": 0.8,
-   "tier": "extreme"
+   "score": 0.3051784652334537,
+   "tier": "moderate"
   },
   "ml-engineer-1": {
-   "score": 0.79,
-   "tier": "extreme"
+   "score": 0.3120800142163138,
+   "tier": "moderate"
   },
   "ml-engineer-10": {
-   "score": 0.8300000000000001,
-   "tier": "extreme"
+   "score": 0.3943284268018594,
+   "tier": "intensive"
   },
   "ml-engineer-11": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.38604899861462805,
+   "tier": "intensive"
   },
   "ml-engineer-12": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.39555634478582336,
+   "tier": "intensive"
   },
   "ml-engineer-13": {
-   "score": 0.7999999999999999,
-   "tier": "extreme"
+   "score": 0.3157775882452433,
+   "tier": "moderate"
   },
   "ml-engineer-14": {
-   "score": 0.94,
-   "tier": "extreme"
+   "score": 0.3927728722927839,
+   "tier": "intensive"
   },
   "ml-engineer-15": {
-   "score": 0.9800000000000001,
-   "tier": "extreme"
+   "score": 0.3440005840664332,
+   "tier": "heavy"
   },
   "ml-engineer-16": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.40938667326193523,
+   "tier": "intensive"
   },
   "ml-engineer-17": {
-   "score": 0.8950000000000001,
-   "tier": "extreme"
+   "score": 0.34930164494201743,
+   "tier": "heavy"
   },
   "ml-engineer-18": {
-   "score": 1,
+   "score": 0.5382512576974996,
    "tier": "extreme"
   },
   "ml-engineer-19": {
-   "score": 0.905,
-   "tier": "extreme"
+   "score": 0.3403299315740652,
+   "tier": "heavy"
   },
   "ml-engineer-2": {
-   "score": 0.95,
-   "tier": "extreme"
+   "score": 0.44705005500564987,
+   "tier": "intensive"
   },
   "ml-engineer-20": {
-   "score": 0.7699999999999999,
-   "tier": "extreme"
+   "score": 0.333701791804788,
+   "tier": "heavy"
   },
   "ml-engineer-21": {
-   "score": 0.73,
-   "tier": "extreme"
+   "score": 0.3182392398753945,
+   "tier": "moderate"
   },
   "ml-engineer-22": {
-   "score": 0.9900000000000002,
-   "tier": "extreme"
+   "score": 0.455265555402278,
+   "tier": "intensive"
   },
   "ml-engineer-23": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.3895365599002449,
+   "tier": "intensive"
   },
   "ml-engineer-24": {
-   "score": 0.92,
-   "tier": "extreme"
+   "score": 0.3425979004726907,
+   "tier": "heavy"
   },
   "ml-engineer-25": {
-   "score": 0.77,
-   "tier": "extreme"
+   "score": 0.30933547569069014,
+   "tier": "moderate"
   },
   "ml-engineer-26": {
-   "score": 0.8099999999999999,
-   "tier": "extreme"
+   "score": 0.5097780289693762,
+   "tier": "intensive"
   },
   "ml-engineer-27": {
-   "score": 0.68,
-   "tier": "extreme"
+   "score": 0.2667099719659123,
+   "tier": "moderate"
   },
   "ml-engineer-28": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.40175015510977913,
+   "tier": "intensive"
   },
   "ml-engineer-29": {
-   "score": 0.6900000000000001,
-   "tier": "extreme"
+   "score": 0.29616507399162717,
+   "tier": "moderate"
   },
   "ml-engineer-3": {
-   "score": 0.6799999999999999,
-   "tier": "extreme"
+   "score": 0.3405375145126921,
+   "tier": "heavy"
   },
   "ml-engineer-30": {
-   "score": 0.75,
-   "tier": "extreme"
+   "score": 0.28331008070246233,
+   "tier": "moderate"
   },
   "ml-engineer-31": {
-   "score": 0.78,
-   "tier": "extreme"
+   "score": 0.3070927563172339,
+   "tier": "moderate"
   },
   "ml-engineer-32": {
-   "score": 0.7599999999999999,
-   "tier": "extreme"
+   "score": 0.29923573153830385,
+   "tier": "moderate"
   },
   "ml-engineer-33": {
-   "score": 0.9800000000000001,
-   "tier": "extreme"
+   "score": 0.35328839499133835,
+   "tier": "heavy"
   },
   "ml-engineer-34": {
-   "score": 0.78,
-   "tier": "extreme"
+   "score": 0.33913372298358263,
+   "tier": "heavy"
   },
   "ml-engineer-35": {
-   "score": 0.83,
-   "tier": "extreme"
+   "score": 0.4704284970781816,
+   "tier": "intensive"
   },
   "ml-engineer-36": {
-   "score": 0.93,
-   "tier": "extreme"
+   "score": 0.4101883252522788,
+   "tier": "intensive"
   },
   "ml-engineer-37": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.392645126739942,
+   "tier": "intensive"
   },
   "ml-engineer-38": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.36630040811628595,
+   "tier": "intensive"
   },
   "ml-engineer-39": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.36757818060645786,
+   "tier": "intensive"
   },
   "ml-engineer-4": {
-   "score": 0.87,
-   "tier": "extreme"
+   "score": 0.34933920873899427,
+   "tier": "heavy"
   },
   "ml-engineer-40": {
-   "score": 0.84,
-   "tier": "extreme"
+   "score": 0.31457357713788137,
+   "tier": "moderate"
   },
   "ml-engineer-41": {
-   "score": 0.84,
-   "tier": "extreme"
+   "score": 0.4949822002298379,
+   "tier": "intensive"
   },
   "ml-engineer-42": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.3463044777448385,
+   "tier": "heavy"
   },
   "ml-engineer-5": {
-   "score": 0.9500000000000002,
-   "tier": "extreme"
+   "score": 0.43559233578514617,
+   "tier": "intensive"
   },
   "ml-engineer-6": {
-   "score": 0.64,
-   "tier": "extreme"
+   "score": 0.3535804884053214,
+   "tier": "heavy"
   },
   "ml-engineer-7": {
-   "score": 0.6599999999999999,
-   "tier": "extreme"
+   "score": 0.25778811619626885,
+   "tier": "light"
   },
   "ml-engineer-8": {
-   "score": 0.74,
-   "tier": "extreme"
+   "score": 0.2892917212685463,
+   "tier": "moderate"
   },
   "ml-engineer-9": {
-   "score": 0.8099999999999999,
-   "tier": "extreme"
+   "score": 0.5014120543900935,
+   "tier": "intensive"
   },
   "mlops-1": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.36101835917447267,
+   "tier": "heavy"
   },
   "mlops-10": {
-   "score": 0.72,
-   "tier": "extreme"
+   "score": 0.286381047842147,
+   "tier": "moderate"
   },
   "mlops-11": {
-   "score": 0.8800000000000001,
-   "tier": "extreme"
+   "score": 0.2872812555940152,
+   "tier": "moderate"
   },
   "mlops-12": {
-   "score": 0.7750000000000001,
-   "tier": "extreme"
+   "score": 0.2639500826894713,
+   "tier": "light"
   },
   "mlops-13": {
-   "score": 0.9500000000000001,
-   "tier": "extreme"
+   "score": 0.3096907071677518,
+   "tier": "moderate"
   },
   "mlops-14": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.33718365995981747,
+   "tier": "heavy"
   },
   "mlops-15": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.34628520582439215,
+   "tier": "heavy"
   },
   "mlops-16": {
-   "score": 0.98,
-   "tier": "extreme"
+   "score": 0.3399210311517132,
+   "tier": "heavy"
   },
   "mlops-17": {
-   "score": 0.65,
-   "tier": "extreme"
+   "score": 0.40190008779773184,
+   "tier": "intensive"
   },
   "mlops-18": {
-   "score": 0.9300000000000002,
-   "tier": "extreme"
+   "score": 0.291012842144013,
+   "tier": "moderate"
   },
   "mlops-19": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.3383580247049483,
+   "tier": "heavy"
   },
   "mlops-2": {
-   "score": 0.93,
-   "tier": "extreme"
+   "score": 0.3348693899929988,
+   "tier": "heavy"
   },
   "mlops-20": {
-   "score": 0.915,
-   "tier": "extreme"
+   "score": 0.32827064433989744,
+   "tier": "heavy"
   },
   "mlops-21": {
-   "score": 0.8300000000000001,
-   "tier": "extreme"
+   "score": 0.2727080333732711,
+   "tier": "moderate"
   },
   "mlops-22": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.33573052648060275,
+   "tier": "heavy"
   },
   "mlops-23": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.30817307230060653,
+   "tier": "moderate"
   },
   "mlops-24": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.34179622510485197,
+   "tier": "heavy"
   },
   "mlops-25": {
-   "score": 0.8899999999999999,
-   "tier": "extreme"
+   "score": 0.4992946525255071,
+   "tier": "intensive"
   },
   "mlops-26": {
-   "score": 0.8300000000000001,
-   "tier": "extreme"
+   "score": 0.29559396122909,
+   "tier": "moderate"
   },
   "mlops-27": {
-   "score": 0.7899999999999999,
-   "tier": "extreme"
+   "score": 0.26816417526256076,
+   "tier": "moderate"
   },
   "mlops-28": {
-   "score": 0.99,
-   "tier": "extreme"
+   "score": 0.31054703813104156,
+   "tier": "moderate"
   },
   "mlops-29": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.33709814655806214,
+   "tier": "heavy"
   },
   "mlops-3": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.34899918893212156,
+   "tier": "heavy"
   },
   "mlops-30": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.37836051621381794,
+   "tier": "intensive"
   },
   "mlops-31": {
-   "score": 0.9700000000000002,
-   "tier": "extreme"
+   "score": 0.2924697556574839,
+   "tier": "moderate"
   },
   "mlops-32": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.5143254426401143,
+   "tier": "intensive"
   },
   "mlops-33": {
-   "score": 0.675,
-   "tier": "extreme"
+   "score": 0.24390625776925454,
+   "tier": "light"
   },
   "mlops-34": {
-   "score": 0.72,
-   "tier": "extreme"
+   "score": 0.2859694446504636,
+   "tier": "moderate"
   },
   "mlops-35": {
-   "score": 0.8800000000000001,
-   "tier": "extreme"
+   "score": 0.44812250552801547,
+   "tier": "intensive"
   },
   "mlops-4": {
-   "score": 0.8300000000000001,
-   "tier": "extreme"
+   "score": 0.29357903195209534,
+   "tier": "moderate"
   },
   "mlops-5": {
-   "score": 0.635,
-   "tier": "extreme"
+   "score": 0.23036479515994293,
+   "tier": "light"
   },
   "mlops-6": {
-   "score": 0.9600000000000002,
-   "tier": "extreme"
+   "score": 0.32918686659370416,
+   "tier": "heavy"
   },
   "mlops-7": {
-   "score": 0.9650000000000001,
-   "tier": "extreme"
+   "score": 0.4998228037738083,
+   "tier": "intensive"
   },
   "mlops-8": {
-   "score": 0.9400000000000001,
-   "tier": "extreme"
+   "score": 0.3487096566652434,
+   "tier": "heavy"
   },
   "mlops-9": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.3477715238891077,
+   "tier": "heavy"
   },
   "product-analyst-1": {
-   "score": 0.66,
-   "tier": "extreme"
+   "score": 0.3248084882888888,
+   "tier": "moderate"
   },
   "product-analyst-10": {
-   "score": 0.72,
-   "tier": "extreme"
+   "score": 0.26561716868623464,
+   "tier": "moderate"
   },
   "product-analyst-11": {
-   "score": 0.8900000000000001,
-   "tier": "extreme"
+   "score": 0.3015398190210212,
+   "tier": "moderate"
   },
   "product-analyst-12": {
-   "score": 0.7,
-   "tier": "extreme"
+   "score": 0.25874056307322213,
+   "tier": "light"
   },
   "product-analyst-13": {
-   "score": 0.67,
-   "tier": "extreme"
+   "score": 0.2469896769734823,
+   "tier": "light"
   },
   "product-analyst-14": {
-   "score": 0.555,
-   "tier": "extreme"
+   "score": 0.2222691104077185,
+   "tier": "light"
   },
   "product-analyst-15": {
-   "score": 0.7100000000000001,
-   "tier": "extreme"
+   "score": 0.26322324851926615,
+   "tier": "light"
   },
   "product-analyst-16": {
-   "score": 0.7200000000000001,
-   "tier": "extreme"
+   "score": 0.4461609654942865,
+   "tier": "intensive"
   },
   "product-analyst-2": {
-   "score": 0.7100000000000001,
-   "tier": "extreme"
+   "score": 0.2743526845879037,
+   "tier": "moderate"
   },
   "product-analyst-3": {
-   "score": 0.71,
-   "tier": "extreme"
+   "score": 0.24887206501561207,
+   "tier": "light"
   },
   "product-analyst-4": {
-   "score": 0.7300000000000001,
-   "tier": "extreme"
+   "score": 0.2582790611722754,
+   "tier": "light"
   },
   "product-analyst-5": {
-   "score": 0.67,
-   "tier": "extreme"
+   "score": 0.24041457624497906,
+   "tier": "light"
   },
   "product-analyst-6": {
-   "score": 0.66,
-   "tier": "extreme"
+   "score": 0.2481694864239858,
+   "tier": "light"
   },
   "product-analyst-7": {
-   "score": 0.63,
-   "tier": "extreme"
+   "score": 0.2784125972131828,
+   "tier": "moderate"
   },
   "product-analyst-8": {
-   "score": 0.67,
-   "tier": "extreme"
+   "score": 0.2623928011006691,
+   "tier": "light"
   },
   "product-analyst-9": {
-   "score": 0.72,
-   "tier": "extreme"
+   "score": 0.27737189253230476,
+   "tier": "moderate"
   },
   "prompt-engineer-1": {
-   "score": 0.97,
-   "tier": "extreme"
+   "score": 0.30667492354918435,
+   "tier": "moderate"
   },
   "prompt-engineer-10": {
-   "score": 0.96,
-   "tier": "extreme"
+   "score": 0.43307807314621044,
+   "tier": "intensive"
   },
   "prompt-engineer-11": {
-   "score": 0.85,
-   "tier": "extreme"
+   "score": 0.3606096841185389,
+   "tier": "heavy"
   },
   "prompt-engineer-12": {
-   "score": 0.94,
-   "tier": "extreme"
+   "score": 0.31659980610032057,
+   "tier": "moderate"
   },
   "prompt-engineer-13": {
-   "score": 0.94,
-   "tier": "extreme"
+   "score": 0.33506133176276687,
+   "tier": "heavy"
   },
   "prompt-engineer-14": {
-   "score": 0.9000000000000001,
-   "tier": "extreme"
+   "score": 0.2833650937425902,
+   "tier": "moderate"
   },
   "prompt-engineer-15": {
-   "score": 0.9,
-   "tier": "extreme"
+   "score": 0.2887079359826069,
+   "tier": "moderate"
   },
   "prompt-engineer-16": {
-   "score": 0.8099999999999999,
-   "tier": "extreme"
+   "score": 0.30026298879071217,
+   "tier": "moderate"
   },
   "prompt-engineer-17": {
-   "score": 0.9700000000000001,
-   "tier": "extreme"
+   "score": 0.4135329828016844,
+   "tier": "intensive"
   },
   "prompt-engineer-18": {
-   "score": 0.79,
-   "tier": "extreme"
+   "score": 0.41850089653461137,
+   "tier": "intensive"
   },
   "prompt-engineer-2": {
-   "score": 0.8,
-   "tier": "extreme"
+   "score": 0.28265493243833295,
+   "tier": "moderate"
   },
   "prompt-engineer-3": {
-   "score": 0.96,
-   "tier": "extreme"
+   "score": 0.303758286759733,
+   "tier": "moderate"
   },
   "prompt-engineer-4": {
-   "score": 0.6900000000000001,
-   "tier": "extreme"
+   "score": 0.2471547696628957,
+   "tier": "light"
   },
   "prompt-engineer-5": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.348277656149119,
+   "tier": "heavy"
   },
   "prompt-engineer-6": {
-   "score": 0.78,
-   "tier": "extreme"
+   "score": 0.3300979220659932,
+   "tier": "heavy"
   },
   "prompt-engineer-7": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.3906237334172974,
+   "tier": "intensive"
   },
   "prompt-engineer-8": {
-   "score": 0.78,
-   "tier": "extreme"
+   "score": 0.3474133441427039,
+   "tier": "heavy"
   },
   "prompt-engineer-9": {
-   "score": 0.77,
-   "tier": "extreme"
+   "score": 0.4583437560106255,
+   "tier": "intensive"
   },
   "prompts-engineer-1": {
-   "score": 0.97,
-   "tier": "extreme"
+   "score": 0.30667492354918435,
+   "tier": "moderate"
   },
   "prompts-engineer-10": {
-   "score": 0.96,
-   "tier": "extreme"
+   "score": 0.43307807314621044,
+   "tier": "intensive"
   },
   "prompts-engineer-11": {
-   "score": 0.85,
-   "tier": "extreme"
+   "score": 0.3606096841185389,
+   "tier": "heavy"
   },
   "prompts-engineer-12": {
-   "score": 0.94,
-   "tier": "extreme"
+   "score": 0.31659980610032057,
+   "tier": "moderate"
   },
   "prompts-engineer-13": {
-   "score": 0.94,
-   "tier": "extreme"
+   "score": 0.33506133176276687,
+   "tier": "heavy"
   },
   "prompts-engineer-14": {
-   "score": 0.9000000000000001,
-   "tier": "extreme"
+   "score": 0.2833650937425902,
+   "tier": "moderate"
   },
   "prompts-engineer-15": {
-   "score": 0.9,
-   "tier": "extreme"
+   "score": 0.2887079359826069,
+   "tier": "moderate"
   },
   "prompts-engineer-16": {
-   "score": 0.8099999999999999,
-   "tier": "extreme"
+   "score": 0.30026298879071217,
+   "tier": "moderate"
   },
   "prompts-engineer-17": {
-   "score": 0.9700000000000001,
-   "tier": "extreme"
+   "score": 0.4135329828016844,
+   "tier": "intensive"
   },
   "prompts-engineer-18": {
-   "score": 0.79,
-   "tier": "extreme"
+   "score": 0.41850089653461137,
+   "tier": "intensive"
   },
   "prompts-engineer-2": {
-   "score": 0.8,
-   "tier": "extreme"
+   "score": 0.28265493243833295,
+   "tier": "moderate"
   },
   "prompts-engineer-3": {
-   "score": 0.96,
-   "tier": "extreme"
+   "score": 0.303758286759733,
+   "tier": "moderate"
   },
   "prompts-engineer-4": {
-   "score": 0.6900000000000001,
-   "tier": "extreme"
+   "score": 0.2471547696628957,
+   "tier": "light"
   },
   "prompts-engineer-5": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.348277656149119,
+   "tier": "heavy"
   },
   "prompts-engineer-6": {
-   "score": 0.78,
-   "tier": "extreme"
+   "score": 0.3300979220659932,
+   "tier": "heavy"
   },
   "prompts-engineer-7": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.3906237334172974,
+   "tier": "intensive"
   },
   "prompts-engineer-8": {
-   "score": 0.78,
-   "tier": "extreme"
+   "score": 0.3474133441427039,
+   "tier": "heavy"
   },
   "prompts-engineer-9": {
-   "score": 0.77,
-   "tier": "extreme"
+   "score": 0.4583437560106255,
+   "tier": "intensive"
   },
   "quantitative-analyst-1": {
-   "score": 0.76,
-   "tier": "extreme"
+   "score": 0.24902724778229832,
+   "tier": "light"
   },
   "quantitative-analyst-10": {
-   "score": 0.75,
-   "tier": "extreme"
+   "score": 0.3093639102527831,
+   "tier": "moderate"
   },
   "quantitative-analyst-11": {
-   "score": 0.68,
-   "tier": "extreme"
+   "score": 0.2300294294144988,
+   "tier": "light"
   },
   "quantitative-analyst-12": {
-   "score": 0.66,
-   "tier": "extreme"
+   "score": 0.22855333543810377,
+   "tier": "light"
   },
   "quantitative-analyst-13": {
-   "score": 0.6900000000000001,
-   "tier": "extreme"
+   "score": 0.412773013003103,
+   "tier": "intensive"
   },
   "quantitative-analyst-14": {
-   "score": 0.79,
-   "tier": "extreme"
+   "score": 0.25275226194430833,
+   "tier": "light"
   },
   "quantitative-analyst-15": {
-   "score": 0.73,
-   "tier": "extreme"
+   "score": 0.2524402909687814,
+   "tier": "light"
   },
   "quantitative-analyst-16": {
-   "score": 0.89,
-   "tier": "extreme"
+   "score": 0.271895782390113,
+   "tier": "moderate"
   },
   "quantitative-analyst-17": {
-   "score": 0.8,
-   "tier": "extreme"
+   "score": 0.2880499915943302,
+   "tier": "moderate"
   },
   "quantitative-analyst-18": {
-   "score": 0.74,
-   "tier": "extreme"
+   "score": 0.26626339599807936,
+   "tier": "moderate"
   },
   "quantitative-analyst-19": {
-   "score": 0.7100000000000001,
-   "tier": "extreme"
+   "score": 0.26710541580729524,
+   "tier": "moderate"
   },
   "quantitative-analyst-2": {
-   "score": 0.84,
-   "tier": "extreme"
+   "score": 0.29640735707815974,
+   "tier": "moderate"
   },
   "quantitative-analyst-20": {
-   "score": 0.66,
-   "tier": "extreme"
+   "score": 0.28939025117476475,
+   "tier": "moderate"
   },
   "quantitative-analyst-21": {
-   "score": 0.83,
-   "tier": "extreme"
+   "score": 0.3941049979594017,
+   "tier": "intensive"
   },
   "quantitative-analyst-22": {
-   "score": 0.8750000000000001,
-   "tier": "extreme"
+   "score": 0.31656569465605783,
+   "tier": "moderate"
   },
   "quantitative-analyst-23": {
-   "score": 0.6900000000000001,
-   "tier": "extreme"
+   "score": 0.2913160838137508,
+   "tier": "moderate"
   },
   "quantitative-analyst-24": {
-   "score": 0.7,
-   "tier": "extreme"
+   "score": 0.3576228734907889,
+   "tier": "heavy"
   },
   "quantitative-analyst-25": {
-   "score": 0.78,
-   "tier": "extreme"
+   "score": 0.26588099869540716,
+   "tier": "moderate"
   },
   "quantitative-analyst-26": {
-   "score": 0.76,
-   "tier": "extreme"
+   "score": 0.2996222515362233,
+   "tier": "moderate"
   },
   "quantitative-analyst-27": {
-   "score": 0.78,
-   "tier": "extreme"
+   "score": 0.4465521741851657,
+   "tier": "intensive"
   },
   "quantitative-analyst-3": {
-   "score": 0.7,
-   "tier": "extreme"
+   "score": 0.2399564298842405,
+   "tier": "light"
   },
   "quantitative-analyst-4": {
-   "score": 0.69,
-   "tier": "extreme"
+   "score": 0.23833732461150167,
+   "tier": "light"
   },
   "quantitative-analyst-5": {
-   "score": 0.66,
-   "tier": "extreme"
+   "score": 0.23619718524360528,
+   "tier": "light"
   },
   "quantitative-analyst-6": {
-   "score": 0.66,
-   "tier": "extreme"
+   "score": 0.23379096190959409,
+   "tier": "light"
   },
   "quantitative-analyst-7": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.2905412126012521,
+   "tier": "moderate"
   },
   "quantitative-analyst-8": {
-   "score": 0.72,
-   "tier": "extreme"
+   "score": 0.2546325709981341,
+   "tier": "light"
   },
   "quantitative-analyst-9": {
-   "score": 0.8800000000000001,
-   "tier": "extreme"
+   "score": 0.28074722897936255,
+   "tier": "moderate"
   },
   "research-scientist-1": {
-   "score": 0.89,
-   "tier": "extreme"
+   "score": 0.3669402483620466,
+   "tier": "intensive"
   },
   "research-scientist-10": {
-   "score": 0.62,
-   "tier": "extreme"
+   "score": 0.23618053751052612,
+   "tier": "light"
   },
   "research-scientist-11": {
-   "score": 0.9,
-   "tier": "extreme"
+   "score": 0.3443455821142216,
+   "tier": "heavy"
   },
   "research-scientist-12": {
-   "score": 0.78,
-   "tier": "extreme"
+   "score": 0.25833630098240923,
+   "tier": "light"
   },
   "research-scientist-13": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.3263490889695906,
+   "tier": "heavy"
   },
   "research-scientist-14": {
-   "score": 0.7899999999999999,
-   "tier": "extreme"
+   "score": 0.3104916910256824,
+   "tier": "moderate"
   },
   "research-scientist-15": {
-   "score": 0.7,
-   "tier": "extreme"
+   "score": 0.27381033039467717,
+   "tier": "moderate"
   },
   "research-scientist-16": {
-   "score": 0.75,
-   "tier": "extreme"
+   "score": 0.24640884386430773,
+   "tier": "light"
   },
   "research-scientist-17": {
-   "score": 0.7699999999999999,
-   "tier": "extreme"
+   "score": 0.26182115319000365,
+   "tier": "light"
   },
   "research-scientist-18": {
-   "score": 0.9100000000000001,
-   "tier": "extreme"
+   "score": 0.29176862711307483,
+   "tier": "moderate"
   },
   "research-scientist-19": {
-   "score": 0.6800000000000002,
-   "tier": "extreme"
+   "score": 0.4510039804579553,
+   "tier": "intensive"
   },
   "research-scientist-2": {
-   "score": 0.6900000000000001,
-   "tier": "extreme"
+   "score": 0.24692511208176313,
+   "tier": "light"
   },
   "research-scientist-20": {
-   "score": 0.77,
-   "tier": "extreme"
+   "score": 0.24669725018215563,
+   "tier": "light"
   },
   "research-scientist-21": {
-   "score": 0.71,
-   "tier": "extreme"
+   "score": 0.3086686799117391,
+   "tier": "moderate"
   },
   "research-scientist-22": {
-   "score": 0.7999999999999999,
-   "tier": "extreme"
+   "score": 0.3169877324236608,
+   "tier": "moderate"
   },
   "research-scientist-23": {
-   "score": 0.78,
-   "tier": "extreme"
+   "score": 0.252196351241585,
+   "tier": "light"
   },
   "research-scientist-24": {
-   "score": 0.7699999999999999,
-   "tier": "extreme"
+   "score": 0.24303432383463172,
+   "tier": "light"
   },
   "research-scientist-25": {
-   "score": 0.86,
-   "tier": "extreme"
+   "score": 0.26449696314983207,
+   "tier": "moderate"
   },
   "research-scientist-26": {
-   "score": 0.9899999999999999,
-   "tier": "extreme"
+   "score": 0.3317800453170281,
+   "tier": "heavy"
   },
   "research-scientist-27": {
-   "score": 0.91,
-   "tier": "extreme"
+   "score": 0.2831395726416731,
+   "tier": "moderate"
   },
   "research-scientist-28": {
-   "score": 0.77,
-   "tier": "extreme"
+   "score": 0.24321873286437848,
+   "tier": "light"
   },
   "research-scientist-29": {
-   "score": 0.7,
-   "tier": "extreme"
+   "score": 0.24444397828131792,
+   "tier": "light"
   },
   "research-scientist-3": {
-   "score": 0.7,
-   "tier": "extreme"
+   "score": 0.26981742601020364,
+   "tier": "moderate"
   },
   "research-scientist-30": {
-   "score": 0.8350000000000002,
-   "tier": "extreme"
+   "score": 0.2699286645043496,
+   "tier": "moderate"
   },
   "research-scientist-31": {
-   "score": 0.99,
-   "tier": "extreme"
+   "score": 0.308398856846132,
+   "tier": "moderate"
   },
   "research-scientist-32": {
-   "score": 0.7899999999999999,
-   "tier": "extreme"
+   "score": 0.4422485465556633,
+   "tier": "intensive"
   },
   "research-scientist-4": {
-   "score": 0.72,
-   "tier": "extreme"
+   "score": 0.2686206164701049,
+   "tier": "moderate"
   },
   "research-scientist-5": {
-   "score": 0.75,
-   "tier": "extreme"
+   "score": 0.26215666518933195,
+   "tier": "light"
   },
   "research-scientist-6": {
-   "score": 0.7,
-   "tier": "extreme"
+   "score": 0.2442358305773824,
+   "tier": "light"
   },
   "research-scientist-7": {
-   "score": 0.6900000000000001,
-   "tier": "extreme"
+   "score": 0.23023814376817173,
+   "tier": "light"
   },
   "research-scientist-8": {
-   "score": 0.72,
-   "tier": "extreme"
+   "score": 0.24385187693778315,
+   "tier": "light"
   },
   "research-scientist-9": {
-   "score": 0.9799999999999999,
+   "score": 0.6543300850619393,
    "tier": "extreme"
   },
   "sql-developer-1": {
-   "score": 0.8999999999999999,
-   "tier": "extreme"
+   "score": 0.27318600960922423,
+   "tier": "moderate"
   },
   "sql-developer-10": {
-   "score": 0.8800000000000002,
-   "tier": "extreme"
+   "score": 0.4026000623799803,
+   "tier": "intensive"
   },
   "sql-developer-11": {
-   "score": 0.8500000000000001,
-   "tier": "extreme"
+   "score": 0.3887832873505106,
+   "tier": "intensive"
   },
   "sql-developer-12": {
-   "score": 0.995,
-   "tier": "extreme"
+   "score": 0.4245923715101347,
+   "tier": "intensive"
   },
   "sql-developer-13": {
-   "score": 0.89,
-   "tier": "extreme"
+   "score": 0.39774711032901466,
+   "tier": "intensive"
   },
   "sql-developer-14": {
-   "score": 0.8600000000000001,
-   "tier": "extreme"
+   "score": 0.3930036029161407,
+   "tier": "intensive"
   },
   "sql-developer-15": {
-   "score": 0.88,
-   "tier": "extreme"
+   "score": 0.4101942529923084,
+   "tier": "intensive"
   },
   "sql-developer-16": {
-   "score": 0.985,
-   "tier": "extreme"
+   "score": 0.5066656440590998,
+   "tier": "intensive"
   },
   "sql-developer-2": {
-   "score": 1,
-   "tier": "extreme"
+   "score": 0.43443506022999717,
+   "tier": "intensive"
   },
   "sql-developer-3": {
-   "score": 0.855,
-   "tier": "extreme"
+   "score": 0.4208585956646272,
+   "tier": "intensive"
   },
   "sql-developer-4": {
-   "score": 0.77,
-   "tier": "extreme"
+   "score": 0.3708233922493409,
+   "tier": "intensive"
   },
   "sql-developer-5": {
-   "score": 0.9300000000000002,
-   "tier": "extreme"
+   "score": 0.3966972349390989,
+   "tier": "intensive"
   },
   "sql-developer-6": {
-   "score": 0.8450000000000001,
-   "tier": "extreme"
+   "score": 0.4107830099708614,
+   "tier": "intensive"
   },
   "sql-developer-7": {
-   "score": 0.94,
-   "tier": "extreme"
+   "score": 0.4110800809036326,
+   "tier": "intensive"
   },
   "sql-developer-8": {
-   "score": 0.9500000000000002,
-   "tier": "extreme"
+   "score": 0.3973029582223005,
+   "tier": "intensive"
   },
   "sql-developer-9": {
-   "score": 0.9200000000000002,
-   "tier": "extreme"
+   "score": 0.42175248488318556,
+   "tier": "intensive"
   },
   "statistician-1": {
-   "score": 0.87,
-   "tier": "extreme"
+   "score": 0.31426126341456906,
+   "tier": "moderate"
   },
   "statistician-10": {
-   "score": 0.7300000000000002,
-   "tier": "extreme"
+   "score": 0.24135053639512175,
+   "tier": "light"
   },
   "statistician-11": {
-   "score": 0.72,
-   "tier": "extreme"
+   "score": 0.24143784579087527,
+   "tier": "light"
   },
   "statistician-12": {
-   "score": 0.79,
-   "tier": "extreme"
+   "score": 0.2503287802112644,
+   "tier": "light"
   },
   "statistician-13": {
-   "score": 0.7800000000000001,
-   "tier": "extreme"
+   "score": 0.24108720520263302,
+   "tier": "light"
   },
   "statistician-14": {
-   "score": 0.9400000000000001,
-   "tier": "extreme"
+   "score": 0.29582879772669635,
+   "tier": "moderate"
   },
   "statistician-15": {
-   "score": 0.6950000000000001,
-   "tier": "extreme"
+   "score": 0.23580084026190654,
+   "tier": "light"
   },
   "statistician-16": {
-   "score": 0.71,
-   "tier": "extreme"
+   "score": 0.26745213204137686,
+   "tier": "moderate"
   },
   "statistician-17": {
-   "score": 0.76,
-   "tier": "extreme"
+   "score": 0.47008373906411327,
+   "tier": "intensive"
   },
   "statistician-2": {
-   "score": 0.9300000000000002,
-   "tier": "extreme"
+   "score": 0.3225794257183169,
+   "tier": "moderate"
   },
   "statistician-3": {
-   "score": 0.72,
-   "tier": "extreme"
+   "score": 0.23430751511931028,
+   "tier": "light"
   },
   "statistician-4": {
-   "score": 0.8600000000000001,
-   "tier": "extreme"
+   "score": 0.27715404340535027,
+   "tier": "moderate"
   },
   "statistician-5": {
-   "score": 0.8450000000000001,
-   "tier": "extreme"
+   "score": 0.2681168512349946,
+   "tier": "moderate"
   },
   "statistician-6": {
-   "score": 0.86,
-   "tier": "extreme"
+   "score": 0.2692290764485159,
+   "tier": "moderate"
   },
   "statistician-7": {
-   "score": 0.9599999999999999,
-   "tier": "extreme"
+   "score": 0.33527258183788355,
+   "tier": "heavy"
   },
   "statistician-8": {
-   "score": 0.81,
-   "tier": "extreme"
+   "score": 0.39070194147567133,
+   "tier": "intensive"
   },
   "statistician-9": {
-   "score": 0.99,
-   "tier": "extreme"
+   "score": 0.3384138934161235,
+   "tier": "heavy"
   }
  }
 }

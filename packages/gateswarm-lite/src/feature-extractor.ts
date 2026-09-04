@@ -45,6 +45,13 @@ export interface FeatureVector {
   conjunction_enumeration: number;
   scale_quantity_mentions: number;
   diagnostic_causal_markers: number;
+  // v0.6.1 shape features — DENSITIES (per 100 words), not counts.
+  // Every other feature above is a count or a flag, so all of them saturate on
+  // long prompts and a 2000-character prompt maxes the whole vector regardless
+  // of difficulty. These two are normalised by length by construction, so they
+  // survive the shift from short golden-set prompts to real traffic.
+  openended_density: number;
+  structure_density: number;
 }
 
 // ─── Domain Keywords ──────────────────────────────────────
@@ -270,6 +277,28 @@ const NAMED_ENTITY_PATTERNS = [
   /\d{4}-\d{2}-\d{2}/g,
 ];
 
+/** Missing or non-finite feature values read as zero, never as NaN. */
+function num(value: number | undefined): number {
+  return Number.isFinite(value) ? (value as number) : 0;
+}
+
+/**
+ * Length past which count-based evidence starts being discounted, and the
+ * exponent of that discount. Chosen by grid search against BOTH distributions
+ * at once: 5-fold CV on the golden set (must not regress) and tier spread plus
+ * difficulty correlation on the 678-prompt real-traffic corpus.
+ */
+const DENSITY_REF_WORDS = 35;
+const DENSITY_EXPONENT = 0.70;
+
+/** Verbs whose answer the prompt cannot mechanically determine. */
+const OPENENDED_VERB_RE =
+  /\b(?:design|architect|optimi[sz]e|evaluate|trade[- ]?off|strateg|justify|critique|reconcile|prioriti[sz]e)\w*/g;
+/** Bullet list items — structural specification. */
+const BULLET_LINE_RE = /^[ \t]*[-*\u2022][ \t]+\S/gm;
+/** "Data sources:", "Warehouse:" — labelled input fields. */
+const LABELLED_FIELD_RE = /^[A-Z][A-Za-z /]{2,30}:[ \t]/gm;
+
 export function extractFeatures(prompt: string): FeatureVector {
   if (!prompt?.trim()) return zeroFeatures();
 
@@ -378,6 +407,18 @@ export function extractFeatures(prompt: string): FeatureVector {
   const scale_quantity_mentions = countScaleQuantityMentions(t);
   const diagnostic_causal_markers = countDiagnosticCausalMarkers(t);
 
+  // v0.6.1 shape densities, per 100 words.
+  // openended: verbs whose answer is not mechanically determined by the prompt.
+  // structure: bullets and "Label:" fields — a heavily structured prompt is a
+  // SPECIFIED one, so it is easier than its length suggests. Measured on the
+  // real-traffic corpus, structure density is the strongest negative signal
+  // available (Spearman -0.17 vs declared difficulty) and openendedness the
+  // strongest positive one that is not a length proxy (+0.16).
+  const perHundred = 100 / Math.max(wc, 1);
+  const openended_density = countRegex(t, OPENENDED_VERB_RE) * perHundred;
+  const structure_density =
+    (countMergedMatches([BULLET_LINE_RE], prompt) + countRegex(prompt, LABELLED_FIELD_RE)) * perHundred;
+
   return {
     has_question, has_code, has_imperative, has_arithmetic,
     has_sequential, has_constraint, has_context, has_architecture, has_design,
@@ -389,6 +430,7 @@ export function extractFeatures(prompt: string): FeatureVector {
     novelty_score, multi_domain, user_expertise_level, compound_tech,
     requirement_count, distinct_imperative_verbs, question_count,
     conjunction_enumeration, scale_quantity_mentions, diagnostic_causal_markers,
+    openended_density, structure_density,
   };
 }
 
@@ -405,6 +447,7 @@ function zeroFeatures(): FeatureVector {
     requirement_count: 0, distinct_imperative_verbs: 0, question_count: 0,
     conjunction_enumeration: 0, scale_quantity_mentions: 0,
     diagnostic_causal_markers: 0,
+    openended_density: 0, structure_density: 0,
   };
 }
 
@@ -425,9 +468,14 @@ function zeroFeatures(): FeatureVector {
 export function heuristicScoreFromFeatures(features: FeatureVector, wordCount: number): number {
   const t = features;
 
-  // Length remains the anchor, but Phase 2 makes room for decomposition signals
-  // that separate heavy implementation tasks from intensive diagnostic tasks.
+  // Volume anchor. Saturates at 45 words, so it contributes a flat 0.30 to every
+  // prompt longer than that and discriminates nothing above the knee.
   const lengthScore = Math.min(Math.log1p(wordCount) / Math.log1p(45), 1) * 0.30;
+
+  // ── Evidence terms ──────────────────────────────────────────────────────
+  // Every term below is a count or a flag, and every one of them saturates.
+  // That is why a long prompt used to max all of them at once (see the density
+  // correction under "shape" below).
   const structScore = (Math.min(t.sentence_count + Math.floor(t.conjunction_enumeration / 4), 5) / 5) * 0.08;
   // Architecture & design lexicon (max 0.20)
   const archScore = Math.min((t.has_architecture + t.has_design) * 0.09, 0.18);
@@ -465,9 +513,33 @@ export function heuristicScoreFromFeatures(features: FeatureVector, wordCount: n
   const systemBonus = wordCount >= 12 && sysCount >= 4 ? 0.10
     : wordCount >= 10 && sysCount >= 3 ? 0.05 : 0;
 
-  const score = lengthScore + structScore + archScore + techScore + codeScore +
-    reasonScore + decompositionScore + scaleScore + diagnosticScore +
-    domainScore + compoundScore + systemBonus;
+  const evidence = structScore + archScore + techScore + codeScore + reasonScore +
+    decompositionScore + scaleScore + diagnosticScore + domainScore +
+    compoundScore + systemBonus;
+
+  // ── v0.6.1 density correction ───────────────────────────────────────────
+  // Evidence found in a long prompt is weaker per unit than the same evidence in
+  // a short one: professional prompts are long because they are well specified,
+  // not because they are hard. Without this, the golden set (median 18 words)
+  // and real traffic (median ~280 words) live on disjoint score ranges — every
+  // real prompt scored above the top boundary and 100% of traffic routed to the
+  // most expensive model. Below the reference length the factor is exactly 1, so
+  // short-prompt behaviour is unchanged.
+  const density = wordCount > DENSITY_REF_WORDS
+    ? Math.pow(DENSITY_REF_WORDS / wordCount, DENSITY_EXPONENT)
+    : 1;
+
+  // ── v0.6.1 shape term ───────────────────────────────────────────────────
+  // The two length-normalised features. Open-endedness raises difficulty;
+  // structural specification lowers it. Both are capped so neither can dominate.
+  // Coerced: heuristicScoreFromFeatures is public API and callers may still pass
+  // a pre-v0.6.1 vector without these fields. A missing field must read as "no
+  // signal", never poison the sum with NaN.
+  const shape =
+    Math.min(num(t.openended_density) * 0.04, 0.15) -
+    Math.min(num(t.structure_density) * 0.03, 0.15);
+
+  const score = lengthScore + evidence * density + shape;
 
   return Math.min(Math.max(score, 0), 1);
 }

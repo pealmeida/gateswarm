@@ -5,7 +5,7 @@ export type TierBoundaries = [number, number, number, number, number];
 // Phase 2 (2026-07-12): one-time sanctioned refit after the mid-band feature
 // work (train-only fit; see eval/refit-boundaries.ts). Frozen until the scorer
 // changes again. This is the code-level source of truth for cut points.
-export const DEFAULT_BOUNDARIES: TierBoundaries = [0.208938, 0.264209, 0.32502, 0.36585, 0.485382];
+export const DEFAULT_BOUNDARIES: TierBoundaries = [0.196029, 0.264209, 0.324887, 0.36585, 0.523832];
 
 let _boundaries: TierBoundaries = [...DEFAULT_BOUNDARIES];
 let lastInvalidScoreLogAt = 0;

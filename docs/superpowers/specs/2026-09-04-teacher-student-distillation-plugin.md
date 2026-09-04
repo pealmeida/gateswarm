@@ -581,3 +581,67 @@ Recommended order — **do not ship the plugin for cost savings first**:
 - **With the loop, after step 1:** plausible, and the arithmetic is attractive (~76% of the cost index is addressable) — but it must be *earned by measurement*, through the existing gates, not assumed.
 
 The setup is **necessary and well-designed, but not sufficient on its own**, and its value is unlocked in a specific order. Every number above came from tooling already in this repository, which is the strongest thing that can be said for the project's honesty infrastructure: it detected its own headline failure without being asked to.
+
+
+---
+
+## 8. Saturation fix — implemented 2026-09-04
+
+§7 diagnosed the failure. This section records the fix that shipped with it, and its measured effect.
+
+### 8.1 Root cause
+
+Every term in `heuristicScoreFromFeatures` was a **count or a flag**, and every one saturated. A long prompt maxed all of them at once, so the score measured *how much text is present* across a dozen proxies rather than how hard the task is. The golden set (median 18 words) and real traffic (median ~280 words) therefore occupied disjoint score ranges.
+
+Confirming this, no existing feature separates real-world difficulty: against the MLJAR corpus's own declared level, the best is `multi_step` at Spearman +0.180, raw word count reaches +0.131, and **12 of 36 features have |rho| < 0.05**. A constrained grid search over reweightings of the existing features found 36 configurations that preserved golden accuracy and **not one** that spread real traffic beyond two tiers — the composite score topped out at rho 0.125, *worse than word count alone*. Reweighting could not fix this.
+
+### 8.2 The change
+
+Three parts, all in `packages/gateswarm-lite/src/feature-extractor.ts`:
+
+1. **Two new features, both densities per 100 words** — the first length-normalized features in the vector, which is why they survive the distribution shift that breaks counts:
+   - `openended_density` — verbs whose answer the prompt cannot mechanically determine (design, architect, optimize, evaluate, trade-off, justify, critique, prioritize). Real-traffic rho **+0.156**.
+   - `structure_density` — bullet lines and `Label:` fields. A heavily structured prompt is a *specified* one, so it is easier than its length suggests. Real-traffic rho **-0.173**, the strongest signal of either sign.
+2. **A density correction** on the evidence sum: `evidence x (REF/wordCount)^0.70` above `REF = 35` words, exactly 1 below it, so short-prompt behavior is untouched. Both constants were chosen by grid search against *both* distributions at once, under a hard guard that golden CV must not regress.
+3. **Defensive coercion** (`num()`) so a pre-v0.6.1 `FeatureVector` missing the new fields reads as zero rather than poisoning the score with `NaN` — `heuristicScoreFromFeatures` is public API.
+
+`DEFAULT_BOUNDARIES` were then refit **once** on the golden set, as `ACCURACY_ROADMAP.md` permits after a feature change: `[0.196029, 0.264209, 0.324887, 0.36585, 0.523832]`, mirrored into `v04_config.json`.
+
+### 8.3 Measured effect
+
+| | before | after |
+|---|---|---|
+| Golden CV exact | 61.1% ± 7.0% | **62.2% ± 6.5%** |
+| Golden CV adjacent | 94.4% | **94.4%** |
+| **heavy recall** | 26.7% (gate fail) | **33.3% (gate pass)** |
+| extreme recall | 60.0% | **73.3%** |
+| ECE | 0.150 | 0.177 (**still fails** <=0.10) |
+| Real-traffic tiers used | **1 of 6** | **5 of 6** |
+| Largest tier share | **100%** | **30.4%** |
+| Real score range | 0.500 - 1.000 (disjoint from golden) | **0.209 - 0.690 (overlaps golden)** |
+| Models receiving traffic | 1 | **4** |
+| Providers receiving traffic | 1 | **3** (google, deepseek, anthropic) |
+| **Cost index (678 prompts)** | **8136** ($12.000 mean) | **2090** ($3.083 mean) — **-74.3%** |
+| Latency | 0.19 ms | 0.19 ms |
+| Test suite | 429 pass | **429 pass** |
+
+Real-traffic distribution is now light 135 / moderate 206 / heavy 121 / intensive 200 / extreme 16. `trivial` stays empty, correctly — none of 678 professional prompts is a greeting.
+
+Difficulty ordering also emerged where there was none: Advanced prompts now reach `intensive` at 39.5% versus 28.9% for Beginner, and `extreme` at 4.7% versus 1.4%. Before the fix all three levels were indistinguishable (mean scores 0.39 / 0.38 / 0.39).
+
+A useful side effect: the 100 KB repetitive-filler fixture (`'analyze this system '` x 5000) now scores `moderate` instead of saturating — repetition is correctly no longer read as difficulty.
+
+### 8.4 What is fixed, and what is not
+
+**Fixed.** The scorer no longer routes all real traffic to the most expensive model. Cost efficiency on the one real corpus is now measured at -74.3%, not assumed. Traffic distributes across 4 models and 3 providers. Golden accuracy improved rather than regressed, and heavy recall crossed its gate.
+
+**Not fixed, and not claimed:**
+
+- **ECE 0.177 still fails the <=0.10 gate**, and got slightly worse. Discrimination improved; the confidence estimate was not recalibrated to match. That is the next piece of work, and it blocks any claim of calibrated confidence.
+- **Real-world accuracy remains unmeasured.** Spread is not correctness. rho against declared level is ~0.15 — a real signal, but weak, and declared level is a proxy for the topic's level, not the prompt's difficulty. Only the teacher/HITL loop in Sections 3-6 produces actual real-traffic tier labels.
+- **The tier proportions are still an artifact of the golden distribution**, not a measurement of real traffic. They are now *plausible* rather than degenerate, which is what makes label collection worth doing — see Section 7.5.
+- **`openai` remains unreachable** under `cheapest-capable`: `gpt-5-mini` and `gpt-5.2` are price-dominated by `deepseek-chat` and `gemini-pro` at every tier they serve. That is a property of `DEFAULT_MATRIX`, not of the scorer, and needs a matrix decision rather than a scoring change.
+
+### 8.5 Sequencing, revisited
+
+Section 7.5 warned that the distillation loop's ask-rate economics collapse while the student says `extreme` for everything. That blocker is now cleared: with five tiers in use and no tier above 31%, teacher-student disagreement becomes the informative minority the loop assumes. **The loop in Sections 3-6 is now safe to switch on.**
