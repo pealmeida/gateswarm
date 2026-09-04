@@ -4,6 +4,66 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [Unreleased]
+
+Scorer calibration and eval integrity. **No routing behaviour changes**: no tier
+boundary moved, so no prompt routes differently — verified against the
+678-prompt real-traffic corpus (cost index 2148 before and after).
+
+### Fixed
+- **Real traffic no longer saturates the scorer.** Every evidence term was a
+  saturating count, so any long prompt maxed the whole vector and 678/678
+  real-world prompts routed to `extreme`. Evidence is now discounted by prompt
+  length above a reference, and two length-normalised features
+  (`openended_density`, `structure_density`) were added. Traffic now spans five
+  tiers with a 30% top share across four models and three providers; the cost
+  index falls 8136 → 2148.
+- **Confidence was inverted, not merely miscalibrated.** It derived from distance
+  to the nearest tier boundary, but measured out-of-fold, accuracy is 75% beside
+  a boundary and 42% far from one. Confidence is now `P(correct | predicted
+  tier)`, fitted out-of-fold and hot-reloadable via `setTierReliability()`.
+  ECE 0.205 → 0.031.
+- Prose containing `However:` or `Note:` counted as specification structure and
+  was scored easier than it is.
+- `recalibrateMatrix` renormalised every model against the new min/max, so
+  grading one model down moved six models with no observations of their own —
+  enough to carry one past a `minQuality` gate on someone else's evidence.
+- The cost report's no-router baseline was ambiguous whenever two models tied on
+  `maxEffort`, making every saving figure depend on array order.
+
+### Added
+- **`gateswarm` agent plugin** (`plugins/gateswarm/`) with a `model-delegation`
+  skill, `/gs-route`, `/gs-review`, `/gs-recalibrate`, and the bundled MCP server.
+- **Outcome-driven matrix recalibration**: `submit_outcome` records whether a
+  delivered result was accurate; `recalibrate_matrix` rebuilds `quality` and
+  demotes `maxEffort` from those votes. Quality stays relative to the input
+  matrix and evidence gates every move. Distinct from `submit_feedback`, which
+  judges the tier rather than the output.
+- **`cost_report`**: cost-efficiency and accuracy indices over time. Names its
+  counterfactual, carries denominators, uses Wilson intervals, withholds rates
+  below ten observations, and distinguishes projected from metered spend.
+- **`length-only` leaderboard baseline** — ranks by character count and nothing
+  else. Any model that cannot beat it is not paying for its complexity.
+
+### Changed
+- **Golden dataset v1 → v3**: 90 → 180 examples, adding 90 length-decorrelated
+  ones. Length-to-tier Spearman falls 0.956 → 0.194, against real traffic's
+  ~0.131. The old benchmark was separable by length by construction, so every
+  accuracy figure ever published for this project was measured on a set a
+  one-liner scores 86.7% on. Splits regenerated as v3; v1 and v2 kept as history.
+- Split version centralised as `ACTIVE_SPLIT_VERSION` — it was hardcoded in seven
+  places, where a bump risked one consumer reading stale folds.
+- Reported accuracy drops (63.3% → 41.7% exact) because the benchmark got harder,
+  not because the scorer got worse. On the new set `ordinal-logistic` clears the
+  length baseline for the first time; the shipped heuristic does not.
+
+### Known limitations
+- The shipped scorer still loses to ranking by character count (41.7% vs 48.9%).
+- Two `score-drift-guard` medians are pinned, not accepted: the scorer
+  over-scores long prompts at every tier.
+- The 90 new dataset labels are one author's judgement and are unreviewed.
+- Real-world tier accuracy remains unmeasured — there are no real-traffic labels.
+
 ## [0.6.0] — 2026-07-12 (Trustable Precision)
 
 "Trustable Precision," developed on `release/v0.6.0`, implements the
