@@ -1199,3 +1199,136 @@ more than inventing features, and should come first.
   CV accuracy, because the golden set rewards length-alignment. That is a decision
   about which distribution the project is optimising for, and it should be made
   deliberately rather than discovered through a regression.
+
+
+---
+
+## 13. Adversarial review + the cost/accuracy index — 2026-09-04
+
+### 13.1 On the Codex request
+
+**Codex was not used, and no output here came from it.** There is no `codex`
+binary or OpenAI credential in this container, no codex plugin installed, and a
+catalog search returned nothing related. The review below is Claude's, run
+against its own changes. A second-model review remains worth doing — this is not
+a substitute for it, and nothing here should be cited as one.
+
+### 13.2 Findings
+
+Four checks aimed at the changes made this session, worst-case first.
+
+**#1 — Calibration leak. NOT PRESENT (verified, not assumed).**
+`DEFAULT_TIER_RELIABILITY` is fitted on all 90 golden prompts, so if the eval
+used the shipped table the reported ECE would be leaked. It does not:
+`eval/lib/runner.ts:67` calls `model.fit(trainEx)` whenever
+`requiresTraining`, and `HeuristicLinearClassifier.fit()` refits reliability
+out-of-fold on the training folds only. **ECE 0.086 is honest.**
+
+**#2 — Zero-evidence quality drift. CONFIRMED BUG, FIXED.**
+`recalibrateMatrix` renormalised every model onto the prior span using the new
+min/max. Grading one model down therefore moved six models that had **no
+observations at all** — `gemini-flash-lite` 0.550 → 0.669, enough to carry a
+model across a `minQuality: 0.6` gate on evidence about a *different* model.
+Replaced with a clamp into the prior span: a model with no samples now keeps its
+prior exactly. Two regression tests pin it, including one asserting that a
+`minQuality` cohort cannot change for an ungraded model.
+
+**#3 — Ambiguous cost baseline. CONFIRMED BUG, FIXED.**
+The report's "no router" baseline was the model with the highest `maxEffort`.
+`claude-sonnet` and `claude-opus` tie there, so the baseline — and therefore
+*every saving figure* — was whichever happened to sort first. Routing everything
+to `claude-opus` scored an index of **-4.0** against a `claude-sonnet` baseline.
+Ties now break on quality, then cost, and the report prints which model the
+baseline is. A negative index is kept rather than clamped: spending more than the
+baseline is a real outcome and should be visible.
+
+**#4 — Retired model ids flatter the saving. CONFIRMED, FIXED.**
+A decision naming a model absent from the current matrix was silently repriced at
+today's cheapest capable substitute, understating real spend. Now counted as
+`unpricedDecisions` and surfaced as a caveat.
+
+**#5 — Density constants tuned and reported on the same corpus. DISCLOSED, TESTED, HOLDS.**
+`DENSITY_REF_WORDS = 35` and `DENSITY_EXPONENT = 0.70` were grid-searched on the
+full 678-prompt corpus whose spread was then reported — no held-out validation at
+the time. Split test since:
+
+| split | entropy | top tier share |
+|---|---|---|
+| half A (tuning-like) | 0.786 | 33.0% |
+| **half B (held out)** | **0.816** | **30.1%** |
+| golden set (different genre) | 0.963 | 21.1% |
+
+The spread generalises to unseen prompts and to a different genre, and
+neighbouring grid configs land in a broad plateau rather than a spike. The
+methodological weakness is real and is recorded; the result survives it.
+
+**#6 — `structure_density` false-positives on prose. OPEN, not fixed.**
+`LABELLED_FIELD_RE` matches any capitalised word followed by a colon, so prose
+containing `However:`, `Note:` or `TODO:` scores 23.08 structure per 100 words
+and is therefore rated *easier*. Real, lower severity than #2-#4, and left open
+deliberately: tightening the regex changes scores and would require regenerating
+both frozen snapshots and re-validating §8's numbers. It should be fixed with
+that revalidation, not slipped in beside it.
+
+Suite after the fixes: **482 tests pass** (was 467), typecheck and build clean,
+scorer metrics unchanged (62.2% / 94.4% / ECE 0.086).
+
+### 13.3 The cost-efficiency and accuracy index
+
+Shipped as `packages/gateswarm-mcp/src/report.ts` plus a `cost_report` MCP tool.
+
+The governing rule is that **a savings number without its counterfactual is
+marketing, not measurement**, so every figure names what it is measured against
+and carries its denominator:
+
+```
+GateSwarm token economy — project "demo"
+
+  Routed                48 prompts
+  Baseline (no router)  576.00 blended $/1M  — every prompt at claude-opus
+  Routed                130.58 blended $/1M
+  Saved                 445.42  (77.3%)
+  Cost-efficiency index 0.773   (1 = free, 0 = no better than the baseline, negative = worse)
+  Metered tokens        in 16,920 / out 8,760 over 16 call(s)
+
+  Tier mix
+    trivial    ██████······    24  50.0%
+    light      ███·········    12  25.0%
+    ...
+  Accuracy index (was the TIER right?)     66.7% ±23.6pp  (n=12)
+  Quality index  (was the OUTPUT good?)    81.3%  (n=16, 4 human)
+
+  Trend (oldest → newest)
+    window        prompts   saving   accuracy   quality
+    7d-0d ago         48    77.3%     66.7%     81.3%
+
+  Read this before quoting any number above:
+    · metered tokens cover 16/48 decisions; the rest is projected
+```
+
+Design decisions worth naming:
+
+- **Two indices, never merged.** Accuracy answers *was the tier right* (from
+  `submit_feedback`); quality answers *was the output good* (from
+  `submit_outcome`). Averaging them would hide which half is failing.
+- **Rates below 10 observations are withheld, not printed.** The report says
+  "n/a (2 verdicts, needs 10)" rather than "50%".
+- **Wilson intervals, not normal approximation** — at n=12 the honest error bar
+  is ±23.6pp, and the normal approximation would understate it.
+- **Projected vs metered is explicit.** Costs are matrix-projected until callers
+  pass `tokensIn`/`tokensOut` to `submit_outcome`; partial coverage is stated as
+  a fraction rather than extrapolated.
+- **A quality index resting only on model self-judgement says so.** Without human
+  verdicts it is a model grading itself, and the report refuses to present that
+  as neutral.
+
+### 13.4 What the index cannot tell you
+
+- **It measures projected price, not delivered value.** A 77% saving on outputs
+  nobody checked is not a saving. That is why the quality index sits beside it,
+  and why the caveat block exists.
+- **The baseline is a counterfactual, never observed.** Nobody ran this traffic
+  through `claude-opus`; the comparison assumes it would have succeeded there.
+- **Accuracy still rests on tier labels**, which §11 showed are measured against
+  a length-separable benchmark. The index reports the verdicts it is given
+  faithfully — it cannot repair the label problem underneath them.

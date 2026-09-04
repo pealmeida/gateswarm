@@ -167,19 +167,21 @@ export function recalibrateMatrix(
     };
   });
 
-  // Renormalise onto the input matrix's quality span so values stay relative and
-  // comparable with minQuality thresholds set against the original matrix.
-  if (preserveSpan && calibrations.some((c) => c.samples > 0)) {
+  // Keep values inside the input matrix's quality span, so `minQuality`
+  // thresholds chosen against the original matrix still mean what they meant.
+  //
+  // This CLAMPS rather than linearly remapping the whole set. An earlier
+  // remapping version rescaled every model against the new min/max, which meant
+  // grading one model down silently promoted six ungraded ones — enough, in
+  // testing, to push a model past a `minQuality` gate on no evidence of its own.
+  // Evidence about one model must never move another. A model with no
+  // observations therefore keeps its prior exactly: its shrunk value equals its
+  // prior, so the clamp is a no-op for it.
+  if (preserveSpan) {
     const priorLo = Math.min(...matrix.map((m) => m.quality));
     const priorHi = Math.max(...matrix.map((m) => m.quality));
-    const newLo = Math.min(...calibrations.map((c) => c.shrunkQuality));
-    const newHi = Math.max(...calibrations.map((c) => c.shrunkQuality));
-    const newSpan = newHi - newLo;
-    const priorSpan = priorHi - priorLo;
-    if (newSpan > 1e-9 && priorSpan > 1e-9) {
-      for (const c of calibrations) {
-        c.calibratedQuality = clamp01(priorLo + ((c.shrunkQuality - newLo) / newSpan) * priorSpan);
-      }
+    for (const c of calibrations) {
+      c.calibratedQuality = clamp01(Math.min(priorHi, Math.max(priorLo, c.shrunkQuality)));
     }
   }
 

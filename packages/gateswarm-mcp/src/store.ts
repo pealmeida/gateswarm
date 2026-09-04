@@ -67,6 +67,9 @@ export interface OutcomeRecord {
   ok: boolean;
   /** 'human' verdicts outweigh 'model' ones during recalibration. */
   judge: 'human' | 'model';
+  /** Actual tokens metered by the provider, when the caller knows them. */
+  tokensIn?: number;
+  tokensOut?: number;
   notes?: string;
 }
 

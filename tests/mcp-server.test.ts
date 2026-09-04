@@ -73,7 +73,7 @@ describe('MCP protocol', () => {
 
     const tools = call(state, 'tools/list');
     const names = ((tools.result as { tools: Array<{ name: string }> }).tools).map((t) => t.name);
-    expect(names).toEqual(['route_prompt', 'route_session', 'submit_feedback', 'submit_outcome', 'recalibrate_matrix', 'telemetry_summary']);
+    expect(names).toEqual(['route_prompt', 'route_session', 'submit_feedback', 'submit_outcome', 'recalibrate_matrix', 'cost_report', 'telemetry_summary']);
 
     expect(handleMessage(state, JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }))).toBeNull();
   });
@@ -203,6 +203,6 @@ describe('MCP stdio transport (real agent-style session)', () => {
     const responses = r.stdout.trim().split('\n').map((l) => JSON.parse(l) as { id: number });
     expect(responses.map((m) => m.id)).toEqual([1, 2, 3]);
     const toolsMsg = responses[1] as unknown as { result: { tools: unknown[] } };
-    expect(toolsMsg.result.tools).toHaveLength(6);
+    expect(toolsMsg.result.tools).toHaveLength(7);
   }, 90_000);
 });

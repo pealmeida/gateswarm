@@ -189,7 +189,7 @@ describe('E2E C: gateswarm-mcp full agent session (one persistent process)', () 
     const names = (tools.result as unknown as { tools: { name: string }[] }).tools.map((t) => t.name);
     expect(names).toEqual([
       'route_prompt', 'route_session', 'submit_feedback',
-      'submit_outcome', 'recalibrate_matrix', 'telemetry_summary',
+      'submit_outcome', 'recalibrate_matrix', 'cost_report', 'telemetry_summary',
     ]);
   });
 

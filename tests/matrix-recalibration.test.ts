@@ -84,6 +84,28 @@ describe('outcome-driven matrix recalibration', () => {
     }
   });
 
+  it('never moves a model that has no evidence of its own', () => {
+    // Regression: an earlier version renormalised every model against the new
+    // min/max, so grading one model down promoted six ungraded ones — enough to
+    // push one past a minQuality gate on no evidence about itself.
+    const r = recalibrateMatrix(DEFAULT_MATRIX, rep(10, { modelId: 'deepseek-chat', tier: 'heavy', quality: 0.1 }));
+    for (const c of r.calibrations) {
+      if (c.samples === 0) expect(c.calibratedQuality).toBeCloseTo(c.priorQuality, 9);
+    }
+    // ...while the graded model still moves, and its demotion still reroutes.
+    const ds = r.calibrations.find((c) => c.modelId === 'deepseek-chat')!;
+    expect(ds.calibratedQuality).toBeLessThan(ds.priorQuality);
+    expect(selectModel('heavy', r.matrix).model.id).not.toBe('deepseek-chat');
+  });
+
+  it('does not let one model\'s grades change another past a minQuality gate', () => {
+    const gate = 0.6;
+    const before = DEFAULT_MATRIX.filter((m) => m.quality >= gate).map((m) => m.id).sort();
+    const r = recalibrateMatrix(DEFAULT_MATRIX, rep(10, { modelId: 'deepseek-chat', tier: 'heavy', quality: 0.1 }));
+    const after = r.matrix.filter((m) => m.quality >= gate && m.id !== 'deepseek-chat').map((m) => m.id).sort();
+    expect(after).toEqual(before.filter((id) => id !== 'deepseek-chat'));
+  });
+
   it('reports outcomes referencing models that are not in the matrix', () => {
     const r = recalibrateMatrix(DEFAULT_MATRIX, rep(3, { modelId: 'retired-model-v1', tier: 'heavy', quality: 1 }));
     expect(r.unknownModelIds).toEqual(['retired-model-v1']);

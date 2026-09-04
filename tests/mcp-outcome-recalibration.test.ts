@@ -47,6 +47,7 @@ describe('submit_outcome', () => {
     const names = listed.result.tools.map((t) => t.name);
     expect(names).toContain('submit_outcome');
     expect(names).toContain('recalibrate_matrix');
+    expect(names).toContain('cost_report');
     const schema = listed.result.tools.find((t) => t.name === 'submit_outcome')!.inputSchema;
     expect(schema.properties.verdict.enum).toEqual(['accurate', 'partial', 'inaccurate', 'failed']);
   });

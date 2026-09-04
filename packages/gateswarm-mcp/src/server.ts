@@ -11,6 +11,7 @@ import {
   DEFAULT_MATRIX, blendedCost, formatRecalibration, recalibrateMatrix, route, routeSession, selectModel,
 } from 'gateswarm-router';
 import type { ModelSpec, OutcomeRecord as RouterOutcome, RouteOptions, RoutingStrategy } from 'gateswarm-router';
+import { buildIndexReport, formatIndexReport } from './report.js';
 import {
   appendRecord,
   findDecision,
@@ -145,6 +146,8 @@ function toolSchemas() {
           verdict: { type: 'string', enum: ['accurate', 'partial', 'inaccurate', 'failed'], description: 'accurate=1.0, partial=0.5, inaccurate=0.0; failed=transport/provider error, excluded from quality.' },
           quality: { type: 'number', minimum: 0, maximum: 1, description: 'Optional explicit score, overrides the verdict mapping.' },
           judge: { type: 'string', enum: ['human', 'model'], default: 'model', description: 'Who judged. Human verdicts are weighted higher during recalibration.' },
+          tokensIn: { type: 'number', minimum: 0, description: 'Metered input tokens, if known. Turns the cost report from projected into realized.' },
+          tokensOut: { type: 'number', minimum: 0, description: 'Metered output tokens, if known.' },
           notes: { type: 'string' },
           project: { type: 'string', default: 'default' },
         },
@@ -162,6 +165,20 @@ function toolSchemas() {
           matrixPath: { type: 'string', description: 'Optional base matrix; defaults to the built-in DEFAULT_MATRIX.' },
           pseudoCounts: { type: 'number', description: 'Observations needed before a model outweighs its prior. Default 8.' },
           minSamplesForDemotion: { type: 'number', description: 'Graded outcomes at a ceiling tier before demotion is allowed. Default 5.' },
+        },
+      },
+    },
+    {
+      name: 'cost_report',
+      description:
+        'Cost-efficiency and accuracy indices over time for a project: what this traffic would have cost with no router, what it cost routed, the saving, the tier mix, how often the tier was judged right, how good the outputs were judged to be, and the trend across recent windows. Every figure carries its denominator, and rates below a usable sample are withheld rather than printed.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          project: { type: 'string', default: 'default' },
+          matrixPath: { type: 'string', description: 'Optional ModelSpec[] JSON; defaults to the built-in matrix.' },
+          buckets: { type: 'number', description: 'How many trend windows. Default 4.' },
+          bucketDays: { type: 'number', description: 'Days per window. Default 7.' },
         },
       },
     },
@@ -404,6 +421,8 @@ function handleSubmitOutcome(id: unknown, args: Record<string, unknown>, state: 
     quality,
     ok: verdict !== 'failed',
     judge: args.judge === 'human' ? 'human' : 'model',
+    tokensIn: typeof args.tokensIn === 'number' && args.tokensIn >= 0 ? args.tokensIn : undefined,
+    tokensOut: typeof args.tokensOut === 'number' && args.tokensOut >= 0 ? args.tokensOut : undefined,
     notes: typeof args.notes === 'string' ? args.notes : undefined,
   };
   appendRecord(project, record);
@@ -447,6 +466,23 @@ function handleRecalibrate(id: unknown, args: Record<string, unknown>): string {
     `${formatRecalibration(result)}\n\nBased on ${outcomes.length} quality vote(s) across ${new Set(outcomes.map((o) => o.modelId)).size} model(s).`,
     { matrix: result.matrix, calibrations: result.calibrations, unknownModelIds: result.unknownModelIds },
   );
+}
+
+function handleCostReport(id: unknown, args: Record<string, unknown>): string {
+  const project = String(args.project ?? 'default');
+  let matrix = DEFAULT_MATRIX;
+  if (typeof args.matrixPath === 'string') {
+    try {
+      matrix = loadMatrix(args.matrixPath);
+    } catch (err) {
+      return textResult(id, JSON.stringify({ error: err instanceof Error ? err.message : String(err) }), true);
+    }
+  }
+  const report = buildIndexReport(project, readRecords(project), matrix, {
+    buckets: typeof args.buckets === 'number' ? args.buckets : undefined,
+    bucketDays: typeof args.bucketDays === 'number' ? args.bucketDays : undefined,
+  });
+  return decisionResult(id, formatIndexReport(report), report);
 }
 
 function handleSummary(id: unknown, args: Record<string, unknown>): string {
@@ -518,6 +554,8 @@ export function handleMessage(state: ServerState, line: string): string | null {
             return handleSubmitOutcome(id, args, state);
           case 'recalibrate_matrix':
             return handleRecalibrate(id, args);
+          case 'cost_report':
+            return handleCostReport(id, args);
           case 'telemetry_summary':
             return handleSummary(id, args);
           default:
