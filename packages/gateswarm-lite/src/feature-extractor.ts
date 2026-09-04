@@ -296,8 +296,14 @@ const OPENENDED_VERB_RE =
   /\b(?:design|architect|optimi[sz]e|evaluate|trade[- ]?off|strateg|justify|critique|reconcile|prioriti[sz]e)\w*/g;
 /** Bullet list items — structural specification. */
 const BULLET_LINE_RE = /^[ \t]*[-*\u2022][ \t]+\S/gm;
-/** "Data sources:", "Warehouse:" — labelled input fields, captured for filtering. */
-const LABELLED_FIELD_RE = /^([A-Z][A-Za-z /]{2,30}):[ \t]/gm;
+/**
+ * "Data sources:", "Step 2:", "P95 latency:", "Node.js version:" — labelled
+ * input fields, captured for filtering. Digits, dots and hyphens are allowed
+ * inside the label: excluding them silently missed numbered steps and any
+ * field naming a version or percentile, which are among the most common field
+ * labels in real engineering prompts.
+ */
+const LABELLED_FIELD_RE = /^([A-Z][A-Za-z0-9 ./-]{2,30}):[ \t]/gm;
 /**
  * Discourse markers that open a line with a colon but introduce prose, not a
  * field. Without this filter, "However: … Note: … Therefore:" scored the same
@@ -560,6 +566,18 @@ export function heuristicScoreFromFeatures(features: FeatureVector, wordCount: n
   // Coerced: heuristicScoreFromFeatures is public API and callers may still pass
   // a pre-v0.6.1 vector without these fields. A missing field must read as "no
   // signal", never poison the sum with NaN.
+  // KNOWN DEFECT, tracked rather than patched. At +/-0.15 these caps are the
+  // largest single terms in the model, and both ends misfire: one open-ended
+  // verb saturates the positive side on a short prompt ("Optimize the import
+  // order in this file." scores well above where it belongs), and a long
+  // heavily-bulleted specification takes the full negative penalty on top of an
+  // already-steep evidence discount.
+  //
+  // A floor on that discount plus smaller caps fixes both in isolation, but
+  // under the SHIPPED boundaries it collapses real traffic back into the top two
+  // tiers — the saturation failure this correction exists to prevent. The two
+  // effects are coupled and retuning them needs the boundaries in the loop, not
+  // a cut-point refit per candidate. Left as-is deliberately; see the spec.
   const shape =
     Math.min(num(t.openended_density) * 0.04, 0.15) -
     Math.min(num(t.structure_density) * 0.03, 0.15);

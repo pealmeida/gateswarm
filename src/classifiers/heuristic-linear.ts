@@ -189,8 +189,11 @@ export class HeuristicLinearClassifier implements TierClassifier {
     const start = performance.now();
     const score = rawHeuristicScore(prompt);
     const tier = scoreToTier(score, this.boundaries);
-    // Calibrated P(correct | predicted tier) — the same source ensemble-voter
-    // uses, so eval confidence and runtime confidence cannot drift apart.
+    // Calibrated P(correct | predicted tier). Deliberately NOT the shipped
+    // table when fit() has run: eval must use per-fold, out-of-fold estimates
+    // or its ECE leaks, whereas production uses DEFAULT_TIER_RELIABILITY. They
+    // are the same *method* on different data, not one shared value, and an
+    // eval must never write global calibration state as a side effect.
     // Boundary margin was measured to carry no signal about correctness.
     const confidence = this.reliability[tier] ?? confidenceForTier(tier);
     return { tier, score, confidence, latencyMs: performance.now() - start };

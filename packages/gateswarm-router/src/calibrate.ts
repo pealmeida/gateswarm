@@ -56,7 +56,11 @@ export interface RecalibrationOptions {
   minSamplesForDemotion?: number;
   /** Mean quality at a tier below which the model is demoted out of it. Default 0.5. */
   demotionQualityFloor?: number;
-  /** Keep the recalibrated values inside the input matrix's quality span. Default true. */
+  /**
+   * Hold models with no observations at their prior. Default true. Disable only
+   * to inspect raw shrunk values; leaving it on is what keeps one model's grades
+   * from moving another.
+   */
   preserveSpan?: boolean;
 }
 
@@ -167,21 +171,28 @@ export function recalibrateMatrix(
     };
   });
 
-  // Keep values inside the input matrix's quality span, so `minQuality`
-  // thresholds chosen against the original matrix still mean what they meant.
+  // Two rules, and they used to be conflated into one clamp that broke both.
   //
-  // This CLAMPS rather than linearly remapping the whole set. An earlier
-  // remapping version rescaled every model against the new min/max, which meant
-  // grading one model down silently promoted six ungraded ones — enough, in
-  // testing, to push a model past a `minQuality` gate on no evidence of its own.
-  // Evidence about one model must never move another. A model with no
-  // observations therefore keeps its prior exactly: its shrunk value equals its
-  // prior, so the clamp is a no-op for it.
+  //   1. A model with NO evidence of its own never moves. Its shrunk value is
+  //      its prior, so this falls out for free — but it is the invariant, and
+  //      the reason an earlier min/max renormalisation was removed: grading one
+  //      model down was silently promoting six ungraded ones past `minQuality`.
+  //   2. A model WITH evidence moves to what its evidence says, without being
+  //      clamped into the prior span. Clamping into `[priorLo, priorHi]` looked
+  //      conservative and was in fact fatal: the model sitting AT `priorLo`
+  //      could never be demoted at all, so fifty human-weighted quality-0 votes
+  //      on the cheapest model changed its quality by exactly nothing. The one
+  //      thing this module exists to do did not happen for the one model most
+  //      likely to need it.
+  //
+  // Values therefore stay in (0,1] via `clamp01` and shrinkage alone. They
+  // remain relative to this matrix and this workload; a heavily-graded model may
+  // now legitimately move outside the original span in either direction, and a
+  // `minQuality` threshold chosen against the priors should be revisited once
+  // real grades exist rather than being silently enforced against stale numbers.
   if (preserveSpan) {
-    const priorLo = Math.min(...matrix.map((m) => m.quality));
-    const priorHi = Math.max(...matrix.map((m) => m.quality));
     for (const c of calibrations) {
-      c.calibratedQuality = clamp01(Math.min(priorHi, Math.max(priorLo, c.shrunkQuality)));
+      c.calibratedQuality = c.samples > 0 ? clamp01(c.shrunkQuality) : c.priorQuality;
     }
   }
 

@@ -16,7 +16,7 @@ claude plugin install gateswarm@gateswarm
 | `/gs-route` | Split a task and show the routing plan with costs, before executing. |
 | `/gs-review` | Grade delivered results; record quality votes. |
 | `/gs-recalibrate` | Rebuild the matrix from those votes and show what changed. |
-| `gateswarm` MCP server | `route_prompt`, `route_session`, `submit_feedback`, `submit_outcome`, `recalibrate_matrix`, `telemetry_summary`. |
+| `gateswarm` MCP server | `route_prompt`, `route_session`, `submit_feedback`, `submit_outcome`, `recalibrate_matrix`, `cost_report`, `telemetry_summary`. |
 
 ## The two votes, which are not the same
 

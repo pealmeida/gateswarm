@@ -1760,3 +1760,94 @@ against 48.9%. That is §12's feature work, and this dataset is now the instrume
 that will show whether it worked. And the 90 labels added across v2 and v3 remain
 one author's judgement, unreviewed: they should be the first batch through
 `/gs-audit` before any of these numbers is quoted outside this repository.
+
+
+---
+
+## 18. Pre-merge review — PR #6, 2026-09-04
+
+A full-branch review before merge. Nine findings; eight fixed, one deliberately
+left as a documented defect.
+
+### 18.1 Fixed
+
+**#1 (critical) — the recalibration feature was a no-op for the model most
+likely to need it.** §13.2's fix for zero-evidence drift replaced a min/max
+renormalisation with a clamp into `[priorLo, priorHi]`. That protected ungraded
+models and broke demotion: the model sitting *at* `priorLo` could never move
+down. Verified — **fifty human-weighted quality-0 votes on `gemini-flash-lite`
+changed its quality from 0.550 to 0.550.** The one thing the module exists to do
+did not happen.
+
+The two goals were conflated. Now stated separately: a model with no evidence
+keeps its prior exactly; a model with evidence moves to what its evidence says,
+bounded only by `clamp01`. The worst model now demotes 0.550 → 0.041 and `light`
+reroutes away from it. Two regression tests pin both halves, and the earlier test
+asserting the span invariant was replaced — it had come to encode the bug.
+
+**#4/#5 — calibrated confidence broke a downstream threshold.** `alwaysAskBelow
+Confidence` defaulted to 0.5, which was the *floor* of the old `[0.5, 0.95]`
+margin scale. Against genuinely calibrated values (heavy 0.256, intensive 0.335)
+it fired on four tiers of six, swamping the aleatory sampling and fatigue decay
+it sits beside, and `lowConfidence` stopped carrying information. Re-scaled to
+0.30 in both places, below the calibrated spread, so it again marks only the
+worst cases. The fix is the threshold, not the confidence — re-inflating the
+number would reinstate the dishonesty §9 removed.
+
+**#6 — `LABELLED_FIELD_RE` excluded digits and dots**, so `Step 1:`,
+`P95 latency:` and `Node.js version:` scored zero structure. Widened. Cost index
+improved 2148 → 1962 as a side effect.
+
+**#7 — two of the plugin's three settings were inert.** `.mcp.json` passed
+`GATESWARM_PROJECT`, which the server never read, and `matrix_path` was wired
+nowhere. Both are now honoured as defaults.
+
+**#8 — a comment claimed eval and production share one calibration source.**
+They must not: eval fits per-fold or its ECE leaks, production uses the shipped
+table, and an eval must never write global calibration state as a side effect.
+The code was right; the comment was corrected.
+
+**#9 — `cost_report` was missing from the plugin manifest test and README.**
+
+### 18.2 Left as a known defect, deliberately
+
+**#2/#3 — the shape term's ±0.15 caps misfire at both ends.** Confirmed:
+`"Optimize the import order in this file."` scores `intensive`, and a 448-word
+distributed-systems spec with 40 bulleted requirements scores `light`. The second
+is the worse one — under-routing hard work sends it to a model that cannot do it.
+
+An attempted fix (floor the evidence discount at 0.55, shrink the caps to
+0.04/0.10) resolved all three regression cases in isolation. **It was reverted**,
+because under the *shipped* boundaries it collapsed real traffic back into the
+top two tiers — 417 `intensive` + 234 `extreme` of 678, the saturation failure
+§8 exists to prevent.
+
+The reason the grid search did not catch that is worth recording, because it is
+the kind of error this document keeps finding elsewhere: **the search refit cut
+points per candidate config, while production keeps `DEFAULT_BOUNDARIES` fixed.**
+The entropy it reported was therefore not the entropy production would see. A
+retune has to hold the boundaries fixed, or move them in the same experiment —
+the two are coupled and cannot be tuned apart.
+
+Left in place with the defect documented at the call site rather than patched
+under time pressure. Shipping a half-tuned scorer is worse than shipping a known
+one.
+
+### 18.3 State at review end
+
+| | |
+|---|---|
+| suite | **496 pass** (was 495; +2 regression, −1 that encoded a bug) |
+| typecheck / build / `npm pack` | clean |
+| golden CV exact / adjacent | 41.7% / 75.0% — unchanged |
+| ECE | 0.031 — unchanged |
+| real-traffic tiers | 5 of 6, top share 30.5% |
+| **cost index** | **1962** (was 2148; the regex fix) |
+| leaderboard verdict | unchanged — `ordinal-logistic` clears the baseline, the heuristic does not |
+
+### 18.4 On the reviewer
+
+This was Claude reviewing its own branch, and it found a critical bug in a fix
+Claude had written one turn earlier. That is an argument for the review, not
+against it — but it is not an argument that self-review suffices. The
+second-model pass requested in §13.1 remains undone and remains worth doing.

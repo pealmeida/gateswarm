@@ -101,7 +101,7 @@ describe('skills and commands', () => {
     const body = readFileSync(join(PLUGIN, 'skills', 'model-delegation', 'SKILL.md'), 'utf-8');
     const exposed = new Set([
       'route_prompt', 'route_session', 'submit_feedback', 'submit_outcome',
-      'recalibrate_matrix', 'telemetry_summary',
+      'recalibrate_matrix', 'cost_report', 'telemetry_summary',
     ]);
     for (const ref of [...body.matchAll(/`([a-z_]+)`/g)].map((m) => m[1])) {
       if (ref.includes('_') && !exposed.has(ref)) {

@@ -23,6 +23,21 @@ import {
 } from './store.js';
 
 export const PROTOCOL_VERSION = '2024-11-05';
+
+/**
+ * Defaults from the environment, so the plugin's declared userConfig actually
+ * does something. Both were previously passed by plugins/gateswarm/.mcp.json
+ * and read by nobody: `project` came only from tool arguments and `matrix_path`
+ * was wired nowhere, so two of the three plugin settings were inert.
+ */
+function defaultProject(): string {
+  const p = process.env.GATESWARM_PROJECT;
+  return p && p.trim() ? p : 'default';
+}
+function defaultMatrixPath(): string | undefined {
+  const p = process.env.GATESWARM_MATRIX_PATH;
+  return p && p.trim() ? p : undefined;
+}
 const SUPPORTED = ['2025-06-18', '2025-03-26', '2024-11-05'];
 const TIERS = ['trivial', 'light', 'moderate', 'heavy', 'intensive', 'extreme'] as const;
 
@@ -211,15 +226,16 @@ function handleRoutePrompt(id: unknown, args: Record<string, unknown>, state: Se
   if (!prompt.trim()) {
     return textResult(id, JSON.stringify({ error: 'prompt is empty' }), true);
   }
-  const project = String(args.project ?? 'default');
+  const project = String(args.project ?? defaultProject());
   const strategy = (args.strategy ?? 'cheapest-capable') as RoutingStrategy;
   if (strategy !== 'cheapest-capable' && strategy !== 'best-value') {
     return textResult(id, JSON.stringify({ error: `invalid strategy "${strategy}"` }), true);
   }
   let matrix = DEFAULT_MATRIX;
-  if (typeof args.matrixPath === 'string') {
+  const matrixPath = typeof args.matrixPath === 'string' ? args.matrixPath : defaultMatrixPath();
+  if (matrixPath) {
     try {
-      matrix = loadMatrix(args.matrixPath);
+      matrix = loadMatrix(matrixPath);
     } catch (err) {
       return textResult(id, JSON.stringify({ error: err instanceof Error ? err.message : String(err) }), true);
     }
@@ -264,15 +280,16 @@ function handleRouteSession(id: unknown, args: Record<string, unknown>, state: S
   if (turns.every((t) => !t.trim())) {
     return textResult(id, JSON.stringify({ error: 'all turns are empty' }), true);
   }
-  const project = String(args.project ?? 'default');
+  const project = String(args.project ?? defaultProject());
   const strategy = (args.strategy ?? 'cheapest-capable') as RoutingStrategy;
   if (strategy !== 'cheapest-capable' && strategy !== 'best-value') {
     return textResult(id, JSON.stringify({ error: `invalid strategy "${strategy}"` }), true);
   }
   let matrix = DEFAULT_MATRIX;
-  if (typeof args.matrixPath === 'string') {
+  const matrixPath = typeof args.matrixPath === 'string' ? args.matrixPath : defaultMatrixPath();
+  if (matrixPath) {
     try {
-      matrix = loadMatrix(args.matrixPath);
+      matrix = loadMatrix(matrixPath);
     } catch (err) {
       return textResult(id, JSON.stringify({ error: err instanceof Error ? err.message : String(err) }), true);
     }
@@ -325,7 +342,7 @@ function handleFeedback(id: unknown, args: Record<string, unknown>, state: Serve
   if (!verdict) {
     return textResult(id, JSON.stringify({ error: 'verdict must be "correct" or "wrong"' }), true);
   }
-  const project = String(args.project ?? 'default');
+  const project = String(args.project ?? defaultProject());
   const original = state.decisions.get(eventId) ?? findDecision(project, eventId);
   if (!original) {
     return textResult(id, JSON.stringify({ error: `unknown eventId "${eventId}" for project "${project}"` }), true);
@@ -382,7 +399,7 @@ function handleSubmitOutcome(id: unknown, args: Record<string, unknown>, state: 
   if (!(verdict in VERDICT_QUALITY)) {
     return textResult(id, JSON.stringify({ error: 'verdict must be accurate|partial|inaccurate|failed' }), true);
   }
-  const project = String(args.project ?? 'default');
+  const project = String(args.project ?? defaultProject());
 
   let modelId = typeof args.modelId === 'string' ? args.modelId : '';
   let provider = typeof args.provider === 'string' ? args.provider : '';
@@ -434,11 +451,12 @@ function handleSubmitOutcome(id: unknown, args: Record<string, unknown>, state: 
 }
 
 function handleRecalibrate(id: unknown, args: Record<string, unknown>): string {
-  const project = String(args.project ?? 'default');
+  const project = String(args.project ?? defaultProject());
   let matrix = DEFAULT_MATRIX;
-  if (typeof args.matrixPath === 'string') {
+  const matrixPath = typeof args.matrixPath === 'string' ? args.matrixPath : defaultMatrixPath();
+  if (matrixPath) {
     try {
-      matrix = loadMatrix(args.matrixPath);
+      matrix = loadMatrix(matrixPath);
     } catch (err) {
       return textResult(id, JSON.stringify({ error: err instanceof Error ? err.message : String(err) }), true);
     }
@@ -469,11 +487,12 @@ function handleRecalibrate(id: unknown, args: Record<string, unknown>): string {
 }
 
 function handleCostReport(id: unknown, args: Record<string, unknown>): string {
-  const project = String(args.project ?? 'default');
+  const project = String(args.project ?? defaultProject());
   let matrix = DEFAULT_MATRIX;
-  if (typeof args.matrixPath === 'string') {
+  const matrixPath = typeof args.matrixPath === 'string' ? args.matrixPath : defaultMatrixPath();
+  if (matrixPath) {
     try {
-      matrix = loadMatrix(args.matrixPath);
+      matrix = loadMatrix(matrixPath);
     } catch (err) {
       return textResult(id, JSON.stringify({ error: err instanceof Error ? err.message : String(err) }), true);
     }
@@ -486,7 +505,7 @@ function handleCostReport(id: unknown, args: Record<string, unknown>): string {
 }
 
 function handleSummary(id: unknown, args: Record<string, unknown>): string {
-  const project = String(args.project ?? 'default');
+  const project = String(args.project ?? defaultProject());
   const records = readRecords(project);
   const decisions = records.filter((r) => r.type === 'decision') as DecisionRecord[];
   const feedback = records.filter((r) => r.type === 'feedback');

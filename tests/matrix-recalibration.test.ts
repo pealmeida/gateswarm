@@ -71,17 +71,36 @@ describe('outcome-driven matrix recalibration', () => {
     expect(h).toBeLessThan(m);
   });
 
-  it('keeps calibrated qualities within the input matrix span', () => {
+  it('lets a graded model leave the prior span in either direction', () => {
+    // This deliberately replaces an earlier assertion that every calibrated
+    // value stayed inside [priorLo, priorHi]. That invariant sounded
+    // conservative and was fatal: the model sitting AT priorLo could never be
+    // demoted, so the module's whole purpose failed for the model most likely
+    // to need it. Evidence has to be able to move a model past its prior.
     const lo = Math.min(...DEFAULT_MATRIX.map((m) => m.quality));
-    const hi = Math.max(...DEFAULT_MATRIX.map((m) => m.quality));
     const r = recalibrateMatrix(DEFAULT_MATRIX, [
-      ...rep(20, { modelId: 'gemini-flash-lite', tier: 'light', quality: 1 }),
-      ...rep(20, { modelId: 'claude-opus', tier: 'extreme', quality: 0 }),
+      ...rep(20, { modelId: 'gemini-flash-lite', tier: 'light', quality: 0 }),
     ]);
+    const lite = r.matrix.find((m) => m.id === 'gemini-flash-lite')!;
+    expect(lite.quality).toBeLessThan(lo);
+    // ...while still a probability, never 0 or 1.
     for (const m of r.matrix) {
-      expect(m.quality).toBeGreaterThanOrEqual(lo - 1e-9);
-      expect(m.quality).toBeLessThanOrEqual(hi + 1e-9);
+      expect(m.quality).toBeGreaterThan(0);
+      expect(m.quality).toBeLessThanOrEqual(1);
     }
+  });
+
+  it('demotes the lowest-prior model when its own grades say so', () => {
+    // Regression for the same bug, stated as the user-visible symptom: fifty
+    // human-weighted quality-0 votes on the cheapest model used to change its
+    // quality by exactly nothing.
+    const worst = [...DEFAULT_MATRIX].sort((a, b) => a.quality - b.quality)[0];
+    const r = recalibrateMatrix(
+      DEFAULT_MATRIX,
+      rep(50, { modelId: worst.id, tier: 'light', quality: 0, weight: 2 }),
+    );
+    const c = r.calibrations.find((x) => x.modelId === worst.id)!;
+    expect(c.calibratedQuality).toBeLessThan(worst.quality * 0.5);
   });
 
   it('never moves a model that has no evidence of its own', () => {
