@@ -37,3 +37,5 @@ export function routeSession(
   const { model, alternatives, reason } = selectModel(tier, matrix, rest);
   return { model, alternatives, complexity: session, strategy, reason };
 }
+
+export * from './calibrate.js';

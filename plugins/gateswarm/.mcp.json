@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "gateswarm": {
+      "command": "npx",
+      "args": ["-y", "gateswarm-mcp"],
+      "env": {
+        "GATESWARM_TELEMETRY_DIR": "${user_config.telemetry_dir}",
+        "GATESWARM_PROJECT": "${user_config.project}"
+      }
+    }
+  }
+}

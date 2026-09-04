@@ -20,6 +20,7 @@
 import type { EffortLevel } from './types.js';
 import { getRecentEntries } from './feedback-store.js';
 import { scoreToEffort as _scoreToEffort, getTierBoundaries, tierMidpoints } from './intent-engine.js';
+import { confidenceForTier } from 'gateswarm-lite';
 import {
   expectedScoreFromProbs,
   getDefaultOrdinalClassifier,
@@ -265,20 +266,16 @@ export interface EnsembleInput {
 }
 
 /**
- * Real confidence from distance to the nearest tier boundary.
- * A score sitting deep inside a tier band is confident; one hugging a
- * boundary is a near coin-flip. ~0.06 margin → full confidence; at the
- * boundary → 0.5. Replaces the old constant 0.7 (which forced 100% escalation).
+ * Calibrated confidence: P(correct | predicted tier), fitted out-of-fold.
  *
- * Boundaries are read LIVE from intent-engine so retraining
- * (setTierBoundaries) keeps confidence in sync with the cut points actually
- * used for routing — a stale hardcoded copy here measured confidence against
- * dead boundaries after the first recalibration.
+ * This replaced a boundary-margin formula (~0.06 margin → 0.95, at the boundary
+ * → 0.5). Measured on the golden set that mapping was inverted — accuracy was
+ * HIGHER next to a boundary than far from it — so it asserted 0.95 where the
+ * scorer was right 42% of the time (ECE 0.205 → 0.093). The table lives in
+ * gateswarm-lite and is hot-reloadable, exactly like the tier boundaries.
  */
-function confidenceFromMargin(score: number): number {
-  let d = Math.min(score, 1 - score);
-  for (const b of getTierBoundaries()) d = Math.min(d, Math.abs(score - b));
-  return Math.max(0.5, Math.min(0.95, 0.5 + (d / 0.06) * 0.45));
+function confidenceFromScore(score: number): number {
+  return confidenceForTier(scoreToEffort(score));
 }
 
 export function ensembleVote(input: EnsembleInput): EnsembleVote {
@@ -324,8 +321,8 @@ export function ensembleVote(input: EnsembleInput): EnsembleVote {
     rawScore = Math.max(0, Math.min(1, rawScore));
     finalScore = Math.max(0, Math.min(1, rawScore + bias));
     confidence = abstained && ordinal
-      ? Math.min(confidenceFromMargin(heuristic), Math.max(0.5, ordinal.confidence * 0.8))
-      : confidenceFromMargin(finalScore);
+      ? Math.min(confidenceFromScore(heuristic), Math.max(0.5, ordinal.confidence * 0.8))
+      : confidenceFromScore(finalScore);
     if (ragPresent) {
       // Lower confidence when heuristic and RAG disagree.
       const agreement = 1 - Math.min(Math.abs(heuristic - (rag as number)), 1);

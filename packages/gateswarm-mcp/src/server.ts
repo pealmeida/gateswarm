@@ -7,8 +7,10 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { getTierBoundaries } from 'gateswarm-lite';
 import type { EffortLevel } from 'gateswarm-lite';
-import { DEFAULT_MATRIX, blendedCost, route, routeSession, selectModel } from 'gateswarm-router';
-import type { ModelSpec, RouteOptions, RoutingStrategy } from 'gateswarm-router';
+import {
+  DEFAULT_MATRIX, blendedCost, formatRecalibration, recalibrateMatrix, route, routeSession, selectModel,
+} from 'gateswarm-router';
+import type { ModelSpec, OutcomeRecord as RouterOutcome, RouteOptions, RoutingStrategy } from 'gateswarm-router';
 import {
   appendRecord,
   findDecision,
@@ -16,6 +18,7 @@ import {
   readRecords,
   snippet,
   type DecisionRecord,
+  type OutcomeRecord,
 } from './store.js';
 
 export const PROTOCOL_VERSION = '2024-11-05';
@@ -126,6 +129,40 @@ function toolSchemas() {
           project: { type: 'string', default: 'default' },
         },
         required: ['eventId', 'verdict'],
+      },
+    },
+    {
+      name: 'submit_outcome',
+      description:
+        'Vote on the QUALITY of a delivered result: did the model that handled this actually produce an accurate, usable answer? Distinct from submit_feedback, which judges whether the complexity TIER was right. These votes accumulate per model and drive recalibrate_matrix, so the next routing decision reflects what each model actually delivered.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          eventId: { type: 'string', description: 'eventId from route_prompt/route_session. Supplies model, provider and tier automatically.' },
+          modelId: { type: 'string', description: 'Required only when no eventId is given.' },
+          provider: { type: 'string' },
+          tier: { type: 'string', enum: tierEnum, description: 'Required only when no eventId is given.' },
+          verdict: { type: 'string', enum: ['accurate', 'partial', 'inaccurate', 'failed'], description: 'accurate=1.0, partial=0.5, inaccurate=0.0; failed=transport/provider error, excluded from quality.' },
+          quality: { type: 'number', minimum: 0, maximum: 1, description: 'Optional explicit score, overrides the verdict mapping.' },
+          judge: { type: 'string', enum: ['human', 'model'], default: 'model', description: 'Who judged. Human verdicts are weighted higher during recalibration.' },
+          notes: { type: 'string' },
+          project: { type: 'string', default: 'default' },
+        },
+        required: ['verdict'],
+      },
+    },
+    {
+      name: 'recalibrate_matrix',
+      description:
+        'Rebuild the routing matrix from recorded quality votes: each model\'s quality becomes what it actually delivered on this project, and a model that repeatedly underperforms at its ceiling tier is demoted. Returns the recalibrated matrix to pass back as matrixPath/matrix on later routing calls. Advisory — nothing is executed or persisted.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          project: { type: 'string', default: 'default' },
+          matrixPath: { type: 'string', description: 'Optional base matrix; defaults to the built-in DEFAULT_MATRIX.' },
+          pseudoCounts: { type: 'number', description: 'Observations needed before a model outweighs its prior. Default 8.' },
+          minSamplesForDemotion: { type: 'number', description: 'Graded outcomes at a ceiling tier before demotion is allowed. Default 5.' },
+        },
       },
     },
     {
@@ -321,6 +358,97 @@ function selectReroute(tier: EffortLevel, matrix: ModelSpec[]): ModelSpec {
   return selectModel(tier, matrix).model;
 }
 
+const VERDICT_QUALITY: Record<string, number> = { accurate: 1, partial: 0.5, inaccurate: 0, failed: 0 };
+
+function handleSubmitOutcome(id: unknown, args: Record<string, unknown>, state: ServerState): string {
+  const verdict = String(args.verdict ?? '');
+  if (!(verdict in VERDICT_QUALITY)) {
+    return textResult(id, JSON.stringify({ error: 'verdict must be accurate|partial|inaccurate|failed' }), true);
+  }
+  const project = String(args.project ?? 'default');
+
+  let modelId = typeof args.modelId === 'string' ? args.modelId : '';
+  let provider = typeof args.provider === 'string' ? args.provider : '';
+  let tier = args.tier as EffortLevel | undefined;
+  let decisionEventId: string | undefined;
+  let promptHash: string | undefined;
+
+  const eventId = typeof args.eventId === 'string' ? args.eventId : '';
+  if (eventId) {
+    const original = state.decisions.get(eventId) ?? findDecision(project, eventId);
+    if (!original) {
+      return textResult(id, JSON.stringify({ error: `unknown eventId "${eventId}" for project "${project}"` }), true);
+    }
+    modelId = modelId || original.modelId;
+    provider = provider || original.provider;
+    tier = tier ?? original.tier;
+    decisionEventId = eventId;
+    promptHash = original.promptHash;
+  }
+  if (!modelId || !tier || !(TIERS as readonly string[]).includes(tier)) {
+    return textResult(id, JSON.stringify({ error: 'provide an eventId, or modelId plus a valid tier' }), true);
+  }
+
+  const quality = typeof args.quality === 'number' && args.quality >= 0 && args.quality <= 1
+    ? args.quality
+    : VERDICT_QUALITY[verdict];
+  const record: OutcomeRecord = {
+    type: 'outcome',
+    ts: Date.now(),
+    project,
+    decisionEventId,
+    promptHash,
+    modelId,
+    provider: provider || 'unknown',
+    tier,
+    quality,
+    ok: verdict !== 'failed',
+    judge: args.judge === 'human' ? 'human' : 'model',
+    notes: typeof args.notes === 'string' ? args.notes : undefined,
+  };
+  appendRecord(project, record);
+
+  return textResult(id, [
+    `Quality vote recorded: ${verdict} (${quality.toFixed(2)}) for ${modelId} @ tier ${tier}.`,
+    'Run recalibrate_matrix once votes accumulate to fold this into the next routing decision.',
+  ].join('\n'));
+}
+
+function handleRecalibrate(id: unknown, args: Record<string, unknown>): string {
+  const project = String(args.project ?? 'default');
+  let matrix = DEFAULT_MATRIX;
+  if (typeof args.matrixPath === 'string') {
+    try {
+      matrix = loadMatrix(args.matrixPath);
+    } catch (err) {
+      return textResult(id, JSON.stringify({ error: err instanceof Error ? err.message : String(err) }), true);
+    }
+  }
+  const outcomes = readRecords(project).filter((r): r is OutcomeRecord => r.type === 'outcome');
+  if (!outcomes.length) {
+    return textResult(id, JSON.stringify({
+      error: `no quality votes recorded for project "${project}" — call submit_outcome after delivering results`,
+    }), true);
+  }
+  // Human verdicts count double; they are the scarcer and more reliable signal.
+  const graded: RouterOutcome[] = outcomes.map((o) => ({
+    modelId: o.modelId,
+    tier: o.tier,
+    quality: o.quality,
+    ok: o.ok,
+    weight: o.judge === 'human' ? 2 : 1,
+  }));
+  const result = recalibrateMatrix(matrix, graded, {
+    pseudoCounts: typeof args.pseudoCounts === 'number' ? args.pseudoCounts : undefined,
+    minSamplesForDemotion: typeof args.minSamplesForDemotion === 'number' ? args.minSamplesForDemotion : undefined,
+  });
+  return decisionResult(
+    id,
+    `${formatRecalibration(result)}\n\nBased on ${outcomes.length} quality vote(s) across ${new Set(outcomes.map((o) => o.modelId)).size} model(s).`,
+    { matrix: result.matrix, calibrations: result.calibrations, unknownModelIds: result.unknownModelIds },
+  );
+}
+
 function handleSummary(id: unknown, args: Record<string, unknown>): string {
   const project = String(args.project ?? 'default');
   const records = readRecords(project);
@@ -332,9 +460,20 @@ function handleSummary(id: unknown, args: Record<string, unknown>): string {
   for (const f of feedback) {
     if (f.type === 'feedback' && f.verdict in verdicts) verdicts[f.verdict as keyof typeof verdicts]++;
   }
+  const outcomes = records.filter((r): r is OutcomeRecord => r.type === 'outcome');
+  const quality: Record<string, { n: number; mean: number; failures: number }> = {};
+  for (const o of outcomes) {
+    const q = (quality[o.modelId] ??= { n: 0, mean: 0, failures: 0 });
+    if (o.ok) { q.mean = (q.mean * q.n + o.quality) / (q.n + 1); q.n++; } else { q.failures++; }
+  }
+  for (const q of Object.values(quality)) q.mean = Number(q.mean.toFixed(3));
   return textResult(
     id,
-    JSON.stringify({ project, decisions: decisions.length, byTier, feedback: feedback.length, verdicts }, null, 2),
+    JSON.stringify(
+      { project, decisions: decisions.length, byTier, feedback: feedback.length, verdicts,
+        outcomes: outcomes.length, qualityByModel: quality },
+      null, 2,
+    ),
   );
 }
 
@@ -375,6 +514,10 @@ export function handleMessage(state: ServerState, line: string): string | null {
             return handleRouteSession(id, args, state);
           case 'submit_feedback':
             return handleFeedback(id, args, state);
+          case 'submit_outcome':
+            return handleSubmitOutcome(id, args, state);
+          case 'recalibrate_matrix':
+            return handleRecalibrate(id, args);
           case 'telemetry_summary':
             return handleSummary(id, args);
           default:

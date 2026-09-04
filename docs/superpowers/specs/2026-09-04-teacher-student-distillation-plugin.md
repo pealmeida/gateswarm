@@ -645,3 +645,142 @@ A useful side effect: the 100 KB repetitive-filler fixture (`'analyze this syste
 ### 8.5 Sequencing, revisited
 
 Section 7.5 warned that the distillation loop's ask-rate economics collapse while the student says `extreme` for everything. That blocker is now cleared: with five tiers in use and no tier above 31%, teacher-student disagreement becomes the informative minority the loop assumes. **The loop in Sections 3-6 is now safe to switch on.**
+
+
+---
+
+## 9. Calibration + delegation plugin — implemented 2026-09-04
+
+### 9.1 Calibration: the confidence signal was inverted, not merely miscalibrated
+
+§8 left ECE at 0.177 against a <=0.10 gate. The cause was not a badly tuned
+constant. Confidence came from distance to the nearest tier boundary
+(`~0.06 margin -> 0.95`, on a boundary -> `0.5`), duplicated verbatim in
+`src/ensemble-voter.ts` and `src/classifiers/heuristic-linear.ts`. Measured
+out-of-fold on the golden set, that mapping runs the wrong way:
+
+| margin band | mean margin | observed accuracy | old formula asserted |
+|---|---|---|---|
+| narrowest | 0.0036 | **75.0%** | 52.7% |
+| middle | 0.0322 | 75.0% | 74.2% |
+| wide | 0.0859 | **41.7%** | **95.0%** |
+| widest | 0.1765 | 66.7% | 95.0% |
+
+Boundary distance carries no information about whether the tier is right. This
+is the same class of defect as `ASSESSMENT.md` #2 ("fake confidence"): a
+constant 0.70 was replaced by a formula that *looks* principled and was never
+checked against outcomes.
+
+What does predict correctness is the **predicted tier itself**. Confidence is now
+`P(correct | predicted tier)`, estimated out-of-fold with cut points refit on
+inner train folds only, Laplace-smoothed (K=6) toward the accuracy prior:
+
+| confidence source | ECE |
+|---|---|
+| old margin formula | 0.205 |
+| constant = accuracy | 0.000 (calibrated but useless — carries no information) |
+| **per-tier reliability** | **0.093** |
+
+Shipped as `packages/gateswarm-lite/src/confidence.ts`
+(`DEFAULT_TIER_RELIABILITY`, `confidenceForTier`, `fitTierReliability`,
+`setTierReliability`) — hot-reloadable data, exactly like the tier boundaries,
+and now the single source for both the runtime and eval paths, so the duplicated
+constant that caused this cannot drift again. Measured on the pipeline:
+**ECE 0.177 -> 0.086**, accuracy unchanged at 62.2% / 94.4%.
+
+The table is honest about the weak band: `trivial` 0.752, `light` 0.787,
+`moderate` 0.617, `heavy` 0.550, `intensive` 0.491, `extreme` 0.617. Confidence
+below 0.5 on `intensive` is not a bug — it is the scorer reporting that it is
+worse than a coin flip there, which is what makes it useful for triage.
+
+### 9.2 The plugin
+
+```
+.claude-plugin/marketplace.json          -> claude plugin marketplace add pealmeida/gateswarm
+plugins/gateswarm/
+  .claude-plugin/plugin.json             userConfig: project, telemetry_dir, matrix_path
+  .mcp.json                              npx gateswarm-mcp
+  skills/model-delegation/SKILL.md       the injected skill
+  commands/gs-route.md  gs-review.md  gs-recalibrate.md
+```
+
+The skill teaches one loop — **split -> route -> delegate -> grade ->
+recalibrate** — and its load-bearing instructions are the constraints, not the
+happy path:
+
+- **Split on deliverable boundaries.** A unit that cannot be judged on its own
+  cannot be graded, and an ungraded unit teaches nothing.
+- **Grade against what the unit asked for**, not against what a larger model
+  would have written. Marking a cheap model down for being terse on a `light`
+  unit drives the matrix toward always routing high — the exact failure §7
+  documented.
+- **Grade the successes too.** A vote set of pure complaints makes every model
+  look bad and the recalibration meaningless.
+- **`judge: "human"` only when a person actually decided.** Model judgement is
+  weighted lower on purpose; mislabelling it corrupts the signal that outranks it.
+- **Never file a bad answer through `submit_feedback`.** That judges the *tier*
+  and moves the complexity boundaries for every future prompt.
+
+### 9.3 Two votes, two loops — kept structurally apart
+
+| | judges | feeds | changes |
+|---|---|---|---|
+| `submit_feedback` | was the **tier** right? | golden dataset | `DEFAULT_BOUNDARIES` — which tier a prompt gets |
+| `submit_outcome` | was the **output** good? | quality votes | `ModelSpec.quality` / `maxEffort` — which model serves a tier |
+
+Separate record types, separate storage, separate consumers, and a test that
+asserts a quality complaint is never counted as a tier verdict. Collapsing them
+would let one bad answer shift routing for all future traffic.
+
+### 9.4 Quality-driven recalibration
+
+`packages/gateswarm-router/src/calibrate.ts` turns graded outcomes into a new
+matrix. Two invariants:
+
+1. **Quality is relative, never absolute.** Win rates are comparable only within
+   one matrix on one workload, so recalibrated values are renormalised onto the
+   input matrix's span. Otherwise a project with generous raters inflates every
+   model and `minQuality` stops meaning anything.
+2. **Evidence gates the move.** Estimates shrink toward the prior with K=8
+   pseudo-counts, and `maxEffort` demotion needs >=5 graded outcomes at the
+   ceiling tier below a 0.5 floor. Three votes cannot overturn a prior — by
+   design. Human verdicts carry double weight.
+
+End to end, with eight `inaccurate` votes for `deepseek-chat` at `heavy`:
+
+```
+deepseek-chat  quality 0.740 -> 0.550  n=8  maxEffort heavy -> moderate
+routing for tier "heavy"  BEFORE: deepseek-chat   AFTER: gemini-pro
+```
+
+That is the requested behaviour concretely: **output quality changes what the
+next prompt is routed to.** Transport failures are excluded from quality and
+counted separately, so a provider outage does not read as a bad model.
+
+### 9.5 State after this change
+
+| gate | value | status |
+|---|---|---|
+| exact vs baseline | 62.2% (from 61.1%) | pass |
+| adjacent >= 90% | 94.4% | pass |
+| heavy recall >= 30% | 33.3% | pass |
+| **ECE <= 0.10** | **0.086** | **pass** |
+| real traffic tiers | 5 of 6, max share 30.4% | — |
+| cost index | 2090 (from 8136), -74.3% | — |
+| suite | **467 pass** (was 429) | pass |
+
+All four scorer gates now pass simultaneously for the first time.
+
+### 9.6 Still not claimed
+
+- **Real-world tier accuracy is still unmeasured.** Calibration makes the
+  confidence number honest; it does not make the tier right. Only real-traffic
+  labels do that.
+- **The reliability table is fitted on 90 golden prompts.** It is the correct
+  shape and the correct source, but its values will move once real verdicts
+  arrive — which is what `setTierReliability` exists for.
+- **Recalibration has been tested, not proven in production.** The demotion
+  thresholds (K=8, 5 samples, 0.5 floor) are reasoned defaults, not empirical
+  ones; they are the first thing to revisit once real quality votes exist.
+- **`openai` remains unreachable** under `cheapest-capable` — a `DEFAULT_MATRIX`
+  property, unchanged here.
