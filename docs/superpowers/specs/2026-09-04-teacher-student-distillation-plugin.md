@@ -293,3 +293,80 @@ Any phase failing its exit criterion stops the ladder. A failed D3 (κ < 0.6) is
 2. **k=3 same model, or 3 different models?** Cross-model consensus is a stronger bias check (it breaks the single-model self-routing prior) but costs a matrix of providers and complicates `teacherModel` provenance.
 3. **Does the plugin ship the teacher at all by default?** Proposal: no — ship routing + capture enabled, and put labeling behind explicit `/gs-label`. Nobody's traffic should be silently labeled by a model.
 4. **Retire `eval/ssl/*` label propagation once teacher labels exist?** They target the same silver slot with weaker signal; keeping both means two silver sources with different calibration. Decide at D4 on measured contribution.
+
+---
+
+## 5. Operating the loop — making it easy for the user and the teacher
+
+§3 says what the loop is. This section says what it *costs to run*, because a distillation loop nobody runs is worth nothing.
+
+### 5.1 The human vote UX already exists — reuse it, don't rebuild it
+
+`src/training-mode.ts` + `src/vote-persistence.ts` already implement a low-friction gold-label capture path built for the gateway:
+
+- `formatVotePrompt()` appends one line to a response: `🎯 [vote:abc123] Router chose: heavy (62% confidence). Reply: ✅ correct | ❌ trivial|light|…`
+- `detectVoteReply()` / `parseVoteReply()` accept a **bare `✅` or `❌ heavy`** as the next message, bound to the pending vote within a 10-minute window.
+- `shouldAskForVote()` samples: never on `trivial`, always below 0.5 confidence, otherwise `aleatoryRate 0.25` decayed by `e^(−votes/50)` (floor 0.02, cap 0.50), doubled on accuracy-gap tiers.
+- `persistOrganicGoldLabel()` writes `OrganicLabelRow` with a WAL and replay.
+
+**No new audit UI is needed.** The plugin surfaces this same one-token reply inside the agent. The human contribution to distillation is, and stays, `✅` or `❌ heavy`.
+
+### 5.2 What the teacher changes: which prompts reach the human, not how they answer
+
+Today `shouldAskForVote` asks the human on ~25% of non-trivial prompts and always below 0.5 confidence. Most of those asks are wasted — the student was right and the human confirms what a rubric could have confirmed.
+
+With a teacher in the loop, the gate becomes:
+
+```
+teacher labels EVERY scored prompt (bronze, free-ish, no human)
+      │
+      ├─ teacher == student  ────────────►  no ask. bronze label stored.
+      │
+      ├─ teacher != student  ────────────►  ASK THE HUMAN  (this is the valuable ask)
+      ├─ teacher abstains / k-disagrees ─►  ASK THE HUMAN
+      └─ random control p≈0.03 ──────────►  ASK THE HUMAN (indistinguishable from the above)
+```
+
+Concretely: `aleatoryRate` drops `0.25 → 0.05` and `alwaysAskBelowConfidence` is replaced by the disagreement predicate. Ask *volume* falls by roughly half; ask *value* rises by more, because every remaining ask lands on a case where two independent judges differ. The fatigue decay, never-ask-trivial rule, cap, and WAL all stay exactly as they are.
+
+**The control stratum must be visually identical to a disagreement ask.** If the human can tell which items are controls, the agreement estimate in §3.5 stops being unbiased.
+
+### 5.3 Three levels of effort
+
+| Level | Trigger | Human effort | Model effort | Yields |
+|---|---|---|---|---|
+| **Cold start** — offline batch | `/gs-label --corpus mljar --n 678` once | one command, walk away | ~10 min background | 678 bronze labels, no traffic needed |
+| **Steady state** — passive | plugin installed, nothing typed | occasional `✅` / `❌ heavy` | one cached rubric call per prompt | bronze on real traffic + gold on disagreements |
+| **Harvest** — deliberate | `/gs-refit` when counts suffice | read one table, approve or not | refit + gate + draft PR | boundary and/or ordinal proposal with numbers |
+
+Cold start is what removes the chicken-and-egg problem: the 678 MLJAR prompts are already in the repo, so the first distillation run needs **zero** accumulated traffic and **zero** human labels — the human only enters at the audit, once there is something to audit.
+
+### 5.4 Making it cheap on the teacher side
+
+Four mechanics, all of which matter more than model choice:
+
+1. **Batch 20–25 prompts per teacher call, not one.** Per-call overhead is the rubric + anchors; amortizing it over 25 prompts cuts total tokens by roughly an order of magnitude for the offline pass.
+2. **Keep the rubric + anchors as a fixed prefix and cache it.** It is identical across every call in a batch run — the single largest cost lever available, and it also makes `rubricVersion` a natural cache key.
+3. **Structured output, no free text.** `{promptId, tier, confidence, rationale, evidence[]}` per item. Nothing to parse, nothing to repair.
+4. **Abstention is cheaper than deliberation.** `tier: null` on a hard case costs a few tokens and routes the item to the human, which is where it belonged anyway.
+
+For the in-session (steady-state) path the teacher call is small and can piggyback on context the agent already holds — the user's prompt is already in the window.
+
+### 5.5 What the user actually types, end to end
+
+```sh
+claude plugin marketplace add pealmeida/gateswarm
+claude plugin install gateswarm@gateswarm
+/gs-label --corpus mljar          # once, cold start. walk away.
+                                  # …then just work. answer ✅ / ❌ <tier> when asked.
+/gs-audit                         # optional: pull 30 pending disagreements in one sitting
+/gs-refit                         # when telemetry_summary shows enough gold
+```
+
+Five commands, of which two are install-once and one is optional. Everything else is a single emoji typed occasionally in the course of normal work.
+
+### 5.6 What is *not* easy, honestly
+
+- **The audit still needs a human who knows the tier semantics.** ~30 judgments to a stable κ estimate, and a rubric revision means re-auditing. This is the irreducible cost; §3.7's 2–3 hours is real work, not a formality.
+- **`/gs-refit` output requires judgment.** The gate returns PASS/FAIL, but deciding whether a passing boundary move is *worth* shipping — against snapshot drift and against the organic-traffic requirement — is a review, not a button.
+- **Cold-start labels are out-of-distribution for any specific deployment.** MLJAR prompts bootstrap the ordinal head; they do not license a `DEFAULT_BOUNDARIES` change on their own. The dogfood rule still binds: a boundary PR needs organic traffic behind it.
