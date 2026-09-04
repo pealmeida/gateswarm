@@ -174,28 +174,37 @@ describe('scoring stays linear in prompt length', () => {
   // catastrophically on text containing no "?" — `[^?]+` consumes to the end at
   // every start position, then fails. At the 64 KiB prompt cap that one regex
   // took 3.4 SECONDS, on every score, for any prompt without a question mark.
-  // It was slow enough on CI to starve vitest's worker heartbeat.
+  //
+  // Measured in CPU time, not wall clock. The first version of this guard used
+  // performance.now() and failed on CI at 3243ms while taking 35ms locally: the
+  // runner has two shared cores and vitest runs files in parallel, so wall clock
+  // here measures contention from other workers, not this code. process.cpuUsage
+  // counts only this worker's own CPU and is unaffected by that.
   const noQuestionMark = 'analyze this system '.repeat(5000).slice(0, 65536);
 
-  it('scores a 64 KiB question-free prompt well inside a second', () => {
-    extractFeatures(noQuestionMark); // warm
-    const started = performance.now();
-    extractFeatures(noQuestionMark);
-    expect(performance.now() - started).toBeLessThan(500);
+  /** Milliseconds of CPU actually burned by one extractFeatures call. */
+  const cpuMsFor = (text: string): number => {
+    extractFeatures(text); // warm: let the JIT settle before measuring
+    const before = process.cpuUsage();
+    extractFeatures(text);
+    const after = process.cpuUsage(before);
+    return (after.user + after.system) / 1000;
+  };
+
+  it('spends well under a second of CPU on a 64 KiB question-free prompt', () => {
+    // Post-fix this is ~96ms of CPU here; pre-fix it was ~3400ms. A 1000ms
+    // bound sits an order of magnitude below the regression and well above any
+    // plausible slow runner, so it separates the two without being brittle.
+    expect(cpuMsFor(noQuestionMark)).toBeLessThan(1000);
   });
 
   it('grows roughly linearly, not quadratically, with length', () => {
-    const at = (n: number) => {
-      const text = noQuestionMark.slice(0, n);
-      extractFeatures(text);
-      const started = performance.now();
-      extractFeatures(text);
-      return performance.now() - started;
-    };
-    const small = Math.max(at(8000), 0.5);
-    const large = at(64000);
-    // 8x the input. Linear predicts ~8x; the quadratic version was ~60x.
-    expect(large / small).toBeLessThan(20);
+    const small = Math.max(cpuMsFor(noQuestionMark.slice(0, 8000)), 0.5);
+    const large = cpuMsFor(noQuestionMark.slice(0, 64000));
+    // 8x the input. Linear predicts ~8x, measured ~13x, and the quadratic
+    // version was ~60x. CPU-time ratios are stable across machine speeds
+    // because both measurements scale together.
+    expect(large / small).toBeLessThan(25);
   });
 
   it('counts questions the way the replaced regex did', () => {

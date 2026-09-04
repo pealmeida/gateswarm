@@ -1930,3 +1930,32 @@ It surfaced only because a test suite got slower and a CI runner was less forgiv
 than a laptop. Nothing in the eval battery measures worst-case latency;
 `bench:scorer` measures the envelope on ordinary prompts. That gap is worth
 closing separately.
+
+
+### 19.4 The guard I wrote was itself wrong
+
+The second CI run failed too — on the regression tests added in §19.2:
+
+```
+expected 3243.204813 to be less than 500
+expected 49.46600140116014 to be less than 20
+```
+
+3243 ms on the runner against 35 ms locally. The fix was genuinely in the code
+CI ran (the `src/feature-extractor-v04.ts` shim re-exports from
+`gateswarm-lite`, vitest aliases that to source, and `dist/` is gitignored).
+The tests were wrong: **wall-clock assertions inside a parallel test runner**.
+GitHub's runners have two shared cores and vitest runs files concurrently, so
+`performance.now()` around a CPU-bound call measures contention from other
+workers, not the code under test.
+
+Rewritten to measure `process.cpuUsage()`, which counts only this worker's own
+CPU and is unaffected by what else is running. Ratios are also stable across
+machine speeds, since both measurements scale together. Bounds set to separate
+clearly in both directions: ~96 ms CPU and ~13x growth measured, against
+~3400 ms and ~60x before the fix, with the assertions at 1000 ms and 25x.
+
+Three CI-visible mistakes in this branch, all of the same kind: a `git stash`
+that was a no-op, a grid search that refit cut points production holds fixed,
+and now a timing test that measured the runner rather than the code. Each was
+caught by re-measuring rather than by reasoning about it.
