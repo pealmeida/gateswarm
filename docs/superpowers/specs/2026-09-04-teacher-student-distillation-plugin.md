@@ -1413,3 +1413,80 @@ discounted into a cheaper tier, which is the correction working.
 
 Six regression tests pin the behaviour, including that a discourse marker inside
 an otherwise structured prompt is dropped while the real fields survive.
+
+
+---
+
+## 15. The length-only baseline — shipped 2026-09-04
+
+§11.4's first recommendation, implemented: `src/classifiers/length-baseline.ts`,
+registered in `eval/leaderboard.ts`.
+
+### 15.1 What it is
+
+A `TierClassifier` that ranks prompts by raw character count and nothing else.
+It plays by the same rules as every other row — cut points fitted on the training
+folds only, confidence calibrated out-of-fold — so the comparison is fair rather
+than rigged toward the baseline.
+
+It declares **no** `predictMode`. Length cannot separate planning from acting, and
+a number in that column would be noise dressed as a measurement.
+
+One implementation note worth recording: `fitMonotonicCutPoints` fits arbitrary
+cut points over the score and log is monotone, so `LOG_CAP` **cannot change a
+single tier prediction** — it only keeps the score in [0,1] for display and
+calibration. Ranking by characters and by words are genuinely different orderings
+though (a prompt of long words has more characters but fewer words), and
+characters is the stronger baseline (86.7% vs ~70%), so the guard uses the
+harder-to-beat one.
+
+### 15.2 What it says
+
+```
+model                      exact       ±      adj    bias     ECE   modeF1        ms
+length-only                86.7%    4.4%    95.6%   +0.13   0.028      n/a      0.00
+heuristic-linear           63.3%    6.7%    94.4%   +0.07   0.057    93.3%      0.21
+ordinal-logistic           58.9%    7.5%    94.4%   +0.02   0.154      n/a      0.24
+
+Baseline guard — "length-only" ranks by prompt length alone: 86.7% exact.
+  ✗ BEATEN BY THE BASELINE: heuristic-linear (63.3%), ordinal-logistic (58.9%)
+    Either the model is not earning its complexity, or this dataset is separable
+    by length and cannot measure what it claims to. Check the dataset first.
+```
+
+The leaderboard now states the verdict rather than leaving it to be inferred from
+a table, and it names both readings — because on this dataset the second one is
+the true one, and pointing only at the models would misdiagnose it.
+
+Note the baseline also wins on ECE (0.028) and adjacent (95.6%). It is not merely
+more accurate here; it is better calibrated. That follows from the same cause —
+on a length-separable benchmark, length is close to the true label.
+
+### 15.3 Two tests that are meant to fail one day
+
+`tests/length-baseline.test.ts` encodes the §11 finding as live assertions rather
+than prose, each with an explicit note that failure is good news:
+
+- **`records that eval/dataset.json is separable by length alone`** — asserts the
+  baseline exceeds 80% exact. If it drops, the dataset has been given
+  length-decorrelated examples: update the bound and re-check the models.
+- **`records that the shipped scorer does not yet clear the baseline`** — asserts
+  `heuristic-linear < length-only`. When that fails because the scorer overtook
+  length, the guard has done its job: delete the test, keep the leaderboard row.
+
+Prose in a spec decays silently. An assertion cannot.
+
+### 15.4 What this closes, and what it does not
+
+**Closes:** the eval can no longer report an accuracy figure without the trivial
+baseline standing beside it. Had this row existed, the 35 features would never
+have shipped unchallenged, and §7's saturation failure — length-dominance learned
+from a length-separable benchmark and carried into production — would have been
+visible at the point it was introduced.
+
+**Does not close:** the baseline is a guard, not a fix. The dataset is still
+length-separable, real-world tier accuracy is still unmeasured, and the scorer
+still loses to a one-liner on the only benchmark available. §12 is the work that
+changes those; this is the instrument that will tell you whether it did.
+
+Suite: **495 tests pass** (was 488).
