@@ -124,3 +124,47 @@ Build the import tool.
       .toBe(heuristicScoreFromFeatures(base, 20));
   });
 });
+
+describe('structure_density — prose must not read as specification', () => {
+  it('ignores discourse markers that open a line with a colon', () => {
+    // Regression: "However:/Note:/Therefore:/TODO:" scored the same structure as
+    // four real input fields, so ordinary prose was rated EASIER than it is.
+    const prose = 'However: this is prose.\nNote: another line.\nTherefore: we ship.\nTODO: fix later.';
+    expect(extractFeatures(prose).structure_density).toBe(0);
+  });
+
+  it('treats a single labelled line as punctuation, not structure', () => {
+    const aside = 'Refactor the auth module.\nNote: the tests are flaky.';
+    expect(extractFeatures(aside).structure_density).toBe(0);
+    const oneField = 'Refactor the auth module.\nSources: the monolith.';
+    expect(extractFeatures(oneField).structure_density).toBe(0);
+  });
+
+  it('still scores a genuinely specified prompt', () => {
+    const structured = [
+      'Design a dbt project.',
+      'Data sources: Postgres, Stripe',
+      'Warehouse: Snowflake',
+      'Target audience: analysts',
+      'Constraints: no dbt Cloud',
+    ].join('\n');
+    expect(extractFeatures(structured).structure_density).toBeGreaterThan(10);
+  });
+
+  it('drops discourse markers while keeping real fields in the same prompt', () => {
+    const mixed = 'Build an ETL job.\nNote: legacy schema.\nSources: S3, Kafka\nSink: Snowflake';
+    const withoutAside = 'Build an ETL job.\nSources: S3, Kafka\nSink: Snowflake';
+    expect(extractFeatures(mixed).structure_density).toBeCloseTo(
+      extractFeatures(withoutAside).structure_density * (withoutAside.split(/\s+/).filter(Boolean).length / mixed.split(/\s+/).filter(Boolean).length),
+      5,
+    );
+  });
+
+  it('leaves bullets alone — a list is unambiguous structure', () => {
+    expect(extractFeatures('Build an API.\n- auth\n- rate limits\n- pagination').structure_density).toBeGreaterThan(20);
+  });
+
+  it('scores an unstructured hard prompt at zero structure', () => {
+    expect(extractFeatures('Design a distributed cache with failover and justify the consistency model you choose.').structure_density).toBe(0);
+  });
+});

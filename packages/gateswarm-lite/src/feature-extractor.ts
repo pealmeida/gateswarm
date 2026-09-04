@@ -296,8 +296,33 @@ const OPENENDED_VERB_RE =
   /\b(?:design|architect|optimi[sz]e|evaluate|trade[- ]?off|strateg|justify|critique|reconcile|prioriti[sz]e)\w*/g;
 /** Bullet list items — structural specification. */
 const BULLET_LINE_RE = /^[ \t]*[-*\u2022][ \t]+\S/gm;
-/** "Data sources:", "Warehouse:" — labelled input fields. */
-const LABELLED_FIELD_RE = /^[A-Z][A-Za-z /]{2,30}:[ \t]/gm;
+/** "Data sources:", "Warehouse:" — labelled input fields, captured for filtering. */
+const LABELLED_FIELD_RE = /^([A-Z][A-Za-z /]{2,30}):[ \t]/gm;
+/**
+ * Discourse markers that open a line with a colon but introduce prose, not a
+ * field. Without this filter, "However: … Note: … Therefore:" scored the same
+ * structure as a prompt with four real input fields, and so was rated easier.
+ */
+const DISCOURSE_LABELS = new Set([
+  'however', 'note', 'notes', 'therefore', 'thus', 'warning', 'caution', 'important',
+  'tip', 'hint', 'todo', 'fixme', 'ps', 'nb', 'update', 'edit', 'disclaimer',
+  'reminder', 'aside', 'caveat', 'result', 'conclusion', 'in short', 'for example',
+]);
+
+/**
+ * Labelled fields that indicate a SPECIFIED prompt, as a count.
+ *
+ * Discourse markers are dropped, and the first surviving label is free: a single
+ * "Sources: …" line is punctuation, whereas a repeated label pattern is a form.
+ * Structure means the pattern repeats.
+ */
+function countLabelledFields(prompt: string): number {
+  let kept = 0;
+  for (const m of prompt.matchAll(LABELLED_FIELD_RE)) {
+    if (!DISCOURSE_LABELS.has(m[1].trim().toLowerCase())) kept++;
+  }
+  return Math.max(0, kept - 1);
+}
 
 export function extractFeatures(prompt: string): FeatureVector {
   if (!prompt?.trim()) return zeroFeatures();
@@ -417,7 +442,7 @@ export function extractFeatures(prompt: string): FeatureVector {
   const perHundred = 100 / Math.max(wc, 1);
   const openended_density = countRegex(t, OPENENDED_VERB_RE) * perHundred;
   const structure_density =
-    (countMergedMatches([BULLET_LINE_RE], prompt) + countRegex(prompt, LABELLED_FIELD_RE)) * perHundred;
+    (countMergedMatches([BULLET_LINE_RE], prompt) + countLabelledFields(prompt)) * perHundred;
 
   return {
     has_question, has_code, has_imperative, has_arithmetic,

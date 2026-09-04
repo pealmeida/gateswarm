@@ -26,16 +26,16 @@ const TIERS: readonly EffortLevel[] = ['trivial', 'light', 'moderate', 'heavy', 
 
 /**
  * Fitted on eval/dataset.json with 5-fold out-of-fold prediction (boundaries fit
- * on train folds only), K=6 pseudo-counts toward the 0.6333 accuracy prior.
+ * on train folds only), K=6 pseudo-counts toward the 0.6444 accuracy prior.
  * Regenerate whenever the scorer or DEFAULT_BOUNDARIES change on purpose.
  */
 export const DEFAULT_TIER_RELIABILITY: TierReliability = {
-  trivial: 0.7520,
-  light: 0.7867,
-  moderate: 0.6167,
-  heavy: 0.5500,
-  intensive: 0.4909,
-  extreme: 0.6167,
+  trivial: 0.8203,
+  light: 0.8042,
+  moderate: 0.5947,
+  heavy: 0.5542,
+  intensive: 0.4939,
+  extreme: 0.6194,
 };
 
 let _reliability: TierReliability = { ...DEFAULT_TIER_RELIABILITY };

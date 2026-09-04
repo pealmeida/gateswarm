@@ -1332,3 +1332,84 @@ Design decisions worth naming:
 - **Accuracy still rests on tier labels**, which §11 showed are measured against
   a length-separable benchmark. The index reports the verdicts it is given
   faithfully — it cannot repair the label problem underneath them.
+
+
+---
+
+## 14. structure_density prose false-positive — fixed 2026-09-04
+
+§13.2 finding #6, deferred there because it moves scores and needed the frozen
+snapshots regenerated alongside a revalidation of §8. Done here as one change.
+
+### 14.1 The defect
+
+`LABELLED_FIELD_RE` matched any capitalised word followed by a colon at the start
+of a line, so discourse markers counted as input fields:
+
+| prompt | old matches |
+|---|---|
+| `However:` / `Note:` / `Therefore:` / `TODO:` (pure prose) | **4** |
+| a genuinely specified prompt with four input fields | 4 |
+
+Indistinguishable. Since `structure_density` is a *negative* predictor — a
+specified prompt is easier than its length implies — prose with asides was being
+rated **easier than it is**, in exactly the direction that under-routes it.
+
+### 14.2 The fix
+
+Two rules, both narrow:
+
+1. **A discourse stoplist.** `however, note(s), therefore, thus, warning,
+   caution, important, tip, hint, todo, fixme, ps, nb, update, edit, disclaimer,
+   reminder, aside, caveat, result, conclusion, in short, for example` are
+   dropped when they appear as a line label.
+2. **The first surviving label is free.** One `Sources: …` line is punctuation;
+   structure means the pattern *repeats*. Implemented as `max(0, kept - 1)`,
+   which avoids a threshold cliff and stays monotone.
+
+Bullets are untouched — a list is unambiguous structure.
+
+| case | before | after |
+|---|---|---|
+| prose with 4 discourse markers | 23.08 | **0.00** |
+| single `Note:` aside | >0 | **0.00** |
+| genuinely specified prompt | — | 17.65 |
+| mixed (`Note:` + 2 real fields) | — | 8.33 |
+| bulleted list | — | 42.86 |
+| unstructured hard prompt | 0.00 | 0.00 |
+
+### 14.3 Revalidation — the fix improved every gate it touched
+
+| metric | §8/§9 | after fix |
+|---|---|---|
+| golden CV exact | 62.2% | **63.3%** |
+| golden CV adjacent | 94.4% | 94.4% |
+| **ECE** | 0.086 | **0.057** |
+| light recall | 60.0% | **66.7%** |
+| heavy / intensive recall | 33.3% / 33.3% | 33.3% / 33.3% |
+| signed bias | +0.03 | +0.07 |
+| real-traffic tiers used | 5 of 6 | 5 of 6 |
+| largest tier share | 30.4% | 30.2% |
+| cost index (678 prompts) | 2090 | 2148 |
+| models / providers | 4 / 3 | 4 / 3 |
+| suite | 482 | **488 pass** |
+
+The false positive was costing accuracy, not just tidiness. Cost index rose 2.8%
+— prompts whose prose asides had been mistaken for specification are no longer
+discounted into a cheaper tier, which is the correction working.
+
+### 14.4 Fitted artifacts
+
+- **`DEFAULT_BOUNDARIES`: unchanged.** Refitting on the new scores moved them by
+  at most 4.75e-7 — pure display rounding from when they were shipped. No churn.
+- **`DEFAULT_TIER_RELIABILITY`: regenerated**, per the rule in `confidence.ts`
+  that the table is refit whenever the scorer changes on purpose. Two tiers had
+  drifted past 0.02 (`trivial` 0.752 → 0.820, `moderate` 0.617 → 0.595). The
+  accuracy prior moved 0.6333 → 0.6444.
+- **`lite-score-snapshot.json`: byte-identical.** None of its nine fixtures
+  contains a colon-labelled line, which is itself evidence the fix is targeted.
+- **`mljar-score-snapshot.json`: regenerated** — 132 of 678 prompts moved; the
+  other 546 were untouched.
+
+Six regression tests pin the behaviour, including that a discourse marker inside
+an otherwise structured prompt is dropped while the real fields survive.
