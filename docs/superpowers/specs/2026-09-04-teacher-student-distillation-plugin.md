@@ -1851,3 +1851,82 @@ This was Claude reviewing its own branch, and it found a critical bug in a fix
 Claude had written one turn earlier. That is an argument for the review, not
 against it — but it is not an argument that self-review suffices. The
 second-model pass requested in §13.1 remains undone and remains worth doing.
+
+
+---
+
+## 19. CI failure — a 3.4-second regex on main
+
+The first CI run on PR #6 failed. Worth recording, because the failure was not
+what it looked like.
+
+**All 496 tests passed.** The job failed on an unhandled error:
+
+```
+Error: [vitest-worker]: Timeout calling "onTaskUpdate"
+```
+
+`tests/sequence-consistency.test.ts` ran for **121 seconds** on the runner
+(~81 s locally). A synchronous, CPU-bound test held the event loop long enough
+that the worker could not answer vitest's progress RPC, and vitest failed the run.
+
+### 19.1 Not this branch's fault, and fixed anyway
+
+Measured from an isolated worktree of `origin/main`: **3415 ms** to score a 64 KiB
+prompt, against **3387 ms** on the branch. The pathology is on main; this branch
+is marginally faster. What the branch did was raise total suite load — the golden
+dataset doubled from 90 to 180 examples — which tipped a pre-existing problem over
+the runner's threshold.
+
+The first `git stash` comparison was itself wrong and worth flagging: everything
+was committed, so the stash was a no-op and **both measurements were the branch.**
+Redone properly in a worktree. Two bad measurements in two turns, both caught by
+checking rather than by intuition.
+
+### 19.2 The actual bug
+
+Scoring was **quadratic in prompt length** — 4x per doubling, confirmed:
+
+| chars | ms |
+|---|---|
+| 8,000 | 57 |
+| 16,000 | 214 |
+| 32,000 | 907 |
+| 64,000 | **3,347** |
+
+The cause, isolated to one line:
+
+```ts
+const question_count = countRegex(prompt, /[^?]+\?/g);
+```
+
+On text containing **no** `?`, `[^?]+` greedily consumes to the end of the string
+at every start position, then fails to find `\?` and backtracks. Timed alone on
+64 KiB: **3392 ms with no question mark, 0 ms with many.** The pathological case
+is the common one — most prompts contain no question mark at all — and this ran on
+every single score.
+
+Replaced with a linear scan. Byte-identical counts across all **858** corpus
+prompts and every edge case (`""`, `"?"`, `"??"`, `"a??b?"`, `"???a"`).
+
+| | before | after |
+|---|---|---|
+| `extractFeatures`, 64 KiB | 3475 ms | **35 ms** |
+| full test suite | 126 s | **49 s** |
+| snapshot drift | — | **none** |
+
+Three regression tests pin it: an absolute bound on the 64 KiB case, a
+growth-ratio check that fails if quadratic behaviour returns, and a table of the
+edge cases proving the new counter matches the regex it replaced.
+
+### 19.3 Why this matters beyond CI
+
+The README advertises "6-level complexity score in 12 ms". A prompt without a
+question mark, near the size cap, took 3.4 seconds — **280x** the advertised
+figure, in production, on main, unnoticed. The routing latency budget assumed
+scoring was free.
+
+It surfaced only because a test suite got slower and a CI runner was less forgiving
+than a laptop. Nothing in the eval battery measures worst-case latency;
+`bench:scorer` measures the envelope on ordinary prompts. That gap is worth
+closing separately.

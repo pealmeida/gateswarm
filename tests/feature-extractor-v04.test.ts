@@ -168,3 +168,39 @@ describe('structure_density — prose must not read as specification', () => {
     expect(extractFeatures('Design a distributed cache with failover and justify the consistency model you choose.').structure_density).toBe(0);
   });
 });
+
+describe('scoring stays linear in prompt length', () => {
+  // Regression: question_count used `/[^?]+\?/g`, which backtracks
+  // catastrophically on text containing no "?" — `[^?]+` consumes to the end at
+  // every start position, then fails. At the 64 KiB prompt cap that one regex
+  // took 3.4 SECONDS, on every score, for any prompt without a question mark.
+  // It was slow enough on CI to starve vitest's worker heartbeat.
+  const noQuestionMark = 'analyze this system '.repeat(5000).slice(0, 65536);
+
+  it('scores a 64 KiB question-free prompt well inside a second', () => {
+    extractFeatures(noQuestionMark); // warm
+    const started = performance.now();
+    extractFeatures(noQuestionMark);
+    expect(performance.now() - started).toBeLessThan(500);
+  });
+
+  it('grows roughly linearly, not quadratically, with length', () => {
+    const at = (n: number) => {
+      const text = noQuestionMark.slice(0, n);
+      extractFeatures(text);
+      const started = performance.now();
+      extractFeatures(text);
+      return performance.now() - started;
+    };
+    const small = Math.max(at(8000), 0.5);
+    const large = at(64000);
+    // 8x the input. Linear predicts ~8x; the quadratic version was ~60x.
+    expect(large / small).toBeLessThan(20);
+  });
+
+  it('counts questions the way the replaced regex did', () => {
+    for (const [text, expected] of [['', 0], ['?', 0], ['??', 0], ['a?', 1], ['a??b?', 2], ['???a', 0]] as [string, number][]) {
+      expect(extractFeatures(text).question_count, JSON.stringify(text)).toBe(expected);
+    }
+  });
+});

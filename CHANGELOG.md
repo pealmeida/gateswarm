@@ -30,6 +30,12 @@ boundary moved, so no prompt routes differently — verified against the
   enough to carry one past a `minQuality` gate on someone else's evidence.
 - The cost report's no-router baseline was ambiguous whenever two models tied on
   `maxEffort`, making every saving figure depend on array order.
+- **Catastrophic backtracking in `question_count`.** `/[^?]+\?/g` consumed to
+  the end of the string at every start position on text containing no `?`, so
+  scoring was O(n²): a 64 KiB prompt took **3.4 seconds**, on every score, for
+  any prompt without a question mark. Replaced with a linear scan giving
+  byte-identical counts across all 858 corpus prompts. **3475 ms → 35 ms**, and
+  the test suite went from 126 s to 49 s.
 
 ### Added
 - **`gateswarm` agent plugin** (`plugins/gateswarm/`) with a `model-delegation`
