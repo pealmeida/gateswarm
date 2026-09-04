@@ -268,7 +268,13 @@ const DEFAULT_AGENT_CONFIG: AgentTrainingConfig = {
   agentId: '',
   enabled: false,
   aleatoryRate: 0.25,
-  alwaysAskBelowConfidence: 0.5,
+  // Confidence is now calibrated P(correct | tier), which legitimately runs
+  // below 0.5 — heavy sits at 0.256. The old 0.5 was the FLOOR of the previous
+  // [0.5, 0.95] margin scale, so carrying it over made "always ask when very
+  // uncertain" fire on four tiers of six, swamping the aleatory sampling and
+  // fatigue decay it is supposed to sit beside. Re-set below the calibrated
+  // spread so it once again marks the genuinely worst cases only.
+  alwaysAskBelowConfidence: 0.30,
   neverAskTiers: ['trivial'],
   weightedTiers: ['moderate', 'heavy', 'intensive'],
   weightedRateMultiplier: 2.0,

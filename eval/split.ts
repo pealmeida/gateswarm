@@ -10,14 +10,15 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { loadEffort, loadMode, loadRaw } from './lib/dataset.js';
-import { stratifiedKFold, stratifiedHoldout, sha256 } from './lib/split.js';
+import { ACTIVE_SPLIT_VERSION, stratifiedKFold, stratifiedHoldout, sha256 } from './lib/split.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SPLIT_DIR = join(__dirname, 'splits');
 const SEED = 42;
 const K = 5;
 const TEST_FRAC = 0.3;
-const VERSION = 'v1';
+/** Generated version. Must match ACTIVE_SPLIT_VERSION, which is what every eval reads. */
+const VERSION = ACTIVE_SPLIT_VERSION;
 
 function writeJson(path: string, obj: unknown): string {
   const s = JSON.stringify(obj, null, 2) + '\n';

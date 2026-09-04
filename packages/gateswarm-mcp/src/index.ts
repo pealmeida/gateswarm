@@ -11,3 +11,5 @@ export {
   type FeedbackRecord,
   type TelemetryRecord,
 } from './store.js';
+
+export * from './report.js';

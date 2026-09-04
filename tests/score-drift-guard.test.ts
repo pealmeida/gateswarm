@@ -20,7 +20,27 @@ const EDGE_TOLERANCE: Partial<Record<EffortLevel, number>> = {
 // less than 0.001 and is covered by the simple-tier tolerance above.
 // If a material band violation is accepted deliberately, pin that tier's
 // measured median here with +/-0.05 instead of silently moving boundaries.
-const CURRENT_MEDIAN_OVERRIDES: Partial<Record<EffortLevel, number>> = {};
+//
+// Pinned on dataset v3 (180 examples), per the instruction above: two tiers now
+// sit outside their configured band, and both are the SAME known scorer defect
+// rather than drift.
+//
+// The v3 dataset gives every tier a full spread of prompt lengths, including
+// long-but-trivial and long-but-heavy prompts. The scorer is length-dominant, so
+// it over-scores those, dragging the trivial median up into the light band and
+// the heavy median up into the intensive band. Nothing about the scorer changed
+// to cause this — the benchmark simply stopped hiding it (see spec sections 11
+// and 17).
+//
+// These are pinned, NOT accepted. Pinning keeps this file doing its actual job,
+// which is catching unintended scorer drift (±0.05 still fires), instead of
+// failing permanently for a defect it was never meant to measure. They should be
+// removed when the scorer stops ranking long-and-easy prompts above short-and-hard
+// ones — the feature work in spec section 12, not a boundary move.
+const CURRENT_MEDIAN_OVERRIDES: Partial<Record<EffortLevel, number>> = {
+  trivial: 0.2449,
+  heavy: 0.3878,
+};
 
 function median(xs: number[]): number {
   const sorted = [...xs].sort((a, b) => a - b);

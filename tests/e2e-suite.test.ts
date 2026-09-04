@@ -182,11 +182,15 @@ describe('E2E C: gateswarm-mcp full agent session (one persistent process)', () 
     responses.push(...(second.stdout.trim().split('\n').map((l) => JSON.parse(l) as McpResponse)));
   }, 600_000);
 
-  it('handshakes and lists four tools', () => {
+  it('handshakes and lists the full tool surface', () => {
     const init = responses.find((r) => r.id === 1)!;
     expect((init.result as unknown as { protocolVersion: string }).protocolVersion).toBe('2025-06-18');
     const tools = responses.find((r) => r.id === 2)!;
-    expect((tools.result as unknown as { tools: unknown[] }).tools).toHaveLength(4);
+    const names = (tools.result as unknown as { tools: { name: string }[] }).tools.map((t) => t.name);
+    expect(names).toEqual([
+      'route_prompt', 'route_session', 'submit_feedback',
+      'submit_outcome', 'recalibrate_matrix', 'cost_report', 'telemetry_summary',
+    ]);
   });
 
   it('routes single prompts AND sessions with distinct payloads', () => {

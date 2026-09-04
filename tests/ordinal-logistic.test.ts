@@ -53,6 +53,8 @@ function zeroFeatures(): FeatureVector {
     conjunction_enumeration: 0,
     scale_quantity_mentions: 0,
     diagnostic_causal_markers: 0,
+      openended_density: 0,
+    structure_density: 0,
   };
 }
 

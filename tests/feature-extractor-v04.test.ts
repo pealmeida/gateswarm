@@ -124,3 +124,83 @@ Build the import tool.
       .toBe(heuristicScoreFromFeatures(base, 20));
   });
 });
+
+describe('structure_density — prose must not read as specification', () => {
+  it('ignores discourse markers that open a line with a colon', () => {
+    // Regression: "However:/Note:/Therefore:/TODO:" scored the same structure as
+    // four real input fields, so ordinary prose was rated EASIER than it is.
+    const prose = 'However: this is prose.\nNote: another line.\nTherefore: we ship.\nTODO: fix later.';
+    expect(extractFeatures(prose).structure_density).toBe(0);
+  });
+
+  it('treats a single labelled line as punctuation, not structure', () => {
+    const aside = 'Refactor the auth module.\nNote: the tests are flaky.';
+    expect(extractFeatures(aside).structure_density).toBe(0);
+    const oneField = 'Refactor the auth module.\nSources: the monolith.';
+    expect(extractFeatures(oneField).structure_density).toBe(0);
+  });
+
+  it('still scores a genuinely specified prompt', () => {
+    const structured = [
+      'Design a dbt project.',
+      'Data sources: Postgres, Stripe',
+      'Warehouse: Snowflake',
+      'Target audience: analysts',
+      'Constraints: no dbt Cloud',
+    ].join('\n');
+    expect(extractFeatures(structured).structure_density).toBeGreaterThan(10);
+  });
+
+  it('drops discourse markers while keeping real fields in the same prompt', () => {
+    const mixed = 'Build an ETL job.\nNote: legacy schema.\nSources: S3, Kafka\nSink: Snowflake';
+    const withoutAside = 'Build an ETL job.\nSources: S3, Kafka\nSink: Snowflake';
+    expect(extractFeatures(mixed).structure_density).toBeCloseTo(
+      extractFeatures(withoutAside).structure_density * (withoutAside.split(/\s+/).filter(Boolean).length / mixed.split(/\s+/).filter(Boolean).length),
+      5,
+    );
+  });
+
+  it('leaves bullets alone — a list is unambiguous structure', () => {
+    expect(extractFeatures('Build an API.\n- auth\n- rate limits\n- pagination').structure_density).toBeGreaterThan(20);
+  });
+
+  it('scores an unstructured hard prompt at zero structure', () => {
+    expect(extractFeatures('Design a distributed cache with failover and justify the consistency model you choose.').structure_density).toBe(0);
+  });
+});
+
+describe('question_count after the backtracking fix', () => {
+  // question_count used `/[^?]+\\?/g`, which backtracks catastrophically on text
+  // containing no "?" — `[^?]+` consumes to the end at every start position,
+  // then fails. At the 64 KiB cap that one regex took 3.4 SECONDS, on every
+  // score, for any prompt without a question mark. It is now a linear scan.
+  //
+  // There is deliberately NO timing assertion here. Three were tried and all
+  // three failed on CI while passing locally: wall clock measured contention
+  // from parallel vitest workers; a CPU-time ratio swung 13x-40x because its
+  // few-millisecond denominator was mostly GC noise; and an absolute CPU bound
+  // read 43ms locally against 1785ms on the runner, because one warm-up call
+  // does not reliably get V8 to tier up on a loaded two-core box. A
+  // micro-benchmark asserted inside a parallel unit suite measures the runner,
+  // not the code.
+  //
+  // The latency envelope belongs in `npm run bench:scorer`, which measures it
+  // deliberately and now covers the question-mark-free case explicitly. What
+  // stays here is the part that is deterministic and actually pins behaviour:
+  // the counter returns exactly what the regex it replaced returned.
+  it('counts questions the way the replaced regex did', () => {
+    const asRegex = (text: string) => (text.match(/[^?]+\?/g) || []).length;
+    for (const text of ['', '?', '??', 'a?', 'a??b?', '???a', 'no question here',
+                        'One? Two? Three?', 'trailing text after ? mark']) {
+      expect(extractFeatures(text).question_count, JSON.stringify(text)).toBe(asRegex(text));
+    }
+  });
+
+  it('handles a 64 KiB question-free prompt without pathological work', () => {
+    // No clock: if the quadratic behaviour returned, this would take ~3.4s and
+    // blow vitest's default 5s timeout. That is a coarse guard, but unlike a
+    // measured bound it cannot fail for being run on a busy machine.
+    const noQuestionMark = 'analyze this system '.repeat(5000).slice(0, 65536);
+    expect(extractFeatures(noQuestionMark).question_count).toBe(0);
+  });
+});

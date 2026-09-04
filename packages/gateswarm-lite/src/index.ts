@@ -16,6 +16,7 @@ import { MAX_PROMPT_SIZE, type ComplexityResult } from './types.js';
 export * from './feature-extractor.js';
 export * from './session.js';
 export * from './tier-boundaries.js';
+export * from './confidence.js';
 export { MAX_PROMPT_SIZE } from './types.js';
 export type { ComplexityResult, EffortLevel } from './types.js';
 

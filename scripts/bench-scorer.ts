@@ -23,6 +23,18 @@ for (const kb of [1, 4, 16, 32, 64]) {
   console.log(`  ${String(kb).padStart(3)} KB → ${ms.toFixed(0).padStart(5)} ms ${bar}`);
 }
 
+// Prompts WITHOUT a question mark used to hit a catastrophic-backtracking path
+// in question_count (`/[^?]+\?/g` consumed to the end at every start position),
+// making scoring quadratic: 64 KiB took ~3.4 SECONDS. This row exists so that
+// pathology is visible here rather than only in a CI timeout. Most real prompts
+// contain no question mark, so this is the common case, not a corner one.
+console.log('\nscoreComplexity — question-mark-free input (the old quadratic path):');
+for (const kb of [16, 32, 64]) {
+  const text = 'analyze this system '.repeat(Math.ceil((kb * 1024) / 20));
+  const ms = time(() => scoreComplexity(text));
+  console.log(`  ${String(kb).padStart(3)} KB, no "?" → ${ms.toFixed(0).padStart(5)} ms`);
+}
+
 console.log('\nscoreSession — bounded window work on an unbounded conversation:');
 for (const totalKb of [64, 256, 1024]) {
   const turns = [UNIT.repeat(Math.ceil((totalKb * 1024) / UNIT.length)), 'final question: fix login bug'];

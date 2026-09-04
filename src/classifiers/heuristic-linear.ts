@@ -12,6 +12,7 @@ import type { TierClassifier, TierPrediction, ModePrediction, LabeledPrompt } fr
 import type { EffortLevel } from '../types.js';
 import { extractFeatures, heuristicScoreFromFeatures, type FeatureVector } from '../feature-extractor-v04.js';
 import { DEFAULT_BOUNDARIES } from '../tier-boundaries.js';
+import { confidenceForTier, fitTierReliability } from 'gateswarm-lite';
 import { detectIntentMode } from '../v04-config.js';
 
 export const HEURISTIC_TIERS: EffortLevel[] = ['trivial', 'light', 'moderate', 'heavy', 'intensive', 'extreme'];
@@ -26,6 +27,28 @@ export function scoreToTier(score: number, b: number[]): EffortLevel {
   let i = 0;
   while (i < b.length && score >= b[i]) i++;
   return HEURISTIC_TIERS[i];
+}
+
+/**
+ * Estimate P(correct | predicted tier) from the training pairs WITHOUT leaking:
+ * cut points are refit on inner train folds and reliability is tallied only on
+ * the held-out inner fold. Fitting on in-sample predictions would report
+ * training accuracy and ship an overconfident table.
+ */
+export function fitReliabilityOutOfFold(pairs: ScoredTier[], k = 4): Partial<Record<EffortLevel, number>> {
+  if (pairs.length < k * 2) return {};
+  const folds: number[][] = Array.from({ length: k }, () => []);
+  pairs.forEach((_, i) => folds[i % k].push(i));
+  const observations: { tier: EffortLevel; correct: boolean }[] = [];
+  for (let f = 0; f < k; f++) {
+    const held = new Set(folds[f]);
+    const cuts = fitMonotonicCutPoints(pairs.filter((_, i) => !held.has(i)));
+    for (const i of folds[f]) {
+      const predicted = scoreToTier(pairs[i].score, cuts);
+      observations.push({ tier: predicted, correct: predicted === pairs[i].tier });
+    }
+  }
+  return fitTierReliability(observations);
 }
 
 export function rawHeuristicScore(prompt: string): number {
@@ -152,22 +175,27 @@ export class HeuristicLinearClassifier implements TierClassifier {
   version = 'v0.5.2';
   requiresTraining = true; // fits boundaries; still runs without (defaults)
   private boundaries = [...DEFAULT_HEURISTIC_BOUNDARIES];
+  private reliability: Partial<Record<EffortLevel, number>> = {};
 
   fit(train: LabeledPrompt[]): void {
     const pairs = train
       .filter((t) => t.tier)
       .map((t) => ({ score: rawHeuristicScore(t.prompt), tier: t.tier! }));
     this.boundaries = fitMonotonicCutPoints(pairs);
+    this.reliability = fitReliabilityOutOfFold(pairs);
   }
 
   predictEffort(prompt: string): TierPrediction {
     const start = performance.now();
     const score = rawHeuristicScore(prompt);
     const tier = scoreToTier(score, this.boundaries);
-    // Confidence from distance to nearest boundary (matches ensemble-voter logic).
-    let d = Math.min(score, 1 - score);
-    for (const b of this.boundaries) d = Math.min(d, Math.abs(score - b));
-    const confidence = Math.max(0.5, Math.min(0.95, 0.5 + (d / 0.06) * 0.45));
+    // Calibrated P(correct | predicted tier). Deliberately NOT the shipped
+    // table when fit() has run: eval must use per-fold, out-of-fold estimates
+    // or its ECE leaks, whereas production uses DEFAULT_TIER_RELIABILITY. They
+    // are the same *method* on different data, not one shared value, and an
+    // eval must never write global calibration state as a side effect.
+    // Boundary margin was measured to carry no signal about correctness.
+    const confidence = this.reliability[tier] ?? confidenceForTier(tier);
     return { tier, score, confidence, latencyMs: performance.now() - start };
   }
 

@@ -28,11 +28,12 @@ import {
 } from '../../src/ensemble-voter.js';
 import { loadEffort, TIERS } from './dataset.js';
 import type { EffortExample } from './dataset.js';
+import { holdoutFile, trainFile } from './split.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SPLIT_DIR = join(__dirname, '..', 'splits');
-const TRAIN_SPLIT_PATH = join(SPLIT_DIR, 'train.v1.json');
-const HOLDOUT_SPLIT_PATH = join(SPLIT_DIR, 'holdout.v1.json');
+const TRAIN_SPLIT_PATH = join(SPLIT_DIR, trainFile());
+const HOLDOUT_SPLIT_PATH = join(SPLIT_DIR, holdoutFile());
 const RAG_FILE = join(__dirname, '..', '..', 'data', 'rag', 'index.json');
 const FEEDBACK_FILE = join(__dirname, '..', '..', 'data', 'feedback', 'entries.json');
 const WARM_TIMESTAMP = 1_700_000_000_000;

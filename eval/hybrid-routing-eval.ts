@@ -28,9 +28,10 @@ import { runAblation } from './lib/hybrid-ablation.js';
 import type { AblationMode } from './lib/hybrid-ablation.js';
 import { selectWarmAblationExamples } from './lib/hybrid-warm-fixtures.js';
 import { evaluateHybridExitVerdict } from './lib/hybrid-verdict.js';
+import { holdoutFile } from './lib/split.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const HOLDOUT_PATH = join(__dirname, 'splits', 'holdout.v1.json');
+const HOLDOUT_PATH = join(__dirname, 'splits', holdoutFile());
 
 const DEFAULT_TIMEOUT_FAST_MS = 120_000;
 const DEFAULT_TIMEOUT_SLOW_MS = 180_000;

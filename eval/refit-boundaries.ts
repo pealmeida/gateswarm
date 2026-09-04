@@ -10,7 +10,7 @@ import { dirname, join } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { loadEffort, loadRaw, TIERS, type EffortExample } from './lib/dataset.js';
 import { effortMetrics, meanStd, pct } from './lib/metrics.js';
-import { sha256 } from './lib/split.js';
+import { foldsFile, holdoutFile, sha256, trainFile } from './lib/split.js';
 import type { EffortLevel } from '../src/types.js';
 import {
   DEFAULT_HEURISTIC_BOUNDARIES,
@@ -74,9 +74,9 @@ function assertDatasetHash(manifest: Manifest): void {
 }
 
 function chooseTrainSplitFile(manifest: Manifest): string {
-  const preferred = 'train.v1.json';
+  const preferred = trainFile();
   if (manifest.hashes[preferred] || existsSync(join(SPLIT_DIR, preferred))) return preferred;
-  return 'holdout.v1.json';
+  return holdoutFile();
 }
 
 function parseTrainTestSplit(raw: unknown): TrainTestSplit {
@@ -97,7 +97,7 @@ function loadFrozen(): { splitName: string; split: TrainTestSplit; folds: Folds 
   assertDatasetHash(manifest);
   const splitName = chooseTrainSplitFile(manifest);
   const splitRaw = loadJsonWithHash<unknown>(splitName, manifest);
-  const folds = loadJsonWithHash<Folds>('folds.v1.json', manifest);
+  const folds = loadJsonWithHash<Folds>(foldsFile(), manifest);
   return { splitName, split: parseTrainTestSplit(splitRaw), folds };
 }
 

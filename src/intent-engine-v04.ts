@@ -18,6 +18,9 @@ import { queryRag, getRagSignalEntries } from './rag-index.js';
 import { getConfig } from './v04-config.js';
 import { scoreToEffort, tierMidpoints } from './intent-engine.js';
 
+/** Kept in step with vote-persistence's alwaysAskBelowConfidence default. */
+const LOW_CONFIDENCE_THRESHOLD = 0.30;
+
 // ─── v3.3 Fallback ───────────────────────────────────────
 
 const MAX_PROMPT_SIZE = 64 * 1024;
@@ -101,7 +104,10 @@ export async function scoreIntent(prompt: string): Promise<ComplexityScore> {
       latencyMs: latency,
       tier: vote.tier,
       confidence: vote.confidence,
-      lowConfidence: vote.confidence < 0.5,
+      // Threshold matches getAgentConfig().alwaysAskBelowConfidence, not the
+      // old 0.5 margin floor: calibrated confidence runs below 0.5 for four
+      // tiers of six, so 0.5 here flagged almost everything as low-confidence.
+      lowConfidence: vote.confidence < LOW_CONFIDENCE_THRESHOLD,
       classifierAccuracy: vote.confidence,
     };
   } catch (err) {

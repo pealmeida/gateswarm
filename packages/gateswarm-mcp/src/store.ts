@@ -46,7 +46,34 @@ export interface FeedbackRecord {
   notes?: string;
 }
 
-export type TelemetryRecord = DecisionRecord | FeedbackRecord;
+/**
+ * A graded delivery: a model answered at a tier and the result was judged.
+ * Distinct from FeedbackRecord — that judges whether the TIER was right, this
+ * judges whether the OUTPUT was good. Conflating them would let a complaint
+ * about a bad answer move the complexity boundaries.
+ */
+export interface OutcomeRecord {
+  type: 'outcome';
+  ts: number;
+  project: string;
+  decisionEventId?: string;
+  promptHash?: string;
+  modelId: string;
+  provider: string;
+  tier: EffortLevel;
+  /** Judged output quality in [0,1]. */
+  quality: number;
+  /** False for transport/provider failures — excluded from quality, counted separately. */
+  ok: boolean;
+  /** 'human' verdicts outweigh 'model' ones during recalibration. */
+  judge: 'human' | 'model';
+  /** Actual tokens metered by the provider, when the caller knows them. */
+  tokensIn?: number;
+  tokensOut?: number;
+  notes?: string;
+}
+
+export type TelemetryRecord = DecisionRecord | FeedbackRecord | OutcomeRecord;
 
 export function telemetryDir(envDir?: string): string {
   return envDir ?? process.env.GATESWARM_TELEMETRY_DIR ?? join(homedir(), '.gateswarm', 'telemetry');

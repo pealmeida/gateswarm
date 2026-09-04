@@ -1,0 +1,29 @@
+{
+  "name": "gateswarm",
+  "displayName": "GateSwarm Router",
+  "version": "0.1.0",
+  "description": "Score task complexity, distribute work across models and providers, grade the results, and recalibrate the routing matrix from those grades.",
+  "author": { "name": "pealmeida", "url": "https://github.com/pealmeida" },
+  "repository": "https://github.com/pealmeida/gateswarm",
+  "homepage": "https://github.com/pealmeida/gateswarm#readme",
+  "license": "MIT",
+  "keywords": ["llm-router", "model-routing", "cost-optimization", "delegation", "calibration"],
+  "userConfig": {
+    "project": {
+      "type": "string",
+      "title": "Project slug",
+      "description": "Groups telemetry and quality votes. Letters, digits, '.', '_' or '-'.",
+      "default": "default"
+    },
+    "telemetry_dir": {
+      "type": "directory",
+      "title": "Telemetry directory",
+      "description": "Where decisions and quality votes are stored. Defaults to ~/.gateswarm/telemetry."
+    },
+    "matrix_path": {
+      "type": "file",
+      "title": "Model matrix",
+      "description": "Optional ModelSpec[] JSON describing the models and providers you can actually reach. Without it, the built-in demo matrix is used."
+    }
+  }
+}

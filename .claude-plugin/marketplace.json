@@ -1,0 +1,16 @@
+{
+  "name": "gateswarm",
+  "owner": { "name": "pealmeida", "url": "https://github.com/pealmeida" },
+  "description": "Complexity-aware model routing, delegation and outcome-driven recalibration.",
+  "plugins": [
+    {
+      "name": "gateswarm",
+      "source": "./plugins/gateswarm",
+      "displayName": "GateSwarm Router",
+      "description": "Route each task to the cheapest capable model, grade what comes back, and recalibrate the matrix from those grades.",
+      "category": "ai",
+      "keywords": ["llm-router", "model-routing", "cost-optimization", "delegation", "calibration"],
+      "license": "MIT"
+    }
+  ]
+}

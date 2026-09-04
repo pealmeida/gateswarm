@@ -13,7 +13,7 @@
  * tests that exercise bias push entries through recordInteraction().
  */
 
-import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest';
+import { describe, it, expect, afterEach, beforeAll, beforeEach, vi } from 'vitest';
 
 // Controllable feedback source. getRecentEntries drives the voter's history
 // buffer; default empty → history bias 0 unless a test injects interactions.
@@ -36,6 +36,12 @@ import {
 } from '../src/ensemble-voter.js';
 import { loadConfig } from '../src/v04-config.js';
 import { setTierBoundaries, scoreToEffort, tierMidpoints } from '../src/intent-engine.js';
+import {
+  DEFAULT_BOUNDARIES,
+  getTierReliability,
+  resetTierReliability,
+  setTierReliability,
+} from 'gateswarm-lite';
 
 const DEFAULT_BOUNDS = [0.21, 0.28, 0.32, 0.37, 0.46];
 const DEFAULT_WEIGHTS = { heuristic: 0.55, cascade: 0.0, ragSignal: 0.25, historyBias: 0.2 };
@@ -191,27 +197,46 @@ describe('setEnsembleWeights — invalid inputs', () => {
 
 // ─── Confidence tracks LIVE boundaries ───────────────────────────────────────
 
-describe('confidence — reads live tier boundaries', () => {
-  it('is lower near a boundary than deep inside a band', () => {
-    const nearBoundary = ensembleVote({ prompt: 'x', heuristicScore: 0.28 }).confidence; // on b1
-    const deepInBand = ensembleVote({ prompt: 'x', heuristicScore: 0.9 }).confidence;
-    expect(deepInBand).toBeGreaterThan(nearBoundary);
+describe('confidence — calibrated per-tier reliability', () => {
+  // This block previously asserted confidence derived from distance to the
+  // nearest boundary (~0.06 margin → 0.95, on a boundary → 0.5). Measured
+  // out-of-fold on the golden set that mapping is inverted — accuracy is higher
+  // beside a boundary than far from it — so those assertions were pinning a
+  // defect. Confidence is now P(correct | predicted tier).
+  afterEach(() => resetTierReliability());
+
+  it('is lower on the tiers the scorer actually confuses', () => {
+    setTierBoundaries([...DEFAULT_BOUNDARIES]);
+    const trivial = ensembleVote({ prompt: 'x', heuristicScore: 0.05 }).confidence;
+    const intensive = ensembleVote({ prompt: 'x', heuristicScore: 0.40 }).confidence;
+    expect(intensive).toBeLessThan(trivial);
   });
 
-  it('stays within [0.5, 0.95]', () => {
+  it('is a probability that never claims near-certainty', () => {
+    setTierBoundaries([...DEFAULT_BOUNDARIES]);
     for (const h of [0.0, 0.21, 0.28, 0.32, 0.37, 0.46, 0.6, 1.0]) {
       const c = ensembleVote({ prompt: 'x', heuristicScore: h }).confidence;
-      expect(c).toBeGreaterThanOrEqual(0.5);
-      expect(c).toBeLessThanOrEqual(0.95);
+      expect(c).toBeGreaterThan(0);
+      expect(c).toBeLessThan(0.95);
     }
   });
 
-  it('changes for the same score after boundaries are retrained', () => {
-    const before = ensembleVote({ prompt: 'x', heuristicScore: 0.3 }).confidence;
-    setTierBoundaries([0.1, 0.2, 0.3, 0.4, 0.5]); // 0.3 now sits ON a boundary
-    const after = ensembleVote({ prompt: 'x', heuristicScore: 0.3 }).confidence;
-    expect(after).not.toBeCloseTo(before, 3);
-    expect(after).toBeCloseTo(0.5, 5); // exactly on b2 → minimum confidence
+  it('follows the tier when boundaries are retrained', () => {
+    setTierBoundaries([...DEFAULT_BOUNDARIES]);
+    const before = ensembleVote({ prompt: 'x', heuristicScore: 0.30 }).confidence;
+    expect(before).toBeCloseTo(getTierReliability().moderate, 6);
+    // Push 0.30 up into the extreme band; confidence must track the new tier.
+    setTierBoundaries([0.05, 0.10, 0.15, 0.20, 0.25]);
+    const after = ensembleVote({ prompt: 'x', heuristicScore: 0.30 }).confidence;
+    expect(after).toBeCloseTo(getTierReliability().extreme, 6);
+  });
+
+  it('tracks a refitted reliability table', () => {
+    setTierBoundaries([...DEFAULT_BOUNDARIES]);
+    const baseline = ensembleVote({ prompt: 'x', heuristicScore: 0.30 }).confidence;
+    setTierReliability({ moderate: 0.12 });
+    expect(ensembleVote({ prompt: 'x', heuristicScore: 0.30 }).confidence).toBeCloseTo(0.12, 6);
+    expect(baseline).not.toBeCloseTo(0.12, 3);
   });
 });
 

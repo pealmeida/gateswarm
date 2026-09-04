@@ -66,7 +66,7 @@ describe('scorer contract across the full mljar corpus', () => {
       expect(r.score).toBeGreaterThanOrEqual(0);
       expect(r.score).toBeLessThanOrEqual(1);
       expect(TIERS).toContain(r.tier);
-      expect(Object.keys(r.features).length).toBe(35);
+      expect(Object.keys(r.features).length).toBe(37);
       const again = scoreComplexity(prompt);
       expect(again.score).toBe(r.score);
       expect(again.tier).toBe(r.tier);

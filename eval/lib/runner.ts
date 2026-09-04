@@ -7,7 +7,7 @@ import { readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { loadEffort, loadMode, loadRaw, modeTarget, type EffortExample, type ModeExample } from './dataset.js';
-import { sha256 } from './split.js';
+import { foldsFile, holdoutFile, sha256 } from './split.js';
 import { effortMetrics, modeMetrics, ece, meanStd, type EffortMetrics, type ModeMetrics } from './metrics.js';
 import type { TierClassifier, LabeledPrompt } from '../../src/classifiers/types.js';
 import type { EffortLevel, IntentMode } from '../../src/types.js';
@@ -30,14 +30,14 @@ export function assertHashes(): void {
   if (got !== m.hashes['dataset.json']) {
     throw new Error(`dataset.json hash drift: manifest ${m.hashes['dataset.json'].slice(0, 12)} vs actual ${got.slice(0, 12)}. Re-run eval/split.ts and bump version.`);
   }
-  for (const f of ['folds.v1.json', 'holdout.v1.json']) {
+  for (const f of [foldsFile(), holdoutFile()]) {
     const s = readFileSync(join(SPLIT_DIR, f), 'utf-8');
     if (sha256(s) !== m.hashes[f]) throw new Error(`${f} hash drift vs MANIFEST. Splits were edited by hand.`);
   }
 }
 
 function loadFolds(): Folds {
-  return JSON.parse(readFileSync(join(SPLIT_DIR, 'folds.v1.json'), 'utf-8'));
+  return JSON.parse(readFileSync(join(SPLIT_DIR, foldsFile()), 'utf-8'));
 }
 
 export interface CvResult {
