@@ -784,3 +784,164 @@ All four scorer gates now pass simultaneously for the first time.
   ones; they are the first thing to revisit once real quality votes exist.
 - **`openai` remains unreachable** under `cheapest-capable` — a `DEFAULT_MATRIX`
   property, unchanged here.
+
+
+---
+
+## 10. Is this the right architecture? — evaluated 2026-09-04
+
+**Objective:** *automatically detect prompt complexity and route to the most
+cost-efficient model, load-balancing token usage across multiple providers.*
+
+Verdict in one line: **the approach is sound and nearly finished for the routing
+half, has almost no cost headroom left to justify further classifier work, and
+has no implementation at all for the load-balancing half.**
+
+### 10.1 The classifier is already at 92% of its own ceiling
+
+Measured on the golden set with `DEFAULT_MATRIX`:
+
+| routing policy | cost per prompt | vs no router |
+|---|---|---|
+| always route `extreme` (no router) | $12.000 | — |
+| **GateSwarm today** | **$4.398** | **-63.3%** |
+| **perfect classifier** (oracle labels) | **$3.708** | **-69.1%** |
+
+A classifier with **100% accuracy** would save only **5.8pp more** of the
+no-router bill. GateSwarm already captures **91.7% of the total achievable
+saving**.
+
+This is the most consequential number in this document, and it retires an
+argument made earlier in it. §3 proposed a teacher/HITL distillation programme
+costing ~2-3 days of engineering, ~3M teacher tokens and 2-3 hours of human
+attention. As a **cost** play, that programme is chasing at most 5.8pp and
+realistically a fraction of it. It remains justified for *trust* — knowing the
+tier is right, calibrated confidence, safe escalation — but it should no longer
+be sold as a cost lever, and it should not be the next thing built.
+
+Caveat, and it is a real one: this is computed on the 90-prompt golden
+distribution. The real-traffic equivalent cannot be computed, because there are
+no real-traffic labels — the same gap §7 and §8 flagged.
+
+### 10.2 The system is being measured on the wrong axis
+
+| metric | value |
+|---|---|
+| exact **tier** accuracy | 67.8% |
+| correct **model** chosen | **75.6%** |
+
+The objective does not care about tiers; it cares about which model gets the
+request. Reported on the axis that matters, the router is ~8pp better than its
+headline number says.
+
+The gap exists because the tier space is finer than the decision space:
+
+```
+trivial  ─┐
+light    ─┴─> gemini-flash-lite      6 tiers collapse to 4 models.
+moderate ─┐                          2 of 5 boundaries cannot change
+heavy    ─┴─> deepseek-chat          the decision, so misclassifying
+intensive ──> gemini-pro             across them costs exactly $0.
+extreme   ──> claude-sonnet
+```
+
+### 10.3 Accuracy effort is aimed away from the money
+
+| boundary | cost jump | recall of the tiers it separates |
+|---|---|---|
+| `light`\|`moderate` | 2.7x | 60% / 73% |
+| **`heavy`\|`intensive`** | **8.8x** | **33% / 33%** |
+| `intensive`\|`extreme` | 1.5x | 33% / 73% |
+
+The single most expensive decision in the system is the one the classifier is
+worst at. Meanwhile effort is spread across a 6-way problem whose two cheapest
+distinctions are financially free.
+
+**The highest-return change available is not more labels — it is collapsing the
+label space onto the decision space** and spending the whole accuracy budget on
+the `heavy`|`intensive` line. A binary classifier at one boundary is a far
+easier problem than 6-way ordinal, and it is where the 8.8x lives.
+
+### 10.4 Load balancing: not implemented, and the code for it is orphaned
+
+On 678 real prompts:
+
+| | |
+|---|---|
+| provider concentration (Herfindahl) | **0.477** (0.250 = four providers even) |
+| providers receiving traffic | 3 of 4 |
+| models receiving traffic | **4 of 8** |
+| never routed to | `gpt-5-mini`, `gemini-flash`, `gpt-5.2`, `claude-opus` |
+
+`selectModel` is a pure `argmin(cost)` over the capable set. Same prompt, same
+tier, same model, every time. There is no token accounting, no rate-limit
+awareness, and no distribution policy in `gateswarm-router` at all.
+
+The gateway has the parts — `src/provider-quota.ts` defines `ProviderQuota`,
+`MultiWindowQuotaConfig` (5h / weekly / monthly), `LoadBalanceDecision`, and a
+`rankProvidersForTier()` that scores providers by remaining RPM/RPD, health and
+cost. **`rankProvidersForTier` has zero callers.** It was written and never
+wired into selection. `LoadBalanceDecision` is imported by the gateway as a type
+only.
+
+So the third of the objective is not underperforming — it is absent, and its
+implementation is sitting unused in the repository.
+
+### 10.5 The objective as stated contains a conflict
+
+"Most cost-efficient" and "load-balanced across providers" pull in opposite
+directions whenever models are differently priced. Measured, on real traffic:
+
+| policy | cost/prompt | provider HHI | providers |
+|---|---|---|---|
+| cheapest capable (today) | **$3.083** | 0.477 | 3 |
+| cheapest 2, even split | $4.886 (+58%) | 0.319 | 4 |
+| inverse-cost weighted | $5.887 (+91%) | 0.275 | 4 |
+| all capable, even split | $17.320 (+462%) | 0.288 | 4 |
+
+Buying evenness costs 58-462%. **Even distribution is almost certainly not what
+you want.** What makes both halves of the objective true at once is a different
+framing:
+
+> minimise cost, **subject to** per-provider rate and quota limits, and to
+> availability.
+
+Under that framing load balancing is **free until a limit binds**: use the
+cheapest capable model until its quota or rate limit is exhausted, then spill to
+the next-cheapest capable one. Spread is a *consequence* of constraints, not a
+goal traded against cost. That is a constrained-allocation problem — closer to
+bin-packing with fallback than to classification — and it is what
+`rankProvidersForTier` was evidently written for.
+
+### 10.6 Alternatives, honestly
+
+| approach | verdict |
+|---|---|
+| **Complexity tiers (current)** | Sound, cheap (0.19 ms, no model call), interpretable, and ~92% of the way to its own ceiling. Keep it. |
+| **Cascade — try cheapest, escalate on failure** | The serious competitor. It *observes* capability instead of predicting it, so it needs no classifier and cannot be wrong about complexity. Given only 5.8pp of headroom remains, a cascade could plausibly match the classifier with no classifier at all. Costs: escalation latency, double-pay on escalation, and it needs an output verifier. **Worth benchmarking; the repo cannot yet answer whether it wins, because that needs per-model quality data — which `submit_outcome` (§9) now collects.** |
+| **Learned per-model win-rate router** | Strictly more expressive than tiering: predict P(model m answers acceptably) per model rather than forcing models onto one capability rank. But it buys ≤5.8pp on cost, so it is a *quality* play, not a cost one. Reachable incrementally from the §9 outcome data. |
+| **Contextual bandit over models** | Uniquely, it handles distribution natively — exploration *is* load balancing — and self-calibrates without upfront labels. Costs: exploration spend, cold start, harder to reason about and to explain to a user. |
+| **Constrained allocation with spillover** | Not an alternative to the classifier — the missing complement to it. This is what objective 3 actually requires. |
+
+### 10.7 Recommendation
+
+1. **Stop investing in classifier accuracy for cost reasons.** 5.8pp of headroom
+   does not repay the distillation programme. Keep §3-§6 on the shelf for when
+   the goal is trust rather than spend.
+2. **Report decision accuracy (75.6%), not tier accuracy (67.8%)**, and collapse
+   the tier space onto the decision space. Then put the whole accuracy budget on
+   the `heavy`|`intensive` boundary, where the 8.8x is.
+3. **Build the spillover router** — wire `rankProvidersForTier` into selection,
+   give `gateswarm-router` an optional quota/health input, and return a ranked
+   capable set rather than a single winner. This is the only objective with a
+   real gap, and most of its code already exists.
+4. **Benchmark a cascade against the classifier** using `submit_outcome` data
+   once enough quality votes exist. If the cascade wins, the classifier becomes
+   a latency optimisation rather than the core mechanism — which is worth
+   knowing before investing further in either.
+
+One caveat on the whole evaluation: every number here uses `DEFAULT_MATRIX`,
+which the repo itself documents as "a reviewed starting point, NOT a source of
+truth". The headroom, the boundary values, and the concentration figures all
+move with the real matrix. Re-run this evaluation against the models you can
+actually reach before acting on it.
