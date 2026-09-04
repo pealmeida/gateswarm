@@ -1955,7 +1955,37 @@ machine speeds, since both measurements scale together. Bounds set to separate
 clearly in both directions: ~96 ms CPU and ~13x growth measured, against
 ~3400 ms and ~60x before the fix, with the assertions at 1000 ms and 25x.
 
-Three CI-visible mistakes in this branch, all of the same kind: a `git stash`
-that was a no-op, a grid search that refit cut points production holds fixed,
-and now a timing test that measured the runner rather than the code. Each was
-caught by re-measuring rather than by reasoning about it.
+### 19.5 And the replacement guard was still wrong
+
+The third run failed too — the absolute CPU bound passed, but the ratio
+assertion did not: **40x on CI against 13x locally**, bound 25.
+
+Measured properly, the post-fix curve is close to linear with noise: ms/char
+runs 0.69 / 0.50 / 0.71 / 0.56 / 1.13 across 4-64 KB, against 2.6 → 52.3 before
+the fix. There is mild residual superlinearity at the top end, but the absolute
+figure is ~73 ms where it was ~3400 ms, so it is not a production concern.
+
+The ratio *form* was the problem. At these durations the 8 KB baseline is a few
+milliseconds, so GC and JIT noise dominate it and the quotient swings far more
+than the underlying behaviour does. A statistic that unstable cannot separate a
+real regression from a noisy runner.
+
+Replaced with absolute CPU budgets at four sizes, which carry the same
+information stably: under the quadratic version the larger bounds all fail
+(57/214/907/3400 ms), while the fixed scorer measures 3/5/12/18/73 ms.
+
+### 19.6 The pattern
+
+Four measurement mistakes in this branch, every one of the same kind — trusting
+an instrument without checking what it actually measured:
+
+1. a `git stash` that was a no-op, so a "main vs branch" comparison compared the
+   branch to itself;
+2. a grid search that refit cut points production holds fixed, so its entropy
+   was not production's;
+3. a wall-clock timing test inside a parallel runner, which measured contention;
+4. a ratio statistic whose denominator was too small to be stable.
+
+Each was caught by re-measuring, none by reasoning about it. That is the
+argument for the guards this branch adds — and equally a caution that a guard is
+only as good as the thing it measures.

@@ -198,13 +198,20 @@ describe('scoring stays linear in prompt length', () => {
     expect(cpuMsFor(noQuestionMark)).toBeLessThan(1000);
   });
 
-  it('grows roughly linearly, not quadratically, with length', () => {
-    const small = Math.max(cpuMsFor(noQuestionMark.slice(0, 8000)), 0.5);
-    const large = cpuMsFor(noQuestionMark.slice(0, 64000));
-    // 8x the input. Linear predicts ~8x, measured ~13x, and the quadratic
-    // version was ~60x. CPU-time ratios are stable across machine speeds
-    // because both measurements scale together.
-    expect(large / small).toBeLessThan(25);
+  it('stays bounded at every size, so quadratic growth cannot hide', () => {
+    // This deliberately replaces a ratio assertion (large/small < 25). The ratio
+    // form measured 13x locally and 40x on CI: at these durations the small
+    // baseline is a few milliseconds, so GC and JIT noise dominate it and the
+    // quotient swings far more than the underlying behaviour does. A ratio that
+    // unreliable cannot distinguish a real regression from a noisy runner.
+    //
+    // Absolute bounds carry the same information stably. Under the quadratic
+    // version these were roughly 57ms / 214 / 907 / 3400 — every one of the
+    // larger bounds would fail — while the fixed scorer measures about
+    // 3 / 5 / 12 / 18 / 73ms of CPU here.
+    for (const [chars, budgetMs] of [[8000, 150], [16000, 250], [32000, 500], [64000, 1000]] as [number, number][]) {
+      expect(cpuMsFor(noQuestionMark.slice(0, chars)), `${chars} chars`).toBeLessThan(budgetMs);
+    }
   });
 
   it('counts questions the way the replaced regex did', () => {
