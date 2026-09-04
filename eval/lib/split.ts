@@ -22,10 +22,15 @@ import { createHash } from 'crypto';
  *
  * v1 — 90 effort prompts. Length-separated by construction: ranking by
  *      character count alone scored 86.7% exact on it.
- * v2 — 126 effort prompts. Adds 36 length-decorrelated examples (long-and-easy,
- *      short-and-hard) so the benchmark can distinguish complexity from verbosity.
+ * v2 — 126 prompts. Adds 36 INVERTED examples (long-and-easy, short-and-hard),
+ *      taking length-to-tier Spearman from 0.956 to 0.293. Each tier became
+ *      bimodal in length: very short or very long, nothing in between.
+ * v3 — 180 prompts. Adds 54 more chosen to FILL each tier's length range rather
+ *      than invert it, so every tier now spans all four length bands. The goal
+ *      is length independent of difficulty, which cancelling correlations does
+ *      not achieve on its own.
  */
-export const ACTIVE_SPLIT_VERSION = 'v2';
+export const ACTIVE_SPLIT_VERSION = 'v3';
 export const foldsFile = () => `folds.${ACTIVE_SPLIT_VERSION}.json`;
 export const holdoutFile = () => `holdout.${ACTIVE_SPLIT_VERSION}.json`;
 export const trainFile = () => `train.${ACTIVE_SPLIT_VERSION}.json`;

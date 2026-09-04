@@ -1,15 +1,15 @@
 {
-  "version": "v2",
+  "version": "v3",
   "seed": 42,
   "k": 5,
   "testFrac": 0.3,
   "counts": {
-    "effort": 126,
+    "effort": 180,
     "mode": 45
   },
   "hashes": {
-    "dataset.json": "79d71de40439c87c8236b5952d098a025d8b267858bf03c723efc9df211629b2",
-    "folds.v2.json": "4a4a56485d5a344bb5c35ae5748e8dfa7530d54b1885e4e2ac896294e5497e09",
-    "holdout.v2.json": "9a4f03e2b62932a316e6964dc13a4bb7761e5a7699fc1d1f17d085f97712a7ee"
+    "dataset.json": "6356dde26530f6e9fcef3c7f57b2d0a35dd622fdbda16bfba5b71b67d34f17cf",
+    "folds.v3.json": "92fa86ca434d974e06e8a01b0bdcc6e3939f6b2d93d3c0121a1aa75eace1fec9",
+    "holdout.v3.json": "bb8924e2325e2f612f54aee71371ea16c0e94d9fc9b1df8f0a6715ebb86bbb0b"
   }
 }

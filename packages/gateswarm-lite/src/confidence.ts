@@ -25,30 +25,32 @@ export type TierReliability = Record<EffortLevel, number>;
 const TIERS: readonly EffortLevel[] = ['trivial', 'light', 'moderate', 'heavy', 'intensive', 'extreme'];
 
 /**
- * Fitted on eval/dataset.json (v2, 126 examples) with 5-fold out-of-fold
+ * Fitted on eval/dataset.json (v3, 180 examples) with 5-fold out-of-fold
  * prediction, boundaries fit on train folds only, K=6 pseudo-counts toward the
- * 0.4762 accuracy prior. Regenerate whenever the scorer, DEFAULT_BOUNDARIES or
+ * 0.4000 accuracy prior. Regenerate whenever the scorer, DEFAULT_BOUNDARIES or
  * the dataset change on purpose.
  *
- * These dropped sharply from the v1 values (prior 0.6444 → 0.4762) when the
- * dataset gained length-decorrelated examples. The v1 numbers were not
+ * These fell across two dataset revisions (prior 0.6444 → 0.4762 → 0.4000) as
+ * length-decorrelated examples were added. The v1 numbers were not
  * conservative estimates that turned out wrong — they were inflated by the same
  * confound as everything else measured on v1: where length ≈ label, the scorer
  * looked reliable because length was.
  *
- * Read them as a floor, not a verdict. v2 deliberately over-weights adversarial
- * examples (36 of 126, at Spearman -0.79 length-to-tier), so the true figure on
- * real traffic sits somewhere above these and below the v1 ones. Neither
- * benchmark is representative; real verdicts installed via setTierReliability()
- * are what should ultimately replace both.
+ * Read them as a floor, not a verdict — but a closer floor than v2's. The v3
+ * dataset carries a length-to-tier correlation of 0.194 against real traffic's
+ * ~0.131, so it is the first version whose length structure resembles production
+ * rather than either the original benchmark (0.956) or a deliberately inverted
+ * one. `heavy` at 0.256 is barely above the 0.167 chance rate for six tiers,
+ * which is the scorer reporting honestly that it cannot do that tier. Real
+ * verdicts installed via setTierReliability() remain what should replace these.
  */
 export const DEFAULT_TIER_RELIABILITY: TierReliability = {
-  trivial: 0.7440,
-  light: 0.5390,
-  moderate: 0.4949,
-  heavy: 0.4921,
-  intensive: 0.2648,
-  extreme: 0.4778,
+  trivial: 0.6308,
+  light: 0.5154,
+  moderate: 0.4222,
+  heavy: 0.2559,
+  intensive: 0.3350,
+  extreme: 0.4966,
 };
 
 let _reliability: TierReliability = { ...DEFAULT_TIER_RELIABILITY };
