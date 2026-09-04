@@ -1073,3 +1073,129 @@ its accuracy against a benchmark that cannot distinguish it from counting
 characters.** The routing layer is the most valuable component in the system.
 The 35-feature complexity model inside it is, on all available evidence,
 unearned.
+
+
+---
+
+## 12. Evolving the classifier to predict effort, not length — measured 2026-09-04
+
+§11 showed the scorer cannot beat counting characters on its own benchmark. This
+section is the answer to "what would actually work", and it is measured rather
+than proposed.
+
+### 12.1 The decisive test is partial correlation, not correlation
+
+A feature that correlates with difficulty *because it correlates with length* is
+worthless — it re-imports the confound that caused the saturation failure. The
+right screen is **partial Spearman correlation with difficulty, controlling for
+log(length)**.
+
+Run against the real-traffic corpus, that screen finds something the raw
+correlation completely hides:
+
+| signal | raw rho | **partial rho** (length controlled) |
+|---|---|---|
+| `requirement_count` | -0.063 | **-0.296** |
+| `structure_density` | -0.160 | **-0.244** |
+| `sentence_count` | +0.041 | **-0.201** |
+| `multi_step` | +0.180 | +0.182 |
+| `conjunction_enumeration` | +0.031 | **-0.150** |
+| `technical_design` | +0.176 | +0.148 |
+| `deictic_density` *(new candidate)* | -0.172 | -0.142 |
+| log(chars) — the confound | +0.131 | — |
+
+`requirement_count` is the strongest signal in the entire feature set once length
+is held constant, it was invisible at raw rho -0.063, and **it points the opposite
+way from how the scorer uses it.**
+
+The pattern is coherent: **specification markers are negative predictors of
+difficulty.** A prompt that enumerates its requirements, splits into sentences and
+lists its constraints is *easier* than one of the same length that does not — it
+has done the decomposition work for the model. The scorer adds all of these with
+positive weights.
+
+### 12.2 The signs are wrong, and length hid it
+
+Fitting a ridge model on **length-normalised** features (every count divided by
+word count), with a 70/30 split of the real corpus:
+
+| model | held-out rho vs real difficulty |
+|---|---|
+| `log(chars)` alone | 0.083 |
+| current shipped scorer | 0.244 |
+| **length-residualised refit** | **0.399** |
+
+**64% better than the shipped scorer, on held-out real data**, using the *same
+features* — only the representation (densities) and the signs/weights (learned,
+not hand-set) changed.
+
+Three sign conflicts the refit surfaced:
+
+| feature | scorer uses | data says |
+|---|---|---|
+| `requirement_count` | +0.012 each | **negative** |
+| `sentence_count` | + (via `structScore`) | **negative** |
+| `has_negation` | +0.02 | **negative** |
+
+This explains why the composite barely beat length in §11: correctly-signed
+features were being cancelled by wrongly-signed ones, and the length term carried
+the result.
+
+### 12.3 What to change, in order
+
+**1. Representation: densities, never counts.** Divide every count feature by
+prompt length. This is not a tweak — it is the single change that removes the
+confound, and §8 already showed it works (the two density features added there are
+the two strongest length-independent signals in the set). *Any new feature that is
+a raw count will re-import the bug.*
+
+**2. Learn the weights; stop hand-setting them.** The hand-weighted linear sum is
+the mechanism by which three signs ended up backwards. The repo already has
+`OrdinalLogisticClassifier` for this. §7.1 found it *underperforming* the
+heuristic (58.9% vs 61.1%) — but that was on the length-separable golden set,
+where the heuristic's length dominance is an advantage. On real data with density
+features, the ordering should reverse. That is a cheap experiment and it has not
+been run.
+
+**3. Change the target: predict observable effort, not an assigned tier.** This is
+the deepest change. "Complexity" is a latent property people disagree about;
+**effort is observable** — turns taken, retries, tokens spent, whether a cheap
+model coped. §6's outcome review already collects exactly this. Predicting a
+measurable quantity converts a 6-way ordinal classification on subjective labels
+into a regression on ground truth, and it makes the target *identical* to what the
+objective in §10 actually cares about.
+
+**4. Guard everything with the length baseline.** `log(chars)` in
+`eval/leaderboard.ts` as a permanent row. Nothing ships that cannot beat it.
+
+### 12.4 Signals worth adding — and the ones that failed
+
+Twelve length-independent candidates were tested. Most did **not** clear
+|partial rho| >= 0.10 and should not be built:
+
+- failed: `unverifiable_ratio`, `checkable_ratio`, `definiteness`,
+  `chained_reference`, `tradeoff_pressure`, `decision_points`, `why_how_ratio`,
+  `subordination`, `rare_token_ratio`, `words_per_clause`
+- survived: `deictic_density` (-0.142) — how much unresolved external reference
+  the prompt carries; `multiplicity` (+0.107) — whether many answers are
+  acceptable
+
+That is a 2-from-12 hit rate on plausible-sounding features, which is the point:
+**the existing features already carry more signal than new ones, they are just
+mis-signed and swamped by length.** Fixing representation and signs is worth far
+more than inventing features, and should come first.
+
+### 12.5 Honest limits
+
+- **The target is a proxy.** MLJAR `level` describes the *topic's* level, not the
+  task's difficulty. rho 0.399 against a noisy label is real movement, not a
+  claim about true difficulty. Observed effort (step 3) is the fix.
+- **One corpus, one genre.** 678 professional role-prompts. Nothing here has been
+  checked against conversational or agentic traffic.
+- **The refit is a proof of concept**, not a shippable model: 37 parameters on 474
+  training rows, and no calibration, gates or snapshots.
+- **There is a real tension to resolve.** Flipping `requirement_count` and
+  `sentence_count` improves real-traffic correlation but will likely *hurt* golden
+  CV accuracy, because the golden set rewards length-alignment. That is a decision
+  about which distribution the project is optimising for, and it should be made
+  deliberately rather than discovered through a regression.
