@@ -501,3 +501,83 @@ This is the section to read twice.
 ### 6.8 What the user does now
 
 Nothing, in the normal case. The classifier is called on every prompt by a hook, the teacher votes in the user's place, the reviewer grades the finished work against the tier, and all three land on one `prompt_id`-keyed record. The human is asked only on the disagreement patterns in §6.6 and on the ~3% control — and the control is the part that keeps the whole loop honest, so it is the one thing that must never be optimized away.
+
+---
+
+## 7. Reality check — measured, 2026-09-04
+
+Everything above is design. This section is measurement, run on this commit with `npm run eval:cv`, `eval:leaderboard`, `simulate:prompts`, and `fit:report`. It changes the recommended sequencing.
+
+### 7.1 Accuracy on the golden distribution is better than the docs claim
+
+`eval/ASSESSMENT.md` (45.6% exact / 84.4% adjacent) is stale — it is v0.5.2 and, as `ACCURACY_ROADMAP.md` §1.2 admits, was measured on the same set the boundaries were fit on. Cross-validated on this commit:
+
+| Classifier | exact | ± | adjacent | bias | ECE | mode F1 | latency |
+|---|---|---|---|---|---|---|---|
+| `heuristic-linear` | **61.1%** | 7.0% | **94.4%** | +0.02 | 0.150 | 93.3% | 0.18 ms |
+| `ordinal-logistic` | 58.9% | 5.7% | 91.1% | +0.03 | 0.149 | n/a | 0.22 ms |
+
+Per-tier recall (heuristic): trivial 100% · light 66.7% · moderate 73.3% · **heavy 26.7%** · intensive 40.0% · extreme 60.0%.
+
+Two gate failures stand out: **ECE 0.150** against the ≤0.10 requirement, and **heavy recall 26.7%** against ≥30%. Adjacent (94.4%) clears its ≥90% bar comfortably.
+
+**The ordinal head is worse than the hand-weighted heuristic it was meant to replace** (58.9% vs 61.1%). That is the textbook signature of a 27-parameter model fit on 60 training examples, and it is the strongest empirical argument in this document for §3: the learned head is not a bad idea, it is a starved one.
+
+### 7.2 On real-world prompts, the scorer routes 100% to `extreme`
+
+`npm run simulate:prompts` over the 678-prompt MLJAR corpus — the only real-world traffic in the repo:
+
+```
+trivial 0 · light 0 · moderate 0 · heavy 0 · intensive 0 · extreme 678 (100.0%)
+```
+
+Direct measurement of why:
+
+| | golden set | MLJAR (real) |
+|---|---|---|
+| score p50 | 0.16 – 0.50 across tiers | **0.765** |
+| score **min** | 0.125 | **0.500** |
+| prompt chars p50 | 113 | **1869** (16×) |
+
+The top boundary is **0.485382**. The *minimum* real-world score (0.500) is above it, so **678/678 land in `extreme`**. `fit:report` reaches the same conclusion through its own path and prints the warning: *"Saturation: 100.0% of traffic above top boundary … top band carries >50% of traffic — tiers carry little resolution there"*, with all four lower boundaries flagged **"no nearby traffic — dead zone"** and a labeling priority queue containing exactly **one** item.
+
+The mechanism is not a bug — it is the design working as documented. `ACCURACY_ROADMAP.md` §1 records that the scorer is length-dominant (`length 0.34`, "the strongest available signal"). Golden prompts are hand-written one-liners; real professional prompts are long because they are *well-specified*, not because they are hard. **On real traffic, length is a confounded feature.**
+
+### 7.3 What this costs
+
+| Scenario | Cost index (678 prompts) | Model share |
+|---|---|---|
+| **Today** | **8136** ($12.000/1M blended, mean) | 100% `claude-sonnet` |
+| Recalibrated to a plausible mixed distribution | ~1985 | spread across the matrix |
+
+So the honest cost answer for real-world use **today** is not the README's 60–90% saving. It is **zero saving, with routing overhead on top** — strictly worse than pinning the expensive model directly. The ~76% gap above is the *opportunity*, and the mix behind it is an assumption, which is precisely what the loop exists to replace with measurements.
+
+### 7.4 Does the loop in §3–§6 fix this?
+
+**The cost failure: yes, and the diagnosis is favorable.** Saturation is not total — only 10.6% of real prompts hit the hard 1.000 ceiling, and there are 90 distinct score values across 678 prompts. Fitting cut points to equal-frequency sextiles of real traffic yields five **non-degenerate** boundaries (0.640 · 0.700 · 0.765 · 0.850 · 0.960). There is real resolution left to exploit; the boundaries are simply in the wrong place for this distribution. Better still, the loop's designated transfer set *is* the corpus that exposes the failure.
+
+**The accuracy failure: partially.** Refitting to quantiles only swaps one assumption (the golden distribution) for another (a uniform tier mix in real traffic). Teacher labels replace that assumption with judgments — that is the point of §3 — but two limits hold:
+
+- The 10.6% pinned at 1.000 is a **representation** problem. No arrangement of cut points separates tied scores. Fixing it needs the feature work `ACCURACY_ROADMAP.md` already prescribes: normalize or re-saturate length, and add features that separate *long-and-routine* from *long-and-hard*. Teacher `evidence[]` spans (§3.4) are the fastest way to find them.
+- Matrix and `maxEffort` calibration remains out of reach from Claude Code telemetry (§6.7 rule 2).
+
+### 7.5 The finding that changes the sequencing
+
+§5.2 and §6.6 budget human attention on the assumption that **the student is usually right**, so teacher–student disagreement is the rare, valuable case. At 100% `extreme`, that assumption inverts: the student says `extreme` for everything, so disagreement would be the overwhelming majority of traffic and the review queue becomes *everything*. The loop's entire ask-rate economy collapses if it is switched on before the saturation is addressed.
+
+Recommended order — **do not ship the plugin for cost savings first**:
+
+1. **Fix saturation.** Re-saturate the length feature and/or refit boundaries against real traffic. Cheap, and it is a prerequisite: labels collected from a scorer pinned at max carry almost no information.
+2. **Then run the loop** (§3–§6) to convert the quantile assumption into judgments, and to mine rationales for the missing features.
+3. **Then re-run `fit:report`** and quote cost efficiency from measurement.
+
+### 7.6 Answering the question directly
+
+> *Will this setup allow us to run GateSwarm in real-world use cases while maintaining high inference accuracy and cost efficiency?*
+
+- **Inference speed and cost of the router itself:** already fine and not the constraint — 0.18 ms mean, zero model calls, zero dollars.
+- **Accuracy:** 61.1% exact / 94.4% adjacent is respectable *on the golden distribution*, and unknown on the real one, because zero real-world labels exist today. ECE and heavy recall currently fail their gates.
+- **Cost efficiency in real-world use, today:** no. 100% of real traffic routes to the most expensive model. The claimed 60–90% saving is unsupported on the one real corpus in the repo.
+- **With the loop, after step 1:** plausible, and the arithmetic is attractive (~76% of the cost index is addressable) — but it must be *earned by measurement*, through the existing gates, not assumed.
+
+The setup is **necessary and well-designed, but not sufficient on its own**, and its value is unlocked in a specific order. Every number above came from tooling already in this repository, which is the strongest thing that can be said for the project's honesty infrastructure: it detected its own headline failure without being asked to.
