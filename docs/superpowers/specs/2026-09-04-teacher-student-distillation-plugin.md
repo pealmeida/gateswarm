@@ -370,3 +370,134 @@ Five commands, of which two are install-once and one is optional. Everything els
 - **The audit still needs a human who knows the tier semantics.** ~30 judgments to a stable κ estimate, and a rubric revision means re-auditing. This is the irreducible cost; §3.7's 2–3 hours is real work, not a formality.
 - **`/gs-refit` output requires judgment.** The gate returns PASS/FAIL, but deciding whether a passing boundary move is *worth* shipping — against snapshot drift and against the organic-traffic requirement — is a review, not a button.
 - **Cold-start labels are out-of-distribution for any specific deployment.** MLJAR prompts bootstrap the ordinal head; they do not license a `DEFAULT_BOUNDARIES` change on their own. The dogfood rule still binds: a boundary PR needs organic traffic behind it.
+
+---
+
+## 6. Agent-as-voter and outcome-grounded review inside Claude Code
+
+§5 removed most of the human from the *labeling* path. This section removes them from the *voting* path, and adds a second, better teacher signal that only an agentic host can produce: **what the work actually took**.
+
+### 6.1 The mechanisms Claude Code provides
+
+| Need | Mechanism | Session-context cost | Token cost |
+|---|---|---|---|
+| Delegate **every** prompt to the classifier | `UserPromptSubmit`, `type: "command"`, `async: true` | none (no stdout) | zero |
+| Teacher votes **instead of the user** | `UserPromptSubmit`, `type: "prompt"` | none | small, cacheable prefix |
+| Observe realized effort as it happens | `PostToolUse`, `type: "command"`, `async: true` | none | zero |
+| Review the finished work against its tier | `Stop`, `type: "agent"` | none — runs as a subagent | one short review |
+| Persist labels | `type: "mcp_tool"` → `gateswarm` server | none | zero |
+
+**`prompt_id` is the join key.** It is a UUID present on *every* hook event and, per the hooks reference, exists precisely to correlate telemetry. `UserPromptSubmit` (the decision), each `PostToolUse` (the effort counters), and `Stop` (the outcome) all carry the same `prompt_id`, so the three writes land on one record with no correlation heuristics. `transcript_path` — also on every event — gives the reviewer the full trajectory without the main session having to carry it.
+
+Two rules keep this invisible to the user: every hook returns **no `additionalContext`** (context injected on every turn is a tax the loop has not earned), and every hook is `async` or exits 0 unconditionally. A scoring bug must never be able to block a prompt or delay a Stop.
+
+### 6.2 Wiring
+
+```json
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      { "hooks": [
+        { "type": "command", "async": true,
+          "command": "\"${CLAUDE_PLUGIN_ROOT}\"/scripts/score-and-open.sh" },
+        { "type": "prompt", "timeout": 20,
+          "prompt": "You are the GateSwarm tier teacher. Rubric: @${CLAUDE_PLUGIN_ROOT}/skills/tier-teacher/SKILL.md\nJudge ONLY the user prompt in this event. Return {\"tier\",\"confidence\",\"rationale\",\"evidence\"} or {\"tier\":null}.\n$ARGUMENTS" }
+      ] }
+    ],
+    "PostToolUse": [
+      { "hooks": [ { "type": "command", "async": true,
+                     "command": "\"${CLAUDE_PLUGIN_ROOT}\"/scripts/tally.sh" } ] }
+    ],
+    "Stop": [
+      { "hooks": [ { "type": "agent",
+                     "prompt": "Review the completed task against its routing decision. Read the transcript at the transcript_path in $ARGUMENTS, compute the realized-effort vector, and call gateswarm/submit_outcome_review. Do not comment on the answer's quality as evidence for tier.\n$ARGUMENTS" } ] }
+    ]
+  }
+}
+```
+
+`score-and-open.sh` scores + routes + opens the record. The `prompt` hook is the teacher's vote. `tally.sh` increments counters keyed by `prompt_id`. The `Stop` agent hook closes the record.
+
+### 6.3 Two teacher signals, and why the second is worth more
+
+| | **Teacher-prior** (`UserPromptSubmit`) | **Teacher-posterior** (`Stop`) |
+|---|---|---|
+| Sees | the prompt text | the whole trajectory |
+| Asks | "what tier does this look like?" | "what tier did this turn out to be?" |
+| Latency | immediate | end of task |
+| Cost | small per prompt | one review per task |
+| **Error correlation with the student** | **high — same input, same surface cues** | **low — different evidence entirely** |
+| Provenance | bronze | silver (see §6.6) |
+
+This is the part worth being blunt about: a prompt-only teacher is *another model guessing from exactly the text the student already sees*. It is better-informed than the student's 35 features, but its mistakes correlate with the student's, so it adds less independent information than its accuracy suggests. The outcome reviewer breaks that correlation — it is scored against evidence the student structurally cannot access at prediction time. **That is the label worth collecting.**
+
+### 6.4 The realized-effort vector
+
+Computable from `transcript_path` plus the `PostToolUse` tally, all with zero model calls:
+
+| Signal | Read from |
+|---|---|
+| `assistantTurns` | transcript |
+| `toolCalls`, by kind | tally |
+| `filesRead`, `filesEdited`, `linesChanged` | tally on `Edit`/`Write` |
+| `testRuns`, `testFailuresBeforeGreen` | tally on `Bash` + `tool_response` |
+| `backtracks` — re-reading a file already read, reverting an edit | transcript |
+| `userInterventions` — user turns mid-task that correct or redirect | transcript (**strongest single negative**) |
+| `subagentSpawns` | `SubagentStop` events |
+| `tokensIn/Out`, `wallClockMs` | transcript |
+| `completed` vs abandoned | terminal state |
+| `effort.level` — Claude Code's own setting | any hook event (free cross-check against the tier) |
+
+**Map realized effort to a realized tier by project-relative quantiles, not absolute thresholds.** Fifteen tool calls means something different in a monorepo than in a scratch project. `TIER_EXPECTED_TOKEN_RANGES` in `src/self-eval.ts` is the absolute-threshold version of this idea and is the wrong shape for agentic work — it scores one response's output tokens, not a trajectory.
+
+### 6.5 The routing verdict
+
+`src/self-eval.ts` already has the skeleton: `quickEval()` for heuristic adequacy, `llmJudge()` returning `{adequacy, correctTier}`, and a `predictedCorrectTier` field on `SelfEvalResult`. The Claude Code reviewer is that function generalized from *one response* to *one trajectory*. Combine adequacy with effort:
+
+| | **low realized effort** | **high realized effort** |
+|---|---|---|
+| **task succeeded** | tier right, or **over-routed** | tier right, or **under-routed** |
+| **task failed / abandoned** | ambiguous prompt — queue for human | **under-routed** |
+
+Verdict vocabulary: `right` · `over_routed` · `under_routed` · `unknown`. `unknown` is a first-class output and must outnumber forced guesses on a healthy corpus.
+
+`over_routed` and `under_routed` are directly cost-denominated, which is what makes them useful: `labelingQueue()` in `scripts/lib/fit.ts` already prices boundary swings in dollars per prompt, so an outcome verdict converts straight into "this cut point is costing $X".
+
+### 6.6 Three-way agreement collapses the human's role
+
+Each record ends with three independent tier estimates:
+
+```
+student tier    ← 35 features, prediction time
+teacher prior   ← rubric on prompt text
+realized tier   ← trajectory, after the fact
+```
+
+| Pattern | Action | Provenance |
+|---|---|---|
+| all three agree | store, no human | **bronze**, high confidence |
+| prior **and** realized agree, student differs | store, no human — **the highest-value training example** | **silver** |
+| prior and student agree, realized differs | ask the human — misleading prompt, or a confound | queue |
+| all three differ | ask the human | queue |
+| reviewer returned `unknown` | ask the human | queue |
+| random control (~3%) | ask the human, **rendered identically** | gold |
+
+This maps onto `src/label-combiner.ts` unchanged. It also *upgrades* its silver tier: silver is currently "RAG contextual consensus" at weight 0.3, a weak signal. Two independent judges concurring against the student is a much stronger silver, and the existing agreement-based recalibration (`FULL_PHASE_MIN_COMPARISONS = 30`, `FULL_PHASE_MIN_AGREEMENT = 0.7`) will find that out on its own if fed the comparisons.
+
+### 6.7 Confounds — what this can and cannot calibrate
+
+This is the section to read twice.
+
+1. **Realized effort measures `difficulty × (1 / model capability)`, not difficulty.** A weak model taking 15 turns and a hard task taking 15 turns are indistinguishable from the trajectory alone. Normalize per-model from the event history, or hold the model fixed within any comparison.
+
+2. **In Claude Code the executor is Claude, not the routed model.** The transcript measures what *Claude* needed, which is a reasonable difficulty proxy but is not the counterfactual for "would `zai/glm-4.7-flash` have coped?". The consequence is sharp and worth stating as a rule: **Claude Code outcome review calibrates the scorer and the boundaries; it cannot calibrate `DEFAULT_MATRIX` or any model's `maxEffort`.** Matrix calibration needs the gateway executing genuinely routed requests — that is what `eval/hybrid-routing-eval.ts` is for.
+
+3. **Acceptance is not evidence of correct routing.** Route high and you get a thorough answer that looks justified; route low and you get a terse answer the user accepts, which also looks justified. The counterfactual is unobservable without intervention. Budget a ~5% **shadow stratum** that is deliberately routed one tier off and compare outcomes — without it, the loop can only confirm itself.
+
+4. **The reviewer is grading its own model family's work.** Not a dishonesty problem — a perceptual one: work the model found easy reads as easy. Mitigations: the reviewer runs from `transcript_path` only, with no session context; the rubric forbids citing the answer's quality as evidence for tier; and the human control stratum from §3.5 still measures signed bias `E[reviewer − human]`. If that drifts past ±0.2 tiers, fix the rubric, not the boundaries.
+
+5. **Attribution is genuinely messy.** One `prompt_id` can span several `Stop` events (the model pauses and continues), and one user *task* can span several prompts. Rule: attribute effort to the `prompt_id` that opened the record, close the record on the first `Stop` where `stop_hook_active` is false, and mark records with `userInterventions > 0` as multi-prompt — they are the queue's best entries anyway.
+
+### 6.8 What the user does now
+
+Nothing, in the normal case. The classifier is called on every prompt by a hook, the teacher votes in the user's place, the reviewer grades the finished work against the tier, and all three land on one `prompt_id`-keyed record. The human is asked only on the disagreement patterns in §6.6 and on the ~3% control — and the control is the part that keeps the whole loop honest, so it is the one thing that must never be optimized away.
