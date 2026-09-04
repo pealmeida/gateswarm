@@ -17,7 +17,13 @@
         "what does CPU stand for",
         "is the sky blue, yes or no",
         "what time zone is London in",
-        "give me a synonym for happy"
+        "give me a synonym for happy",
+        "Hey! Hope the week's treating you well. I know everyone's been heads-down since the release and I didn't want to add noise to the channel while people were firefighting. Nothing urgent here at all. I'm putting together the travel plan for next month and I've already got the flights held and the hotel shortlisted, so I'm nearly done. There's just one thing I want to confirm before I book anything. What's the capital of Australia?",
+        "Following up on the thread from yesterday, and please ignore this if you're still catching up after the offsite. I've attached the itinerary, the hotel confirmations and the expense pre-approval, so everything on my side is basically ready to go and I don't need anything from you on those. The only thing I can't remember off the top of my head, and it's embarrassing to ask: what time zone is Tokyo in?",
+        "Quick recap of where we landed so nobody has to re-read the whole thread. We agreed to push the launch by two weeks, marketing is aware and has already adjusted the campaign calendar, and legal signed off on the copy on Thursday afternoon. Sam is handling the changelog and Priya will send the customer note on Monday. One last sanity check for my own calendar before I close the loop: was the meeting on Tuesday? Yes or no is fine.",
+        "Thanks so much for putting all of this together, it genuinely saved me a lot of time this week and I've already shared it with the rest of the team, who were equally grateful. I'm going through the budget line by line now and mostly everything reconciles against what finance sent over. There's one bit of arithmetic I keep second-guessing myself on, so I'd rather just ask: what's 25 percent of 80?",
+        "Long story short: the vendor got back to us late, the invoice came through in a different currency than we expected, and finance wants everything normalised before end of quarter. I've already flagged it to procurement and they're handling the currency side, so that part is genuinely fine. Before I finish filling in the form I need one unit conversion I should honestly know by heart. How many centimetres are in a metre?",
+        "Just so you have the full context before you reply to the customer. They originally reached out in March about the billing discrepancy, we escalated in April once it was clear it wasn't a one-off, and the account team has been looping in support ever since. Nothing is on fire, I promise, and the fix shipped last week. I'm updating the record now and drew a complete blank on something basic. What does CPU stand for?"
       ]
     },
     {
@@ -37,7 +43,13 @@
         "Explain what a fiscal quarter is in one or two sentences.",
         "Take this list of three items and turn it into a single comma-separated line: apples, bread, eggs.",
         "Summarize this in a sentence: the app keeps crashing whenever I try to upload a photo larger than ten megabytes.",
-        "What's a simpler word I could use instead of utilize in a casual email?"
+        "What's a simpler word I could use instead of utilize in a casual email?",
+        "Here's the note I'm about to send to the customer after everything that happened last quarter with the migration delays and the two support escalations. I've already run it past the account manager and she's happy with the substance, so please don't restructure it or change what it commits us to. The tone of the closing line is the only thing bothering me: 'Let us know if you need anything else, otherwise we'll consider this closed.' Rewrite just that last sentence to be warmer and more polite.",
+        "Pulling together the release notes and the dates came from four different trackers, so they're in four different formats: 03/07/2025, July 9 2025, 2025-07-14, and 21.07.2025. I've already checked each one against the deploy log so I'm confident the dates themselves are right and nothing needs re-verifying. I just need them consistent before this goes into the changelog. Convert all four into ISO 8601 format.",
+        "Below is the raw transcript chunk from the incident review call. I've stripped the timestamps already and removed the bits where we were waiting for people to join, so what's left is just the discussion itself. It runs to about four paragraphs and covers the rollback decision, the monitoring gap, and the follow-up owners. I don't need analysis of any of it. Summarise the whole thing in one sentence.",
+        "This is the product blurb marketing sent over for the new tier, and it's currently sitting at about ninety words, which is roughly triple what fits in the card component on the pricing page. The claims have all been through legal already so the substance can't change and no feature can be dropped. What I need is purely a length problem. Shorten it to twenty words.",
+        "Attaching the meeting notes from the vendor sync. There were seven people on the call across three companies, and the notes are a bit of a mess because two of us were typing into the same doc at once, so some lines are duplicated and the attribution is inconsistent in places. I don't need the content cleaned up or the duplicates merged. Just list every person's name that appears.",
+        "Here's the paragraph from the onboarding doc that keeps getting flagged in review. The content is correct and has been signed off twice, so nothing about what it says should change, and the technical terms all need to stay exactly as they are because they match the API reference. It's purely the writing that's the problem: there are a few comma splices and one tense shift. Fix the grammar without changing any wording otherwise."
       ]
     },
     {
@@ -57,7 +69,13 @@
         "Write a function that flattens a nested array of arbitrary depth into a single flat array.",
         "Explain how JWT authentication works from login to validating a request on the server.",
         "I have a CSV of sales records; write a script that totals revenue per product and sorts descending.",
-        "Walk me through why my recursive Fibonacci is so slow and how memoization would fix it."
+        "Walk me through why my recursive Fibonacci is so slow and how memoization would fix it.",
+        "Compare REST and GraphQL for our public API.",
+        "Explain eventual consistency to a non-technical PM.",
+        "What's the practical difference between a mutex and a semaphore?",
+        "We're writing the internal FAQ for the new billing system and this question keeps coming up from the support team in slightly different forms, so I want one canonical answer we can point everyone at. The billing system charges monthly in arrears, prorates mid-cycle upgrades, and doesn't prorate downgrades until the following cycle. Finance has confirmed all three of those rules are correct and they aren't changing. Write the FAQ answer explaining how proration works, in plain language, for a customer audience.",
+        "Context for this one: we've had three separate teams independently ask whether they should be using our shared cache or standing up their own. The shared cache is a single Redis cluster, it's currently at about 40 percent memory headroom, and the platform team owns it but doesn't want to be a bottleneck on every request. I'm not asking you to make the decision for us. Write up the tradeoffs so the teams can decide for themselves.",
+        "I'm putting together a short internal explainer because a lot of people on the team have started using the words interchangeably in design docs and it's causing confusion in review. The terms are idempotency, atomicity, and determinism. Everyone has a rough sense of each one but nobody can quite articulate the boundaries, and the existing wiki page just links out to three Wikipedia articles. Explain how the three differ, with one concrete example each."
       ]
     },
     {
@@ -77,7 +95,13 @@
         "Implement a job scheduler that runs tasks at fixed intervals, handles overlapping runs, and supports pause and resume per task.",
         "I want a streaming CSV parser that handles quoted fields, embedded newlines, and configurable delimiters without loading the whole file.",
         "Write a binary serialization layer for a struct with versioning so older readers can skip unknown fields gracefully.",
-        "Build a priority queue backed by a binary heap and use it to implement Dijkstra shortest path on a weighted graph."
+        "Build a priority queue backed by a binary heap and use it to implement Dijkstra shortest path on a weighted graph.",
+        "Find the off-by-one in a binary search.",
+        "Design a retry policy that won't amplify an outage.",
+        "Why would p99 latency be 10x p50 under steady load?",
+        "Make this endpoint idempotent without a dedupe table.",
+        "How do I make a schema migration reversible mid-flight?",
+        "Our cache hit rate dropped 30% overnight. Where do I look?"
       ]
     },
     {
@@ -97,7 +121,13 @@
         "Refactor our error-handling so every service reports failures consistently, retries are bounded, and we stop swallowing exceptions, without rewriting business logic everywhere.",
         "Design a feature-flag rollout strategy for shipping the new search backend to 5% then 100% of users while keeping a clean rollback path and measuring impact.",
         "Audit our Kubernetes setup for why pods get evicted under load and recommend resource limits, autoscaling rules, and scheduling changes with the reasoning behind each.",
-        "I need to consolidate three overlapping customer datasets with mismatched IDs and date formats into one clean source of truth, deciding how to resolve conflicts."
+        "I need to consolidate three overlapping customer datasets with mismatched IDs and date formats into one clean source of truth, deciding how to resolve conflicts.",
+        "Design a CRDT for an ordered list.",
+        "Prove this scheduler is starvation-free.",
+        "Design a lock-free MPMC queue.",
+        "How do we reshard with zero downtime?",
+        "Derive our consistency/availability tradeoff.",
+        "Make writes linearizable across three regions."
       ]
     },
     {
@@ -117,7 +147,13 @@
         "Plan a research-grade evaluation of three competing consensus protocols under partition, clock skew, and Byzantine nodes, then synthesize which to adopt given our latency and durability targets.",
         "Help me redesign our streaming data platform so that backfills, late-arriving events, schema evolution, and exactly-once sinks all coexist without ever producing duplicate or dropped records downstream.",
         "I'm trying to architect a globally consistent inventory system for flash sales where overselling is impossible, latency is low everywhere, and a regional outage degrades gracefully instead of failing.",
-        "Untangle how to do a live cross-cutting refactor splitting our shared auth, billing, and tenancy layers out of the monolith while three teams keep shipping and zero customer sessions break."
+        "Untangle how to do a live cross-cutting refactor splitting our shared auth, billing, and tenancy layers out of the monolith while three teams keep shipping and zero customer sessions break.",
+        "Design a distributed transaction protocol.",
+        "Architect multi-region active-active for this.",
+        "Prove our exactly-once delivery guarantee.",
+        "Design a compiler backend for a new ISA.",
+        "Build a deterministic distributed scheduler.",
+        "Formally verify our consensus implementation."
       ]
     }
   ],

@@ -76,17 +76,20 @@ describe('the guard, as a live assertion', () => {
     return hits / examples.length;
   };
 
-  it('records that eval/dataset.json is separable by length alone', () => {
-    // NOT a target — a warning. This dataset was written with longer prompts for
-    // harder tiers (only 1 of 15 tier pairs has overlapping interquartile
-    // character ranges), so ranking by length scores far above chance and every
-    // accuracy figure measured on it inherits that.
+  it('tracks how far the dataset still rewards ranking by length', () => {
+    // History: on v1 (90 examples) this stood at 86.7% — length-to-tier Spearman
+    // was 0.956, so the benchmark could barely distinguish complexity from
+    // verbosity. v2 added 36 length-decorrelated examples, taking the
+    // correlation to 0.293 and this figure to ~59.5%.
     //
-    // If this assertion FAILS because the number dropped, that is good news: the
-    // dataset has been given length-decorrelated examples. Update the bound and
-    // re-check the models against the new benchmark.
+    // It is still well above chance because 90 of 126 examples remain the
+    // original length-separated ones. Driving it toward ~17% (six-way chance)
+    // needs roughly 54 more decorrelated examples. If this FAILS low, that work
+    // happened: lower the bound. If it climbs, length-correlated examples crept
+    // back in.
     const baseline = exact(new LengthBaselineClassifier());
-    expect(baseline).toBeGreaterThan(0.80);
+    expect(baseline).toBeLessThan(0.70);
+    expect(baseline).toBeGreaterThan(0.30);
   });
 
   it('records that the shipped scorer does not yet clear the baseline', () => {

@@ -11,6 +11,25 @@
  */
 import { createHash } from 'crypto';
 
+/**
+ * The split generation every eval reads.
+ *
+ * Frozen split files are immutable (see eval/split.ts) — a dataset change means
+ * a NEW version, never a rewrite. The version used to be hardcoded in seven
+ * places, so a bump risked leaving one consumer reading the old folds against a
+ * new dataset hash. It lives here now: bump it once, and every eval moves
+ * together or fails loudly on the hash check.
+ *
+ * v1 — 90 effort prompts. Length-separated by construction: ranking by
+ *      character count alone scored 86.7% exact on it.
+ * v2 — 126 effort prompts. Adds 36 length-decorrelated examples (long-and-easy,
+ *      short-and-hard) so the benchmark can distinguish complexity from verbosity.
+ */
+export const ACTIVE_SPLIT_VERSION = 'v2';
+export const foldsFile = () => `folds.${ACTIVE_SPLIT_VERSION}.json`;
+export const holdoutFile = () => `holdout.${ACTIVE_SPLIT_VERSION}.json`;
+export const trainFile = () => `train.${ACTIVE_SPLIT_VERSION}.json`;
+
 export function sha256(s: string): string {
   return createHash('sha256').update(s).digest('hex');
 }

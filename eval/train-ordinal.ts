@@ -20,10 +20,11 @@ import type { EffortLevel } from '../src/types.js';
 import type { LabeledPrompt } from '../src/classifiers/types.js';
 import type { TierClassifier } from '../src/classifiers/types.js';
 import { decodeOrganicLabel } from '../src/organic-labels.js';
+import { holdoutFile } from './lib/split.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..');
-const HOLDOUT_PATH = join(__dirname, 'splits', 'holdout.v1.json');
+const HOLDOUT_PATH = join(__dirname, 'splits', holdoutFile());
 const ORGANIC_PATH = join(ROOT, 'data', 'organic', 'labeled.jsonl');
 const WEIGHTS_PATH = join(ROOT, 'v05_ordinal_weights.json');
 const TIERS: EffortLevel[] = ['trivial', 'light', 'moderate', 'heavy', 'intensive', 'extreme'];

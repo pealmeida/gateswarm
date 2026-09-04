@@ -1490,3 +1490,136 @@ still loses to a one-liner on the only benchmark available. §12 is the work tha
 changes those; this is the instrument that will tell you whether it did.
 
 Suite: **495 tests pass** (was 488).
+
+
+---
+
+## 16. Length-decorrelated examples — dataset v2, 2026-09-04
+
+§12.3 named this the highest-value labelling work available. Done: 36 new
+examples, `eval/dataset.json` 90 → 126, splits regenerated as v2.
+
+### 16.1 What was added
+
+Six per tier, written to invert the staircase rather than extend it:
+
+| tier | old median chars | **new median chars** | kind |
+|---|---|---|---|
+| trivial | 26 | **423** | verbose preamble, one-token answer |
+| light | 70 | **411** | long input, single mechanical transform |
+| moderate | 88 | **433** | three short, three long — deliberately mixed |
+| heavy | 123 | **53** | short, needs real reasoning |
+| intensive | 167 | **40** | short, needs deep reasoning |
+| extreme | 200 | **44** | short, top of the difficulty range |
+
+Existing ids are untouched — new prompts are appended, so `effort:<tier>:<index>`
+never shifts for anything already labelled.
+
+### 16.2 It worked, and the measurement is unambiguous
+
+**Length-to-tier Spearman correlation:**
+
+| set | rho |
+|---|---|
+| original 90 | **0.956** — near-deterministic |
+| the 36 new | **-0.790** |
+| **combined 126** | **0.293** |
+
+**Accuracy on old vs new examples, 5-fold, fit on train only:**
+
+| model | on the original 90 | **on the 36 new** |
+|---|---|---|
+| `length-only` | 85.6% | **0.0%** |
+| `heuristic-linear` | 62.2% | **11.1%** |
+
+The length baseline scores **zero** on the new examples — exactly what a
+length-decorrelated set should do to a length model. The shipped scorer scores
+**11.1%**, which is the finding that matters: it fails the new examples almost as
+completely as the baseline does. §11 argued from correlation that the 35 features
+add little beyond length; this measures it directly.
+
+Leaderboard, v1 → v2:
+
+| model | v1 exact | v2 exact | v1 adjacent | v2 adjacent |
+|---|---|---|---|---|
+| `length-only` | 86.7% | **59.5%** | 95.6% | **70.5%** |
+| `heuristic-linear` | 63.3% | 46.5% | 94.4% | 79.0% |
+| `ordinal-logistic` | 58.9% | **50.0%** | 94.4% | 87.5% |
+
+Two things worth noting. The baseline's *adjacent* accuracy collapsed 25pp — on
+v2 length no longer makes merely off-by-one errors. And **`ordinal-logistic` now
+beats `heuristic-linear`** (50.0% vs 46.5%), reversing v1. That is precisely what
+§12.3 predicted: the learned model lost on v1 because length-dominance was an
+*advantage* there. On a benchmark that is harder to game, it wins.
+
+The guard still fires — length-only still leads at 59.5% — because 90 of 126
+examples remain the original length-separated ones. `0.714 x 85.6% + 0.286 x 0%`
+≈ 61%, which is what is observed. Reaching parity needs roughly 54 more
+decorrelated examples.
+
+### 16.3 Split versioning
+
+`eval/split.ts` refuses to overwrite frozen splits, so this generated
+`folds.v2.json` / `holdout.v2.json` and a v2 MANIFEST; the v1 files stay on disk
+as history. The version was hardcoded in **seven** places, where a bump risked
+leaving one consumer reading old folds against a new dataset hash. It now lives
+once, as `ACTIVE_SPLIT_VERSION` in `eval/lib/split.ts`, with every consumer
+importing `foldsFile()` / `holdoutFile()` / `trainFile()`.
+
+### 16.4 Two fitted-artifact decisions, both measured
+
+**`DEFAULT_BOUNDARIES`: NOT refit. Evidence, not preference.**
+
+Refitting on v2 barely moves them (`0.1960 → 0.1974`, `0.3659 → 0.3607`), and:
+
+| | v2 CV exact |
+|---|---|
+| cut points refit per fold | 47.6% |
+| **shipped v1 boundaries** | **53.2%** |
+
+The shipped boundaries *beat* refitting — fitting cut points to a bimodal
+adversarial distribution overfits the fold. On real traffic the refit is also
+slightly worse (entropy 0.798 vs 0.806, top share 32.3% vs 30.2%). This is
+`ACCURACY_ROADMAP.md`'s claim confirmed empirically: **boundaries cannot fix a
+representation problem.** The new examples expose a feature gap, and moving cut
+points to chase them would trade real-traffic behaviour for examples the feature
+set cannot express.
+
+**`DEFAULT_TIER_RELIABILITY`: refit to v2.** The accuracy prior fell 0.6444 →
+0.4762, and `intensive` from 0.4939 to 0.2648. The v1 values were not
+conservative estimates that turned out wrong — they were inflated by the same
+confound as everything else measured on v1: where length ≈ label, the scorer
+looks reliable because length is. Shipped with an explicit note that they are a
+floor rather than a verdict, since v2 over-weights adversarial examples; the true
+figure on real traffic sits between the two, and `setTierReliability()` is how
+real verdicts should eventually replace both.
+
+### 16.5 State
+
+| | v1 | v2 |
+|---|---|---|
+| golden CV exact | 63.3% | 46.5% |
+| golden CV adjacent | 94.4% | 79.0% |
+| ECE | 0.057 | 0.136 |
+| length-to-tier rho | 0.956 | **0.293** |
+| **real-traffic distribution** | 5 tiers, top 30.2% | **unchanged** |
+| **cost index** | 2148 | **unchanged** |
+| suite | 495 | **495 pass** |
+
+Production behaviour is byte-identical — no boundary moved, so routing did not
+change. What changed is that **the numbers are now honest**. The drop from 63.3%
+to 46.5% is not a regression; it is the same scorer measured against a benchmark
+that can no longer be passed by counting characters.
+
+### 16.6 Caveats
+
+- **The labels are one author's judgement.** They are defensible but unreviewed,
+  which is exactly the human-verdict gap §3 exists to close. These 36 should be
+  the first batch through `/gs-audit`.
+- **rho 0.293 is not 0.** The new examples are deliberately inverted (-0.790)
+  rather than length-neutral, so each tier is now bimodal in length. That kills
+  the length shortcut but is not the same as length being independent of
+  difficulty.
+- **v2 is a stress test, not a representative sample.** Real traffic is neither
+  v1's short hand-written prompts nor v2's adversarial mix, and no number here
+  should be quoted as real-world accuracy.

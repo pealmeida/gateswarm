@@ -25,17 +25,30 @@ export type TierReliability = Record<EffortLevel, number>;
 const TIERS: readonly EffortLevel[] = ['trivial', 'light', 'moderate', 'heavy', 'intensive', 'extreme'];
 
 /**
- * Fitted on eval/dataset.json with 5-fold out-of-fold prediction (boundaries fit
- * on train folds only), K=6 pseudo-counts toward the 0.6444 accuracy prior.
- * Regenerate whenever the scorer or DEFAULT_BOUNDARIES change on purpose.
+ * Fitted on eval/dataset.json (v2, 126 examples) with 5-fold out-of-fold
+ * prediction, boundaries fit on train folds only, K=6 pseudo-counts toward the
+ * 0.4762 accuracy prior. Regenerate whenever the scorer, DEFAULT_BOUNDARIES or
+ * the dataset change on purpose.
+ *
+ * These dropped sharply from the v1 values (prior 0.6444 → 0.4762) when the
+ * dataset gained length-decorrelated examples. The v1 numbers were not
+ * conservative estimates that turned out wrong — they were inflated by the same
+ * confound as everything else measured on v1: where length ≈ label, the scorer
+ * looked reliable because length was.
+ *
+ * Read them as a floor, not a verdict. v2 deliberately over-weights adversarial
+ * examples (36 of 126, at Spearman -0.79 length-to-tier), so the true figure on
+ * real traffic sits somewhere above these and below the v1 ones. Neither
+ * benchmark is representative; real verdicts installed via setTierReliability()
+ * are what should ultimately replace both.
  */
 export const DEFAULT_TIER_RELIABILITY: TierReliability = {
-  trivial: 0.8203,
-  light: 0.8042,
-  moderate: 0.5947,
-  heavy: 0.5542,
-  intensive: 0.4939,
-  extreme: 0.6194,
+  trivial: 0.7440,
+  light: 0.5390,
+  moderate: 0.4949,
+  heavy: 0.4921,
+  intensive: 0.2648,
+  extreme: 0.4778,
 };
 
 let _reliability: TierReliability = { ...DEFAULT_TIER_RELIABILITY };

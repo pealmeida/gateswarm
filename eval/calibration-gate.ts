@@ -9,12 +9,12 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { EffortLevel } from '../src/types.js';
 import { loadEffort, loadRaw, TIERS, tierIdx } from './lib/dataset.js';
 import { effortMetrics, pct } from './lib/metrics.js';
-import { sha256 } from './lib/split.js';
+import { holdoutFile, sha256 } from './lib/split.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SPLIT_DIR = join(__dirname, 'splits');
 const MANIFEST_PATH = join(SPLIT_DIR, 'MANIFEST.json');
-const HOLDOUT_PATH = join(SPLIT_DIR, 'holdout.v1.json');
+const HOLDOUT_PATH = join(SPLIT_DIR, holdoutFile());
 const DEFAULT_TIMEOUT_MS = 15_000;
 const MIN_COVERAGE = 0.95;
 const MIN_RECALL = 0.4;
@@ -56,10 +56,10 @@ function loadFrozenHoldout(): Set<string> {
   const { bytes } = loadRaw();
   assertHash('dataset.json', bytes, manifest);
   const holdoutBytes = readFileSync(HOLDOUT_PATH, 'utf8');
-  assertHash('holdout.v1.json', holdoutBytes, manifest);
+  assertHash(holdoutFile(), holdoutBytes, manifest);
   const holdout = JSON.parse(holdoutBytes) as Holdout;
   if (!Array.isArray(holdout.effort?.test) || !holdout.effort.test.every((id) => typeof id === 'string')) {
-    throw new Error('invalid holdout.v1.json effort.test');
+    throw new Error(`invalid ${holdoutFile()} effort.test`);
   }
   return new Set(holdout.effort.test);
 }
