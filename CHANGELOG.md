@@ -35,7 +35,8 @@ boundary moved, so no prompt routes differently — verified against the
   scoring was O(n²): a 64 KiB prompt took **3.4 seconds**, on every score, for
   any prompt without a question mark. Replaced with a linear scan giving
   byte-identical counts across all 858 corpus prompts. **3475 ms → 35 ms**, and
-  the test suite went from 126 s to 49 s.
+  the test suite went from 126 s to 49 s. `npm run bench:scorer` now measures
+  the question-mark-free case explicitly, since it is the common one.
 
 ### Added
 - **`gateswarm` agent plugin** (`plugins/gateswarm/`) with a `model-delegation`

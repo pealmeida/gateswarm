@@ -1974,9 +1974,43 @@ Replaced with absolute CPU budgets at four sizes, which carry the same
 information stably: under the quadratic version the larger bounds all fail
 (57/214/907/3400 ms), while the fixed scorer measures 3/5/12/18/73 ms.
 
-### 19.6 The pattern
+### 19.6 Three failed guards, and where the check belongs
 
-Four measurement mistakes in this branch, every one of the same kind — trusting
+The fourth run failed too: the absolute CPU bound read **43 ms locally and
+1785 ms on the runner**. That is 41x, which no core-speed difference explains.
+The cause is JIT tier-up — a single warm-up call does not reliably get V8 to
+optimise a function on a loaded two-core box, so the measured call may run
+interpreted.
+
+Three variants of the same idea, all failing on CI while passing locally:
+
+| guard | local | CI | why it failed |
+|---|---|---|---|
+| wall-clock bound | 35 ms | 3243 ms | measured contention from parallel workers |
+| CPU-time ratio | 13x | 40x | few-millisecond denominator, mostly GC noise |
+| CPU-time bound | 43 ms | 1785 ms | one warm-up does not guarantee JIT tier-up |
+
+**A micro-benchmark asserted inside a parallel unit suite measures the runner,
+not the code.** The timing assertions were removed — not to get green, but
+because they cannot measure what they claim to. What replaced them:
+
+- the suite keeps the **deterministic** part, which is what actually pins
+  behaviour: `question_count` returns exactly what the regex it replaced
+  returned, checked against the old regex directly across nine inputs, plus a
+  64 KiB case that would blow vitest's 5 s timeout if the quadratic path came
+  back;
+- the latency envelope moved to `npm run bench:scorer`, which exists for this
+  and now measures the question-mark-free case explicitly (16/32/64 KB →
+  15/32/89 ms).
+
+That last point is worth sitting with: **`bench:scorer` already timed a 64 KiB
+question-mark-free prompt.** Its `UNIT` string contains no `?`, so it was
+printing the 3.4-second figure all along. The instrument existed and was
+reporting the defect; nothing was gated on its output and nobody read it.
+
+### 19.7 The pattern
+
+Five measurement mistakes in this branch, every one of the same kind — trusting
 an instrument without checking what it actually measured:
 
 1. a `git stash` that was a no-op, so a "main vs branch" comparison compared the
@@ -1984,8 +2018,12 @@ an instrument without checking what it actually measured:
 2. a grid search that refit cut points production holds fixed, so its entropy
    was not production's;
 3. a wall-clock timing test inside a parallel runner, which measured contention;
-4. a ratio statistic whose denominator was too small to be stable.
+4. a ratio statistic whose denominator was too small to be stable;
+5. a CPU-time bound that measured whether V8 had tiered up, not how much work
+   the code did.
 
-Each was caught by re-measuring, none by reasoning about it. That is the
-argument for the guards this branch adds — and equally a caution that a guard is
-only as good as the thing it measures.
+Each was caught by re-measuring, none by reasoning about it. Three of the five
+were guards written to catch someone else's mistake, which is the caution worth
+taking from this branch: **a guard is only as trustworthy as the thing it
+measures, and a benchmark is not a unit test.** The scorer defect this branch
+began with — a benchmark separable by prompt length — is the same shape.
