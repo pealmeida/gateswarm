@@ -151,6 +151,25 @@ class ConsumptionIntelligence {
   }
 
   /**
+   * v0.7.0: Ensure quota-band selection is warmed/cached.
+   * Call this before accessing quota band data to guarantee non-null results
+   * on endpoints like /v1/score and /v06/resolve that don't invoke selectModel.
+   */
+  async ensureQuotaBandSelection(): Promise<QuotaBandSelection | null> {
+    const now = Date.now();
+    if (!this.quotaBandSelection || (now - this.quotaBandCachedAt) > this.QUOTA_BAND_CACHE_MS) {
+      try {
+        this.quotaBandSelection = await getEffectiveTierModels();
+        this.quotaBandCachedAt = now;
+      } catch (err) {
+        console.error(`⚠️  [Intel] Failed to warm quota-band cache:`, (err as Error).message);
+        return null;
+      }
+    }
+    return this.quotaBandSelection;
+  }
+
+  /**
    * Actively probe a provider's health by calling its /models endpoint.
    * Returns true if the provider responds successfully.
    */
