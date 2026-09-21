@@ -2868,6 +2868,15 @@ async function init() {
         await consumptionIntelligence.ensureQuotaBandSelection();
         const quotaBandSelectionResolve = consumptionIntelligence.getQuotaBandSelection();
         
+        // v0.7.0: Quota-band observability headers
+        if (quotaBandSelectionResolve) {
+          res.setHeader('X-Quota-Band', quotaBandSelectionResolve.band);
+          res.setHeader('X-Matrix-Variant', quotaBandSelectionResolve.matrixVariant);
+          if (quotaBandSelectionResolve.overlaysApplied.length > 0) {
+            res.setHeader('X-Quota-Overlays', quotaBandSelectionResolve.overlaysApplied.join(','));
+          }
+        }
+        
         return jsonResponse(res, 200, {
           tier,
           mode,
@@ -2911,6 +2920,15 @@ async function init() {
         // v0.7.0: Warm quota-band cache before accessing observability data
         await consumptionIntelligence.ensureQuotaBandSelection();
         const quotaBandSelectionScore = consumptionIntelligence.getQuotaBandSelection();
+        
+        // v0.7.0: Quota-band observability headers
+        if (quotaBandSelectionScore) {
+          res.setHeader('X-Quota-Band', quotaBandSelectionScore.band);
+          res.setHeader('X-Matrix-Variant', quotaBandSelectionScore.matrixVariant);
+          if (quotaBandSelectionScore.overlaysApplied.length > 0) {
+            res.setHeader('X-Quota-Overlays', quotaBandSelectionScore.overlaysApplied.join(','));
+          }
+        }
         
         return jsonResponse(res, 200, {
           prompt: body.prompt,
