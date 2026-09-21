@@ -16,10 +16,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Feature flag: `GATESWARM_QUOTA_BAND_MATRIX` (default OFF for bit-identical 0.6.x behavior)
   - Safe fallback to Yellow/current matrix when flag OFF or quota data missing/stale
   - Band matrices stored in `calibration/matrix-variants/quota_band_matrices.json`
-- **Quota Observability**: Exposed quota-band selection in responses and headers
+- **Quota Observability** (DoD Gap B): Exposed quota-band selection in responses and headers **ALWAYS**, regardless of flag state
   - Response headers: `X-Quota-Band`, `X-Matrix-Variant`, `X-Quota-Overlays`
   - Advisory body fields (score/resolve/chat): `quotaBand`, `matrixVariant`, `overlaysApplied`, `maxProviderPct`, `window`, `quotaCoverage`, `providerPct`
   - CLI command: `gateswarm quota-band` — displays current band, overlays, provider percentages
+  - When flag OFF: `matrixVariant = "current"`, `reason = "flag_off"`, `overlaysApplied = []` (observability preserved, routing bit-identical to 0.6.x)
+  - When flag ON: full quota-aware matrix selection with band-specific variants and overlays
 - **Unified Quota Sources**: Integrated quota percentage computation
   - Priority: `quotaSync` (real dashboard) → `consumptionTracker` → CLI tools
   - Coverage reporting: `full` / `partial` / `none` based on available data

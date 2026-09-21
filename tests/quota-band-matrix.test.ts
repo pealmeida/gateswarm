@@ -81,10 +81,21 @@ describe('Quota Band Matrix', () => {
   });
 
   describe('getEffectiveTierModels', () => {
-    it('should return null when feature flag is OFF', async () => {
+    it('should return observability data when feature flag is OFF', async () => {
       delete process.env.GATESWARM_QUOTA_BAND_MATRIX;
       const result = await getEffectiveTierModels();
-      expect(result).toBe(null);
+      
+      // Should return observability data even when flag is OFF
+      expect(result).not.toBe(null);
+      if (result) {
+        expect(result.reason).toBe('flag_off');
+        expect(result.matrixVariant).toBe('current');
+        expect(result.overlaysApplied).toEqual([]);
+        expect(result.effectiveTierModels).toBeDefined();
+        expect(result.effectiveTierModels.moderate).toBeDefined();
+        expect(result.band).toBeDefined();
+        expect(['green', 'yellow', 'orange', 'red']).toContain(result.band);
+      }
     });
 
     it('should return Yellow fallback when flag is ON but no quota data', async () => {
@@ -307,6 +318,86 @@ describe('DoD Product Criteria', () => {
       const moderate = result.effectiveTierModels.moderate;
       // In Green band, moderate should use glm-5 (ZAI) as designed
       expect(['glm-5', 'glm-4.7', 'minimax-m2.7', 'kimi-k2.6']).toContain(moderate.model);
+    }
+  });
+});
+
+describe('DoD Gap B: Flag OFF Observability', () => {
+  afterEach(() => {
+    delete process.env.GATESWARM_QUOTA_BAND_MATRIX;
+  });
+
+  it('should expose all observability fields when flag is OFF', async () => {
+    delete process.env.GATESWARM_QUOTA_BAND_MATRIX;
+    const result = await getEffectiveTierModels();
+    
+    expect(result).not.toBe(null);
+    if (result) {
+      // All observability fields must be present
+      expect(result.band).toBeDefined();
+      expect(result.matrixVariant).toBe('current');
+      expect(result.reason).toBe('flag_off');
+      expect(result.overlaysApplied).toEqual([]);
+      expect(result.providerPcts).toBeDefined();
+      expect(Array.isArray(result.providerPcts)).toBe(true);
+      expect(result.window).toBeDefined();
+      expect(result.quotaCoverage).toBeDefined();
+      expect(result.maxProviderPct).toBeDefined();
+      expect(result.effectiveTierModels).toBeDefined();
+    }
+  });
+
+  it('should use baseline tier_models when flag is OFF', async () => {
+    delete process.env.GATESWARM_QUOTA_BAND_MATRIX;
+    const result = await getEffectiveTierModels();
+    
+    expect(result).not.toBe(null);
+    if (result) {
+      // Should use the baseline matrix from v04_config.json
+      const moderate = result.effectiveTierModels.moderate;
+      expect(moderate).toBeDefined();
+      expect(moderate.model).toBe('glm-5');
+      expect(moderate.provider).toBe('zai');
+      
+      // Verify bit-identical to v04_config.json baseline
+      const heavy = result.effectiveTierModels.heavy;
+      expect(heavy.model).toBe('glm-5.1');
+      expect(heavy.provider).toBe('zai');
+    }
+  });
+
+  it('should not apply alternate band matrix when flag is OFF', async () => {
+    delete process.env.GATESWARM_QUOTA_BAND_MATRIX;
+    const result = await getEffectiveTierModels();
+    
+    expect(result).not.toBe(null);
+    if (result) {
+      // matrixVariant should be "current", not a band name
+      expect(result.matrixVariant).toBe('current');
+      
+      // No overlays should be applied
+      expect(result.overlaysApplied).toEqual([]);
+      
+      // Reason should indicate flag is off
+      expect(result.reason).toBe('flag_off');
+    }
+  });
+
+  it('should calculate band but use baseline matrix when flag is OFF', async () => {
+    delete process.env.GATESWARM_QUOTA_BAND_MATRIX;
+    const result = await getEffectiveTierModels();
+    
+    expect(result).not.toBe(null);
+    if (result) {
+      // Band should be calculated (for observability)
+      expect(['green', 'yellow', 'orange', 'red']).toContain(result.band);
+      
+      // But matrix should be baseline, not the calculated band's matrix
+      expect(result.matrixVariant).toBe('current');
+      expect(result.reason).toBe('flag_off');
+      
+      // And routing should use baseline (glm-5 for moderate)
+      expect(result.effectiveTierModels.moderate.model).toBe('glm-5');
     }
   });
 });

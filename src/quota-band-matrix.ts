@@ -5,7 +5,10 @@
  * Bands: Green (0-40%), Yellow (40-70%), Orange (70-85%), Red (85-100%).
  *
  * Feature flag: GATESWARM_QUOTA_BAND_MATRIX (default OFF)
- * When OFF: returns current Yellow matrix (bit-identical to 0.6.x)
+ * When OFF:
+ *   - Routing uses current/baseline matrix from v04_config.json (bit-identical to 0.6.x)
+ *   - STILL calculates and exports ALL observability data on all surfaces
+ *   - matrixVariant = "current", reason = "flag_off", overlaysApplied = []
  * When ON:
  *   - Computes max(%) across providers using 5h window (fallback to weekly)
  *   - Selects band based on max%
@@ -17,8 +20,8 @@
  *   2. consumptionTracker — historical usage % (fallback)
  *   3. CLI tools (if available) — for claude-cli/codex-cli
  *
- * Observability: exposes quotaBand, matrixVariant, overlaysApplied, providerPct,
- * window, quotaCoverage in advisory responses.
+ * Observability: ALWAYS exposes quotaBand, matrixVariant, overlaysApplied, providerPct,
+ * window, quotaCoverage in advisory responses (regardless of flag state).
  */
 
 import { promises as fs } from 'fs';
@@ -26,6 +29,7 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import type { EffortLevel } from './types.js';
 import type { TierModelConfig } from './v04-config.js';
+import { getConfig } from './v04-config.js';
 import { quotaSync } from './quota-sync.js';
 import { consumptionTracker } from './consumption-tracker.js';
 import { getMultiWindowQuota } from './provider-quota.js';
@@ -369,28 +373,72 @@ function applyProviderOverlays(
  * This is the main function called by consumption-intelligence.ts
  * and the gateway routing logic.
  *
- * When feature flag is OFF: returns null (caller should use default Yellow/inverted matrix)
+ * When feature flag is OFF:
+ *   - ALWAYS calculates and exports observability data (band, matrixVariant, etc.)
+ *   - Uses current/baseline matrix from v04_config.json (bit-identical routing to 0.6.x)
+ *   - Sets reason = "flag_off", matrixVariant = "current", overlaysApplied = []
  * When feature flag is ON:
  *   - Returns effective matrix based on quota bands + overlays
  *   - Includes observability metadata
  */
 export async function getEffectiveTierModels(): Promise<QuotaBandSelection | null> {
-  // Feature flag check
-  if (!isQuotaBandMatrixEnabled()) {
-    return null; // Caller uses default Yellow matrix
-  }
-
   try {
-    const matrices = await loadMatrices();
-
-    // Get quota percentages
+    // Get quota percentages (always, for observability)
     const providerPcts = getProviderQuotaPercentages();
 
     // Compute max% across all providers
     const validPcts = providerPcts.filter(p => p.maxPct !== null).map(p => p.maxPct!);
     
+    // Determine band and window
+    let band: QuotaBand;
+    let maxPct: number;
+    let window: 'fiveHour' | 'weekly' | 'none';
+    
     if (validPcts.length === 0) {
-      // No quota data available — fallback to Yellow + reason
+      // No quota data available
+      band = 'yellow';
+      maxPct = 0;
+      window = 'none';
+    } else {
+      maxPct = Math.max(...validPcts);
+      band = selectBand(maxPct);
+      
+      // Determine window preference (5h preferred, weekly fallback)
+      const fiveHourProviders = providerPcts.filter(p => p.window === 'fiveHour');
+      window = fiveHourProviders.length > 0 ? 'fiveHour' : 'weekly';
+    }
+
+    // Determine quota coverage
+    const knownProviders = providerPcts.filter(p => p.maxPct !== null);
+    const unknownProviders = providerPcts.filter(p => p.maxPct === null).map(p => p.provider);
+    const quotaCoverage: 'full' | 'partial' | 'none' =
+      unknownProviders.length === 0 ? 'full' :
+      knownProviders.length > 0 ? 'partial' : 'none';
+
+    // Feature flag check
+    if (!isQuotaBandMatrixEnabled()) {
+      // Flag OFF: use current/baseline matrix from v04_config.json
+      const baselineConfig = getConfig();
+      
+      return {
+        band,
+        matrixVariant: 'current',
+        maxProviderPct: maxPct,
+        window,
+        providerPcts,
+        overlaysApplied: [],
+        quotaCoverage,
+        unknownProviders,
+        reason: 'flag_off',
+        effectiveTierModels: baselineConfig.tier_models,
+      };
+    }
+
+    // Flag ON: apply quota-band matrix logic
+    const matrices = await loadMatrices();
+    
+    if (validPcts.length === 0) {
+      // No quota data available — use Yellow band as fallback
       const yellowMatrix = matrices.bands.yellow.tier_models;
       return {
         band: 'yellow',
@@ -400,18 +448,11 @@ export async function getEffectiveTierModels(): Promise<QuotaBandSelection | nul
         providerPcts,
         overlaysApplied: [],
         quotaCoverage: 'none',
-        unknownProviders: providerPcts.filter(p => p.maxPct === null).map(p => p.provider),
+        unknownProviders,
         reason: 'missing_quota',
         effectiveTierModels: yellowMatrix,
       };
     }
-
-    const maxPct = Math.max(...validPcts);
-    const band = selectBand(maxPct);
-
-    // Determine window preference (5h preferred, weekly fallback)
-    const fiveHourProviders = providerPcts.filter(p => p.window === 'fiveHour');
-    const window: 'fiveHour' | 'weekly' | 'none' = fiveHourProviders.length > 0 ? 'fiveHour' : 'weekly';
 
     // Get base matrix for selected band
     const baseTierModels = matrices.bands[band].tier_models;
@@ -422,13 +463,6 @@ export async function getEffectiveTierModels(): Promise<QuotaBandSelection | nul
       providerPcts,
       matrices,
     );
-
-    // Determine quota coverage
-    const knownProviders = providerPcts.filter(p => p.maxPct !== null);
-    const unknownProviders = providerPcts.filter(p => p.maxPct === null).map(p => p.provider);
-    const quotaCoverage: 'full' | 'partial' | 'none' =
-      unknownProviders.length === 0 ? 'full' :
-      knownProviders.length > 0 ? 'partial' : 'none';
 
     const matrixVariant = overlaysApplied.length > 0
       ? `${band}_${overlaysApplied.join('_')}`
