@@ -1602,6 +1602,17 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
             res.setHeader('X-Routed-Tier', 'trivial');
             res.setHeader('X-Routing-Method', 'greeting-fast-path');
             res.setHeader('X-Routing-Reason', 'greeting-fast-path');
+            
+            // v0.7.0: Warm quota-band cache before accessing observability headers
+            await consumptionIntelligence.ensureQuotaBandSelection();
+            const quotaBandSelectionGreeting = consumptionIntelligence.getQuotaBandSelection();
+            if (quotaBandSelectionGreeting) {
+              res.setHeader('X-Quota-Band', quotaBandSelectionGreeting.band);
+              res.setHeader('X-Matrix-Variant', quotaBandSelectionGreeting.matrixVariant);
+              if (quotaBandSelectionGreeting.overlaysApplied.length > 0) {
+                res.setHeader('X-Quota-Overlays', quotaBandSelectionGreeting.overlaysApplied.join(','));
+              }
+            }
             res.setHeader('X-Modality', 'text');
             if (clientWantsStream && isSseContentType(resp.headers.get('content-type')) && resp.body) {
               res.writeHead(200, {
@@ -2448,6 +2459,17 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
       res.setHeader('X-Routed-Tier', effort);
       res.setHeader('X-Routing-Method', decision.source || 'request');
       if (decision.reason) res.setHeader('X-Routing-Reason', decision.reason);
+      
+      // v0.7.0: Quota-band observability headers
+      const quotaBandSelection = consumptionIntelligence.getQuotaBandSelection();
+      if (quotaBandSelection) {
+        res.setHeader('X-Quota-Band', quotaBandSelection.band);
+        res.setHeader('X-Matrix-Variant', quotaBandSelection.matrixVariant);
+        if (quotaBandSelection.overlaysApplied.length > 0) {
+          res.setHeader('X-Quota-Overlays', quotaBandSelection.overlaysApplied.join(','));
+        }
+      }
+      
       // MoMA: expose detected request modalities for transparency
       res.setHeader('X-Modality', requestModalities.vision || requestModalities.audio
         ? ['text', requestModalities.vision ? 'vision' : '', requestModalities.audio ? 'audio' : ''].filter(Boolean).join('+')
@@ -2736,7 +2758,7 @@ async function init() {
   console.log('🔄 [Intel] Tier recovery check: every 5min');
 
   const agents = agentRegistry.getAgents();
-  console.log(`🚀 GateSwarm MoMA Router v0.6.0 (Trustable Precision) starting on :${PORT}`);
+  console.log(`🚀 GateSwarm MoMA Router v0.7.0 (Trustable Precision) starting on :${PORT}`);
   if (!process.env.MOMA_ADMIN_TOKEN) {
     console.warn('⚠️⚠️  [SECURITY] MOMA_ADMIN_TOKEN is unset; agent-management endpoints are unauthenticated.');
   }
@@ -2775,7 +2797,7 @@ async function init() {
         const agents = agentRegistry.getAgents();
         return jsonResponse(res, 200, {
           status: 'healthy',
-          router: 'GateSwarm MoMA Router v0.6.0 (Trustable Precision)',
+          router: 'GateSwarm MoMA Router v0.7.0 (Trustable Precision)',
           turboquant: 'v3.6',
           ensemble: 'enabled',
           feedback: 'enabled',
@@ -2841,6 +2863,20 @@ async function init() {
         if (!resolved) {
           return jsonResponse(res, 404, { error: { message: `no model configured for tier=${tier}`, type: 'not_found' } });
         }
+        
+        // v0.7.0: Warm quota-band cache before accessing observability data
+        await consumptionIntelligence.ensureQuotaBandSelection();
+        const quotaBandSelectionResolve = consumptionIntelligence.getQuotaBandSelection();
+        
+        // v0.7.0: Quota-band observability headers
+        if (quotaBandSelectionResolve) {
+          res.setHeader('X-Quota-Band', quotaBandSelectionResolve.band);
+          res.setHeader('X-Matrix-Variant', quotaBandSelectionResolve.matrixVariant);
+          if (quotaBandSelectionResolve.overlaysApplied.length > 0) {
+            res.setHeader('X-Quota-Overlays', quotaBandSelectionResolve.overlaysApplied.join(','));
+          }
+        }
+        
         return jsonResponse(res, 200, {
           tier,
           mode,
@@ -2850,6 +2886,19 @@ async function init() {
             max_tokens: resolved.max_tokens,
             enable_thinking: resolved.enable_thinking,
           },
+          // v0.7.0: Quota-band observability
+          quotaBand: quotaBandSelectionResolve?.band,
+          matrixVariant: quotaBandSelectionResolve?.matrixVariant,
+          overlaysApplied: quotaBandSelectionResolve?.overlaysApplied || [],
+          maxProviderPct: quotaBandSelectionResolve?.maxProviderPct,
+          window: quotaBandSelectionResolve?.window,
+          quotaCoverage: quotaBandSelectionResolve?.quotaCoverage,
+          providerPct: quotaBandSelectionResolve?.providerPcts.map(p => ({
+            provider: p.provider,
+            maxPct: p.maxPct,
+            window: p.window,
+            source: p.source,
+          })),
         });
       }
 
@@ -2867,6 +2916,20 @@ async function init() {
         const modeOverride = (body.mode === 'plan' || body.mode === 'act') ? body.mode as IntentMode : undefined;
         const scored = await scoreIntentV04(body.prompt);
         const tierModel = getTierModelForMode(scored.tier as EffortLevel, modeOverride ?? detectIntentMode(body.prompt).mode);
+        
+        // v0.7.0: Warm quota-band cache before accessing observability data
+        await consumptionIntelligence.ensureQuotaBandSelection();
+        const quotaBandSelectionScore = consumptionIntelligence.getQuotaBandSelection();
+        
+        // v0.7.0: Quota-band observability headers
+        if (quotaBandSelectionScore) {
+          res.setHeader('X-Quota-Band', quotaBandSelectionScore.band);
+          res.setHeader('X-Matrix-Variant', quotaBandSelectionScore.matrixVariant);
+          if (quotaBandSelectionScore.overlaysApplied.length > 0) {
+            res.setHeader('X-Quota-Overlays', quotaBandSelectionScore.overlaysApplied.join(','));
+          }
+        }
+        
         return jsonResponse(res, 200, {
           prompt: body.prompt,
           score: scored.value,
@@ -2884,6 +2947,19 @@ async function init() {
           } : null,
           mode: modeOverride ?? 'auto',
           timestamp: Date.now(),
+          // v0.7.0: Quota-band observability
+          quotaBand: quotaBandSelectionScore?.band,
+          matrixVariant: quotaBandSelectionScore?.matrixVariant,
+          overlaysApplied: quotaBandSelectionScore?.overlaysApplied || [],
+          maxProviderPct: quotaBandSelectionScore?.maxProviderPct,
+          window: quotaBandSelectionScore?.window,
+          quotaCoverage: quotaBandSelectionScore?.quotaCoverage,
+          providerPct: quotaBandSelectionScore?.providerPcts.map(p => ({
+            provider: p.provider,
+            maxPct: p.maxPct,
+            window: p.window,
+            source: p.source,
+          })),
         });
       }
 
@@ -3381,7 +3457,7 @@ async function init() {
     console.warn(`⚠️  SECURITY: binding ${HOST} without GATESWARM_REQUIRE_AUTH — network clients can spend provider quota. Set GATESWARM_REQUIRE_AUTH=true.`);
   }
   server.listen(PORT, HOST, () => {
-    console.log(`✅ GateSwarm MoMA Router v0.6.0 (Trustable Precision) listening on http://${HOST}:${PORT}`);
+    console.log(`✅ GateSwarm MoMA Router v0.7.0 (Trustable Precision) listening on http://${HOST}:${PORT}`);
     console.log(`📡 Endpoint: http://localhost:${PORT}/v1/chat/completions`);
     console.log(`📊 Metrics: http://localhost:${PORT}/metrics`);
     console.log(`🤖 Agents: http://localhost:${PORT}/v1/agents`);

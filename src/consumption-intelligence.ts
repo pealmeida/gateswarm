@@ -21,6 +21,7 @@ import { modelMatrix, ModelEntry, EffortLevel, ProviderSummary } from './model-m
 import { agentRegistry } from './agent-registry.js';
 import { getConfig, saveConfig } from './v04-config.js';
 import { providerQuota, getMultiWindowQuota } from './provider-quota.js';
+import { getEffectiveTierModels, type QuotaBandSelection } from './quota-band-matrix.js';
 
 // ─── Types ───────────────────────────────────────────────
 
@@ -107,11 +108,66 @@ const TIER_REQUIREMENTS: Record<EffortLevel, TierRequirements> = {
 class ConsumptionIntelligence {
   private decisions: ConsumptionDecision[] = [];
   private readonly maxDecisionHistory = 100;
+  // v0.7.0: Cache quota-band selection for observability
+  private quotaBandSelection: QuotaBandSelection | null = null;
+  private quotaBandCachedAt = 0;
+  private readonly QUOTA_BAND_CACHE_MS = 30000; // Re-evaluate every 30s
 
   // ─── v0.5.7: Active provider probing ──────────────────
   // Track when each provider was last probed and whether it passed.
   private providerProbes: Map<string, { probedAt: number; healthy: boolean; error?: string }> = new Map();
   private readonly PROBE_TTL_MS = 60000; // Re-probe every 60s
+
+  /**
+   * v0.7.0: Get effective tier config considering quota-band matrix.
+   * When GATESWARM_QUOTA_BAND_MATRIX is ON, uses quota-aware matrix.
+   * When OFF or on error, uses static config from v04_config.json.
+   */
+  private async getEffectiveTierConfig(tier: EffortLevel): Promise<import('./v04-config.js').TierModelConfig | null> {
+    // Try quota-band matrix first (if feature is enabled)
+    try {
+      const now = Date.now();
+      if (!this.quotaBandSelection || (now - this.quotaBandCachedAt) > this.QUOTA_BAND_CACHE_MS) {
+        this.quotaBandSelection = await getEffectiveTierModels();
+        this.quotaBandCachedAt = now;
+      }
+
+      if (this.quotaBandSelection && this.quotaBandSelection.effectiveTierModels[tier]) {
+        return this.quotaBandSelection.effectiveTierModels[tier];
+      }
+    } catch (err) {
+      console.error(`⚠️  [Intel] Failed to get quota-band matrix, using static config:`, (err as Error).message);
+    }
+
+    // Fallback to static config
+    return getConfig().tier_models[tier] || null;
+  }
+
+  /**
+   * v0.7.0: Get current quota-band selection for observability.
+   */
+  getQuotaBandSelection(): QuotaBandSelection | null {
+    return this.quotaBandSelection;
+  }
+
+  /**
+   * v0.7.0: Ensure quota-band selection is warmed/cached.
+   * Call this before accessing quota band data to guarantee non-null results
+   * on endpoints like /v1/score and /v06/resolve that don't invoke selectModel.
+   */
+  async ensureQuotaBandSelection(): Promise<QuotaBandSelection | null> {
+    const now = Date.now();
+    if (!this.quotaBandSelection || (now - this.quotaBandCachedAt) > this.QUOTA_BAND_CACHE_MS) {
+      try {
+        this.quotaBandSelection = await getEffectiveTierModels();
+        this.quotaBandCachedAt = now;
+      } catch (err) {
+        console.error(`⚠️  [Intel] Failed to warm quota-band cache:`, (err as Error).message);
+        return null;
+      }
+    }
+    return this.quotaBandSelection;
+  }
 
   /**
    * Actively probe a provider's health by calling its /models endpoint.
@@ -329,7 +385,9 @@ class ConsumptionIntelligence {
     const reqs: TierRequirements = options?.requireVision
       ? { ...TIER_REQUIREMENTS[tier], needsVision: true }
       : TIER_REQUIREMENTS[tier];
-    const staticCfg = getConfig().tier_models[tier];
+    
+    // v0.7.0: Use quota-aware matrix when feature is enabled
+    const staticCfg = await this.getEffectiveTierConfig(tier);
 
     // MoMA: a vision request can't take the static-primary shortcut unless the
     // static model is known vision-capable — otherwise fall through to dynamic
@@ -763,7 +821,8 @@ class ConsumptionIntelligence {
    */
   private async rebalanceTier(tier: EffortLevel, failedProvider: string, failedModel: string, reason: string): Promise<void> {
     const cfg = getConfig();
-    const tierCfg = cfg.tier_models[tier];
+    // v0.7.0: Use effective tier config (quota-aware if enabled)
+    const tierCfg = await this.getEffectiveTierConfig(tier);
     if (!tierCfg) return;
 
     // Don't rebalance if already swapped (avoid loops)

@@ -6,6 +6,45 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-21
+
+### Added
+- **Quota Band Matrix Selection (MVP)**: Automatic routing-matrix selection based on provider quota consumption bands.
+  - Four bands: Green (0-40%), Yellow (40-70%), Orange (70-85%), Red (85-100%)
+  - Selection based on `max(%)` across providers using 5h window (fallback to weekly)
+  - Provider overlays: `go_high`, `zai_high`, `claude_high`, `codex_high`, `both_http_high`
+  - Feature flag: `GATESWARM_QUOTA_BAND_MATRIX` (default OFF for bit-identical 0.6.x behavior)
+  - Safe fallback to Yellow/current matrix when flag OFF or quota data missing/stale
+  - Band matrices stored in `calibration/matrix-variants/quota_band_matrices.json`
+- **Quota Observability** (DoD Gap B): Exposed quota-band selection in responses and headers **ALWAYS**, regardless of flag state
+  - Response headers: `X-Quota-Band`, `X-Matrix-Variant`, `X-Quota-Overlays`
+  - Advisory body fields (score/resolve/chat): `quotaBand`, `matrixVariant`, `overlaysApplied`, `maxProviderPct`, `window`, `quotaCoverage`, `providerPct`
+  - CLI command: `gateswarm quota-band` — displays current band, overlays, provider percentages
+  - When flag OFF: `matrixVariant = "current"`, `reason = "flag_off"`, `overlaysApplied = []` (observability preserved, routing bit-identical to 0.6.x)
+  - When flag ON: full quota-aware matrix selection with band-specific variants and overlays
+- **Unified Quota Sources**: Integrated quota percentage computation
+  - Priority: `quotaSync` (real dashboard) → `consumptionTracker` → CLI tools
+  - Coverage reporting: `full` / `partial` / `none` based on available data
+  - Separate `unknown` list for providers without quota data
+
+### Changed
+- **consumption-intelligence.ts**: Now uses quota-aware matrix when feature flag is ON
+  - `getEffectiveTierConfig()` method selects from quota-band matrix or static config
+  - `getQuotaBandSelection()` exposes current selection for observability
+  - Caches quota-band selection for 30s to avoid re-computation per request
+- **moma-gateway.ts**: Added quota-band headers and fields to all routing endpoints
+  - `/v1/chat/completions`: Headers + observability (greeting fast-path included)
+  - `/v1/score`: Added `quotaBand`, `matrixVariant`, `overlaysApplied`, `providerPct` to response
+  - `/v06/resolve`: Added quota-band fields to response
+- **gateswarm-cli.ts**: Added `quota-band` command with visual provider % display
+
+### Fixed
+- **Plan override alignment**: Both `selectModel()` and plan-override code paths now use the same effective matrix (quota-aware or static), preventing divergence between chat and UI scoring
+- **DoD B HTTP wiring**: `/v1/score` and `/v06/resolve` now warm the quota-band cache before reading observability data, fixing null `quotaBand`/`matrixVariant`/`providerPct` responses when feature flag is ON
+- **Quota-band matrices path resolution**: Fixed ENOENT when running from dist. `quota-band-matrix.ts` now uses robust path resolver (GATESWARM_ROOT, package root walk, cwd, dist-relative candidates) and `copy-build-assets.mjs` copies `calibration/matrix-variants/` into dist tree. Feature now works correctly when flag is ON from compiled dist runtime.
+
+## [0.6.0] - (Previous Release)
+
 Scorer calibration and eval integrity. **No routing behaviour changes**: no tier
 boundary moved, so no prompt routes differently — verified against the
 678-prompt real-traffic corpus (cost index 2148 before and after).

@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 const assets = [
   ['src/secrets/sv-secrets.mjs', 'dist/src/secrets/sv-secrets.mjs'],
   ['v04_config.json', 'dist/v04_config.json'],
+  ['calibration/matrix-variants/quota_band_matrices.json', 'dist/calibration/matrix-variants/quota_band_matrices.json'],
 ];
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
