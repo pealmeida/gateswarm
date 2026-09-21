@@ -25,7 +25,7 @@
  */
 
 import { promises as fs } from 'fs';
-import { join, dirname } from 'path';
+import { join, dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
 import type { EffortLevel } from './types.js';
 import type { TierModelConfig } from './v04-config.js';
@@ -35,7 +35,53 @@ import { consumptionTracker } from './consumption-tracker.js';
 import { getMultiWindowQuota } from './provider-quota.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const MATRICES_FILE = join(__dirname, '../calibration/matrix-variants/quota_band_matrices.json');
+
+/**
+ * Resolve the quota band matrices file path robustly.
+ * Tries multiple locations to support both src and dist runtime layouts.
+ */
+function resolveMatricesFile(): string {
+  const candidates: string[] = [];
+  
+  // 1. GATESWARM_ROOT env var (most reliable for production)
+  if (process.env.GATESWARM_ROOT) {
+    candidates.push(join(process.env.GATESWARM_ROOT, 'calibration/matrix-variants/quota_band_matrices.json'));
+  }
+  
+  // 2. Walk up from __dirname to find package.json (project root)
+  let currentDir = __dirname;
+  for (let i = 0; i < 5; i++) {
+    try {
+      const pkgPath = join(currentDir, 'package.json');
+      if (require('fs').existsSync(pkgPath)) {
+        candidates.push(join(currentDir, 'calibration/matrix-variants/quota_band_matrices.json'));
+        break;
+      }
+    } catch {}
+    currentDir = dirname(currentDir);
+  }
+  
+  // 3. process.cwd() (current working directory)
+  candidates.push(join(process.cwd(), 'calibration/matrix-variants/quota_band_matrices.json'));
+  
+  // 4. Relative paths from __dirname (src layout and dist layout)
+  candidates.push(join(__dirname, '../calibration/matrix-variants/quota_band_matrices.json')); // src layout
+  candidates.push(join(__dirname, '../../calibration/matrix-variants/quota_band_matrices.json')); // dist layout
+  
+  // Return first candidate that exists
+  for (const candidate of candidates) {
+    try {
+      if (require('fs').existsSync(candidate)) {
+        return candidate;
+      }
+    } catch {}
+  }
+  
+  // If none exist, return the first candidate (will fail later with helpful error)
+  return candidates[0] || join(__dirname, '../calibration/matrix-variants/quota_band_matrices.json');
+}
+
+const MATRICES_FILE = resolveMatricesFile();
 
 // ─── Types ───────────────────────────────────────────────
 

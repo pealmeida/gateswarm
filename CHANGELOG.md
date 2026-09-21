@@ -41,6 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **Plan override alignment**: Both `selectModel()` and plan-override code paths now use the same effective matrix (quota-aware or static), preventing divergence between chat and UI scoring
 - **DoD B HTTP wiring**: `/v1/score` and `/v06/resolve` now warm the quota-band cache before reading observability data, fixing null `quotaBand`/`matrixVariant`/`providerPct` responses when feature flag is ON
+- **Quota-band matrices path resolution**: Fixed ENOENT when running from dist. `quota-band-matrix.ts` now uses robust path resolver (GATESWARM_ROOT, package root walk, cwd, dist-relative candidates) and `copy-build-assets.mjs` copies `calibration/matrix-variants/` into dist tree. Feature now works correctly when flag is ON from compiled dist runtime.
 
 ## [0.6.0] - (Previous Release)
 
