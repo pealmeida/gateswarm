@@ -169,6 +169,7 @@ Consumption Intelligence Commands (v0.5.6):
   consumption                               Show per-provider 5h/weekly/monthly consumption + quota
   consumption <window>                      Filter to one window: 5h | weekly | monthly
   quota                                     Show per-provider quota (RPM/RPD/tokens/throttled)
+  quota-band                                Show quota-band matrix selection (v0.7.0)
   rediscover                                Force immediate model rediscovery
 
 TUI Commands (v0.5.6):
@@ -647,6 +648,61 @@ async function cmdQuota() {
   }
 }
 
+async function cmdQuotaBand() {
+  // v0.7.0: Display quota-band matrix selection status
+  const data = await gatewayFetch('/v1/score', 'POST', { prompt: 'test' });
+  
+  console.log('📊 Quota Band Matrix Selection (v0.7.0)\n');
+  
+  if (!data.quotaBand) {
+    console.log('❌ Quota band matrix is OFF or not available.');
+    console.log('   Enable with: export GATESWARM_QUOTA_BAND_MATRIX=1\n');
+    return;
+  }
+  
+  const bandEmoji: Record<string, string> = {
+    green: '🟢',
+    yellow: '🟡',
+    orange: '🟠',
+    red: '🔴',
+  };
+  
+  console.log(`Current Band:     ${bandEmoji[data.quotaBand] || ''} ${data.quotaBand.toUpperCase()}`);
+  console.log(`Matrix Variant:   ${data.matrixVariant}`);
+  console.log(`Max Provider %:   ${data.maxProviderPct?.toFixed(1) || 'N/A'}%`);
+  console.log(`Window:           ${data.window || 'none'}`);
+  console.log(`Quota Coverage:   ${data.quotaCoverage || 'none'}`);
+  console.log(`Overlays Applied: ${data.overlaysApplied?.length || 0} ${data.overlaysApplied?.length > 0 ? '→ ' + data.overlaysApplied.join(', ') : ''}`);
+  
+  if (data.providerPct && data.providerPct.length > 0) {
+    console.log('\n┌─ PROVIDER USAGE % (by window) ──────────────────────────────────────┐');
+    console.log('  PROVIDER         MAX%    WINDOW       SOURCE');
+    console.log('  ──────────────── ─────── ──────────── ──────────────────');
+    
+    for (const p of data.providerPct) {
+      const maxPctStr = p.maxPct !== null ? `${p.maxPct.toFixed(1)}%` : 'N/A';
+      const badge = p.maxPct !== null
+        ? (p.maxPct >= 85 ? '🔴' : p.maxPct >= 70 ? '🟠' : p.maxPct >= 40 ? '🟡' : '🟢')
+        : '⚪';
+      console.log(
+        `  ${p.provider.padEnd(16)} ${badge} ${maxPctStr.padStart(5)} ${(p.window || 'none').padEnd(12)} ${p.source}`,
+      );
+    }
+    console.log('└─────────────────────────────────────────────────────────────────────┘');
+  }
+  
+  console.log('\n📋 Band Thresholds:');
+  console.log('  🟢 Green:  0-40%   (Healthy)');
+  console.log('  🟡 Yellow: 40-70%  (Warning)');
+  console.log('  🟠 Orange: 70-85%  (Alert)');
+  console.log('  🔴 Red:    85-100% (Critical)');
+  
+  if (data.overlaysApplied && data.overlaysApplied.length > 0) {
+    console.log(`\n⚙️  Active Overlays: ${data.overlaysApplied.join(', ')}`);
+    console.log('   Provider-specific routing adjustments are active.');
+  }
+}
+
 async function cmdRediscover() {
   console.log('🔄 Forcing model rediscovery…');
   const result = await gatewayFetch('/v05/intel/rediscover', 'POST');
@@ -770,6 +826,9 @@ async function main() {
       break;
     case 'quota':
       await cmdQuota();
+      break;
+    case 'quota-band':
+      await cmdQuotaBand();
       break;
     case 'rediscover':
       await cmdRediscover();

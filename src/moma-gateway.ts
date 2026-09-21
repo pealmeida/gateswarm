@@ -1602,6 +1602,16 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
             res.setHeader('X-Routed-Tier', 'trivial');
             res.setHeader('X-Routing-Method', 'greeting-fast-path');
             res.setHeader('X-Routing-Reason', 'greeting-fast-path');
+            
+            // v0.7.0: Quota-band observability headers
+            const quotaBandSelectionGreeting = consumptionIntelligence.getQuotaBandSelection();
+            if (quotaBandSelectionGreeting) {
+              res.setHeader('X-Quota-Band', quotaBandSelectionGreeting.band);
+              res.setHeader('X-Matrix-Variant', quotaBandSelectionGreeting.matrixVariant);
+              if (quotaBandSelectionGreeting.overlaysApplied.length > 0) {
+                res.setHeader('X-Quota-Overlays', quotaBandSelectionGreeting.overlaysApplied.join(','));
+              }
+            }
             res.setHeader('X-Modality', 'text');
             if (clientWantsStream && isSseContentType(resp.headers.get('content-type')) && resp.body) {
               res.writeHead(200, {
@@ -2448,6 +2458,17 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
       res.setHeader('X-Routed-Tier', effort);
       res.setHeader('X-Routing-Method', decision.source || 'request');
       if (decision.reason) res.setHeader('X-Routing-Reason', decision.reason);
+      
+      // v0.7.0: Quota-band observability headers
+      const quotaBandSelection = consumptionIntelligence.getQuotaBandSelection();
+      if (quotaBandSelection) {
+        res.setHeader('X-Quota-Band', quotaBandSelection.band);
+        res.setHeader('X-Matrix-Variant', quotaBandSelection.matrixVariant);
+        if (quotaBandSelection.overlaysApplied.length > 0) {
+          res.setHeader('X-Quota-Overlays', quotaBandSelection.overlaysApplied.join(','));
+        }
+      }
+      
       // MoMA: expose detected request modalities for transparency
       res.setHeader('X-Modality', requestModalities.vision || requestModalities.audio
         ? ['text', requestModalities.vision ? 'vision' : '', requestModalities.audio ? 'audio' : ''].filter(Boolean).join('+')
@@ -2841,6 +2862,10 @@ async function init() {
         if (!resolved) {
           return jsonResponse(res, 404, { error: { message: `no model configured for tier=${tier}`, type: 'not_found' } });
         }
+        
+        // v0.7.0: Include quota-band observability
+        const quotaBandSelectionResolve = consumptionIntelligence.getQuotaBandSelection();
+        
         return jsonResponse(res, 200, {
           tier,
           mode,
@@ -2850,6 +2875,19 @@ async function init() {
             max_tokens: resolved.max_tokens,
             enable_thinking: resolved.enable_thinking,
           },
+          // v0.7.0: Quota-band observability
+          quotaBand: quotaBandSelectionResolve?.band,
+          matrixVariant: quotaBandSelectionResolve?.matrixVariant,
+          overlaysApplied: quotaBandSelectionResolve?.overlaysApplied || [],
+          maxProviderPct: quotaBandSelectionResolve?.maxProviderPct,
+          window: quotaBandSelectionResolve?.window,
+          quotaCoverage: quotaBandSelectionResolve?.quotaCoverage,
+          providerPct: quotaBandSelectionResolve?.providerPcts.map(p => ({
+            provider: p.provider,
+            maxPct: p.maxPct,
+            window: p.window,
+            source: p.source,
+          })),
         });
       }
 
@@ -2867,6 +2905,10 @@ async function init() {
         const modeOverride = (body.mode === 'plan' || body.mode === 'act') ? body.mode as IntentMode : undefined;
         const scored = await scoreIntentV04(body.prompt);
         const tierModel = getTierModelForMode(scored.tier as EffortLevel, modeOverride ?? detectIntentMode(body.prompt).mode);
+        
+        // v0.7.0: Include quota-band observability
+        const quotaBandSelectionScore = consumptionIntelligence.getQuotaBandSelection();
+        
         return jsonResponse(res, 200, {
           prompt: body.prompt,
           score: scored.value,
@@ -2884,6 +2926,19 @@ async function init() {
           } : null,
           mode: modeOverride ?? 'auto',
           timestamp: Date.now(),
+          // v0.7.0: Quota-band observability
+          quotaBand: quotaBandSelectionScore?.band,
+          matrixVariant: quotaBandSelectionScore?.matrixVariant,
+          overlaysApplied: quotaBandSelectionScore?.overlaysApplied || [],
+          maxProviderPct: quotaBandSelectionScore?.maxProviderPct,
+          window: quotaBandSelectionScore?.window,
+          quotaCoverage: quotaBandSelectionScore?.quotaCoverage,
+          providerPct: quotaBandSelectionScore?.providerPcts.map(p => ({
+            provider: p.provider,
+            maxPct: p.maxPct,
+            window: p.window,
+            source: p.source,
+          })),
         });
       }
 
