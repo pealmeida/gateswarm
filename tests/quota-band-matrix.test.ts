@@ -361,8 +361,8 @@ describe('DoD Gap B: Flag OFF Observability', () => {
       
       // Verify bit-identical to v04_config.json baseline
       const heavy = result.effectiveTierModels.heavy;
-      expect(heavy.model).toBe('glm-5.1');
-      expect(heavy.provider).toBe('zai');
+      expect(heavy.model).toBe('cc/claude-sonnet-5');
+      expect(heavy.provider).toBe('claude-cli');
     }
   });
 

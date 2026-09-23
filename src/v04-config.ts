@@ -121,27 +121,26 @@ export const DEFAULT_V04_CONFIG: V04Config = {
   // vs 57.8% at the old cuts). Frozen until the scorer changes again.
   // Derived here so config-load fallback cannot drift from scoreToEffort().
   tier_boundaries: getEffortRanges(DEFAULT_BOUNDARIES),
-  // v0.5.7: mirrors the committed v04_config.json (the validated source of truth).
+  // v0.5.8: mirrors the committed v04_config.json (Sep 2026 recommended models).
   // A config-load failure must not re-route traffic to providers/models the
   // catalogs don't serve — the old defaults pointed at retired bailian models.
   tier_models: {
-    // Low tiers use hosted defaults; local Ollama remains an optional fallback.
-    trivial:   { model: 'glm-4.7-flash',  provider: 'zai',          max_tokens: 256,  enable_thinking: false,
-                 fallback_models: [{ model: 'glm-4.5-air', provider: 'zai' }, { model: 'minimax-m2.7', provider: 'ollama-cloud' }, { model: 'deepseek-v4-flash', provider: 'opencodego' }] },
-    light:     { model: 'minimax-m2.7',   provider: 'ollama-cloud', max_tokens: 512,  enable_thinking: false,
-                 fallback_models: [{ model: 'glm-4.7', provider: 'zai' }, { model: 'glm-4.5-air', provider: 'zai' }, { model: 'deepseek-v4-flash', provider: 'opencodego' }] },
+    trivial:   { model: 'deepseek-v4-flash', provider: 'opencodego', max_tokens: 256,  enable_thinking: false,
+                 fallback_models: [{ model: 'glm-4.7-flash', provider: 'zai' }, { model: 'glm-4.5-air', provider: 'zai' }, { model: 'mimo-v2.5', provider: 'opencodego' }] },
+    light:     { model: 'deepseek-v4-flash', provider: 'opencodego', max_tokens: 512,  enable_thinking: false,
+                 fallback_models: [{ model: 'mimo-v2.5', provider: 'opencodego' }, { model: 'glm-4.7-flash', provider: 'zai' }, { model: 'glm-4.5-air', provider: 'zai' }] },
     moderate:  { model: 'glm-5',          provider: 'zai',          max_tokens: 2048, enable_thinking: false,
                  plan_model: 'glm-4.7-flash', plan_provider: 'zai', plan_max_tokens: 1024, plan_enable_thinking: false,
-                 fallback_models: [{ model: 'glm-4.7', provider: 'zai' }, { model: 'minimax-m2.7', provider: 'ollama-cloud' }, { model: 'kimi-k2.6', provider: 'ollama-cloud' }, { model: 'glm-4.7-flash', provider: 'zai' }] },
-    heavy:     { model: 'glm-5.1',        provider: 'zai',          max_tokens: 4096, enable_thinking: true,
+                 fallback_models: [{ model: 'glm-5.1', provider: 'zai' }, { model: 'glm-4.7', provider: 'zai' }, { model: 'glm-4.7-flash', provider: 'zai' }, { model: 'deepseek-v4-flash', provider: 'opencodego' }] },
+    heavy:     { model: 'cc/claude-sonnet-5', provider: 'claude-cli', max_tokens: 4096, enable_thinking: true,
                  plan_model: 'glm-5', plan_provider: 'zai', plan_max_tokens: 2048, plan_enable_thinking: false,
-                 fallback_models: [{ model: 'glm-5', provider: 'zai' }, { model: 'deepseek-v4-pro', provider: 'ollama-cloud' }, { model: 'minimax-m3', provider: 'ollama-cloud' }, { model: 'kimi-k2.7-code', provider: 'ollama-cloud' }, { model: 'cc/claude-sonnet-4-6', provider: 'claude-cli' }] },
-    intensive: { model: 'cx/gpt-5.4-codex', provider: 'codex-cli',  max_tokens: 4096, enable_thinking: true,
-                 plan_model: 'cc/claude-sonnet-4-6', plan_provider: 'claude-cli', plan_max_tokens: 2048, plan_enable_thinking: true,
-                 fallback_models: [{ model: 'cx/gpt-5.5-codex', provider: 'codex-cli' }, { model: 'glm-5', provider: 'zai' }, { model: 'deepseek-v4-pro', provider: 'ollama-cloud' }, { model: 'minimax-m3', provider: 'ollama-cloud' }] },
-    extreme:   { model: 'cx/gpt-5.4-codex', provider: 'codex-cli',  max_tokens: 8192, enable_thinking: true,
-                 plan_model: 'cc/claude-opus-4-8', plan_provider: 'claude-cli', plan_max_tokens: 4096, plan_enable_thinking: true,
-                 fallback_models: [{ model: 'cx/gpt-5.5-codex', provider: 'codex-cli' }, { model: 'glm-5', provider: 'zai' }, { model: 'deepseek-v4-pro', provider: 'ollama-cloud' }, { model: 'minimax-m3', provider: 'ollama-cloud' }] },
+                 fallback_models: [{ model: 'glm-5.1', provider: 'zai' }, { model: 'glm-5', provider: 'zai' }, { model: 'cx/gpt-6-luna', provider: 'codex-cli' }] },
+    intensive: { model: 'cx/gpt-6-sol', provider: 'codex-cli',  max_tokens: 4096, enable_thinking: true,
+                 plan_model: 'cc/claude-sonnet-5', plan_provider: 'claude-cli', plan_max_tokens: 2048, plan_enable_thinking: true,
+                 fallback_models: [{ model: 'cx/gpt-6-luna', provider: 'codex-cli' }, { model: 'glm-5', provider: 'zai' }, { model: 'glm-5.1', provider: 'zai' }] },
+    extreme:   { model: 'cc/claude-opus-5-5', provider: 'claude-cli', max_tokens: 8192, enable_thinking: true,
+                 plan_model: 'cc/claude-fable-5-1', plan_provider: 'claude-cli', plan_max_tokens: 4096, plan_enable_thinking: true,
+                 fallback_models: [{ model: 'cx/gpt-6-astra', provider: 'codex-cli' }, { model: 'glm-5', provider: 'zai' }, { model: 'cx/gpt-6-sol', provider: 'codex-cli' }] },
   },
   feedback_loop: {
     retrainAfterInteractions: 500,

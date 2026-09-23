@@ -150,12 +150,12 @@ The six built-in default tiers are defined in `DEFAULT_V04_CONFIG`; deployments 
 
 | Tier | Score Range | Act Model | Act Provider | Max Tokens | Reasoning |
 |------|-------------|-----------|--------------|------------|-----------|
-| **trivial** | 0.000000 – 0.208938 | glm-4.7-flash | zai | 256 | — |
-| **light** | 0.208938 – 0.264209 | minimax-m2.7 | ollama-cloud | 512 | — |
-| **moderate** | 0.264209 – 0.325020 | glm-5 | zai | 2048 | — |
-| **heavy** | 0.325020 – 0.365850 | glm-5.1 | zai | 4096 | ✓ |
-| **intensive** | 0.365850 – 0.485382 | cx/gpt-5.4-codex | codex-cli | 4096 | ✓ |
-| **extreme** | 0.485382 – 1.000000 | cx/gpt-5.4-codex | codex-cli | 8192 | ✓ |
+| **trivial** | 0.000000 – 0.196029 | deepseek-v4-flash | opencodego | 256 | — |
+| **light** | 0.196029 – 0.264209 | deepseek-v4-flash | opencodego | 512 | — |
+| **moderate** | 0.264209 – 0.324887 | glm-5 | zai | 2048 | — |
+| **heavy** | 0.324887 – 0.365850 | cc/claude-sonnet-5 | claude-cli | 4096 | ✓ |
+| **intensive** | 0.365850 – 0.523832 | cx/gpt-6-sol | codex-cli | 4096 | ✓ |
+| **extreme** | 0.523832 – 1.000000 | cc/claude-opus-5-5 | claude-cli | 8192 | ✓ |
 
 Reasoning (`enable_thinking`) is on for heavy, intensive, and extreme tiers. Tier models, plan/act overrides, and fallback chains are fully configurable via CLI or by editing `v04_config.json` directly.
 
@@ -165,12 +165,12 @@ Every tier has two model assignments — one for **acting** (default: implementa
 
 | Tier | Act Model | Act Provider | Plan Model | Plan Provider |
 |------|-----------|--------------|------------|---------------|
-| **trivial** | glm-4.7-flash | zai | (uses act) | — |
-| **light** | minimax-m2.7 | ollama-cloud | (uses act) | — |
+| **trivial** | deepseek-v4-flash | opencodego | (uses act) | — |
+| **light** | deepseek-v4-flash | opencodego | (uses act) | — |
 | **moderate** | glm-5 | zai | glm-4.7-flash | zai |
-| **heavy** | glm-5.1 | zai | glm-5 | zai |
-| **intensive** | cx/gpt-5.4-codex | codex-cli | cc/claude-sonnet-4-6 | claude-cli |
-| **extreme** | cx/gpt-5.4-codex | codex-cli | cc/claude-opus-4-8 | claude-cli |
+| **heavy** | cc/claude-sonnet-5 | claude-cli | glm-5 | zai |
+| **intensive** | cx/gpt-6-sol | codex-cli | cc/claude-sonnet-5 | claude-cli |
+| **extreme** | cc/claude-opus-5-5 | claude-cli | cc/claude-fable-5-1 | claude-cli |
 
 Auto-detection (`detectIntentMode`) scores stem-aware keyword hits plus intent patterns. Override explicitly with `"mode": "plan"` / `"mode": "act"` in the request body, or the `X-Mode` request header.
 
@@ -213,7 +213,7 @@ npm install
 npm start                     # gateway on :8900
 ```
 
-The default low tiers use hosted Z.AI and Ollama Cloud models, so configure the relevant provider keys; local Ollama is optional and is not a default routing path.
+The default low tiers use OpenCode Go and Z.AI; configure `OPENCODEGO_KEY` and `ZAI_KEY` (or `GLM_API_KEY`). Ollama Cloud remains an optional quota-stress fallback, not a default primary.
 
 Point any OpenAI-compatible client at `http://localhost:8900/v1`:
 

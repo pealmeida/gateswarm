@@ -62,42 +62,42 @@
   },
   "tier_models": {
     "trivial": {
-      "model": "glm-4.7-flash",
-      "provider": "zai",
+      "model": "deepseek-v4-flash",
+      "provider": "opencodego",
       "max_tokens": 256,
       "enable_thinking": false,
       "fallback_models": [
+        {
+          "model": "glm-4.7-flash",
+          "provider": "zai"
+        },
         {
           "model": "glm-4.5-air",
           "provider": "zai"
         },
         {
-          "model": "minimax-m2.7",
-          "provider": "ollama-cloud"
-        },
-        {
-          "model": "deepseek-v4-flash",
+          "model": "mimo-v2.5",
           "provider": "opencodego"
         }
       ]
     },
     "light": {
-      "model": "minimax-m2.7",
-      "provider": "ollama-cloud",
+      "model": "deepseek-v4-flash",
+      "provider": "opencodego",
       "max_tokens": 512,
       "enable_thinking": false,
       "fallback_models": [
         {
-          "model": "glm-4.7",
+          "model": "mimo-v2.5",
+          "provider": "opencodego"
+        },
+        {
+          "model": "glm-4.7-flash",
           "provider": "zai"
         },
         {
           "model": "glm-4.5-air",
           "provider": "zai"
-        },
-        {
-          "model": "deepseek-v4-flash",
-          "provider": "opencodego"
         }
       ]
     },
@@ -112,26 +112,26 @@
       "plan_enable_thinking": false,
       "fallback_models": [
         {
+          "model": "glm-5.1",
+          "provider": "zai"
+        },
+        {
           "model": "glm-4.7",
           "provider": "zai"
         },
         {
-          "model": "minimax-m2.7",
-          "provider": "ollama-cloud"
-        },
-        {
-          "model": "kimi-k2.6",
-          "provider": "ollama-cloud"
-        },
-        {
           "model": "glm-4.7-flash",
           "provider": "zai"
+        },
+        {
+          "model": "deepseek-v4-flash",
+          "provider": "opencodego"
         }
       ]
     },
     "heavy": {
-      "model": "glm-5.1",
-      "provider": "zai",
+      "model": "cc/claude-sonnet-5",
+      "provider": "claude-cli",
       "max_tokens": 4096,
       "enable_thinking": true,
       "plan_model": "glm-5",
@@ -140,39 +140,31 @@
       "plan_enable_thinking": false,
       "fallback_models": [
         {
+          "model": "glm-5.1",
+          "provider": "zai"
+        },
+        {
           "model": "glm-5",
           "provider": "zai"
         },
         {
-          "model": "deepseek-v4-pro",
-          "provider": "ollama-cloud"
-        },
-        {
-          "model": "minimax-m3",
-          "provider": "ollama-cloud"
-        },
-        {
-          "model": "kimi-k2.7-code",
-          "provider": "ollama-cloud"
-        },
-        {
-          "model": "cc/claude-sonnet-4-6",
-          "provider": "claude-cli"
+          "model": "cx/gpt-6-luna",
+          "provider": "codex-cli"
         }
       ]
     },
     "intensive": {
-      "model": "cx/gpt-5.4-codex",
+      "model": "cx/gpt-6-sol",
       "provider": "codex-cli",
       "max_tokens": 4096,
       "enable_thinking": true,
-      "plan_model": "cc/claude-sonnet-4-6",
+      "plan_model": "cc/claude-sonnet-5",
       "plan_provider": "claude-cli",
       "plan_max_tokens": 2048,
       "plan_enable_thinking": true,
       "fallback_models": [
         {
-          "model": "cx/gpt-5.5-codex",
+          "model": "cx/gpt-6-luna",
           "provider": "codex-cli"
         },
         {
@@ -180,27 +172,23 @@
           "provider": "zai"
         },
         {
-          "model": "deepseek-v4-pro",
-          "provider": "ollama-cloud"
-        },
-        {
-          "model": "minimax-m3",
-          "provider": "ollama-cloud"
+          "model": "glm-5.1",
+          "provider": "zai"
         }
       ]
     },
     "extreme": {
-      "model": "cx/gpt-5.4-codex",
-      "provider": "codex-cli",
+      "model": "cc/claude-opus-5-5",
+      "provider": "claude-cli",
       "max_tokens": 8192,
       "enable_thinking": true,
-      "plan_model": "cc/claude-opus-4-8",
+      "plan_model": "cc/claude-fable-5-1",
       "plan_provider": "claude-cli",
       "plan_max_tokens": 4096,
       "plan_enable_thinking": true,
       "fallback_models": [
         {
-          "model": "cx/gpt-5.5-codex",
+          "model": "cx/gpt-6-astra",
           "provider": "codex-cli"
         },
         {
@@ -208,12 +196,8 @@
           "provider": "zai"
         },
         {
-          "model": "deepseek-v4-pro",
-          "provider": "ollama-cloud"
-        },
-        {
-          "model": "minimax-m3",
-          "provider": "ollama-cloud"
+          "model": "cx/gpt-6-sol",
+          "provider": "codex-cli"
         }
       ]
     }
@@ -236,5 +220,5 @@
     "queryMaxResults": 3
   },
   "_tier_boundaries_note": "Phase 1.1 train-only refit; fitted_on=2026-07-12T03:34:24.672Z; split=holdout.v1.json; frozen until the scorer changes again.",
-  "_low_tier_note": "Trivial and light tiers use hosted defaults so local Ollama remains optional rather than a routing prerequisite."
+  "_low_tier_note": "Trivial and light tiers use OpenCode Go + Z.AI; Ollama Cloud is optional fallback only (see docs/RECOMMENDED_MODELS.md)."
 }

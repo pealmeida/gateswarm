@@ -353,6 +353,9 @@ describe('🏷️ CLI Prefix Notation', () => {
   it('recognizes cx/ prefix for Codex', () => {
     const cfg = agentRegistry.getCliProviderConfig('codex-cli');
     expect(cfg).not.toBeNull();
+    expect(cfg!.modelAlias!['cx/gpt-6-sol']).toBe('gpt-6-sol');
+    expect(cfg!.modelAlias!['cx/gpt-6-luna']).toBe('gpt-6-luna');
+    expect(cfg!.modelAlias!['cx/gpt-6-astra']).toBe('gpt-6-astra');
     expect(cfg!.modelAlias!['cx/gpt-5.5-codex']).toBe('gpt-5.5');
     expect(cfg!.modelAlias!['cx/gpt-5.3-codex']).toBe('gpt-5.3');
     expect(cfg!.modelAlias!['cx/gpt-4.1']).toBe('gpt-4.1');
