@@ -10,11 +10,15 @@
       "description": "Healthy state (0-40%). Use moderate/balanced tier selections.",
       "tier_models": {
         "trivial": {
-          "model": "deepseek-v4-flash",
+          "model": "mimo-v2.6-flash",
           "provider": "opencodego",
           "max_tokens": 256,
           "enable_thinking": false,
           "fallback_models": [
+            {
+              "model": "deepseek-v4-flash",
+              "provider": "opencodego"
+            },
             {
               "model": "glm-4.7-flash",
               "provider": "zai"
@@ -159,11 +163,15 @@
       "description": "Warning state (40-70%). Current default/inverted matrix - balanced across all providers.",
       "tier_models": {
         "trivial": {
-          "model": "deepseek-v4-flash",
+          "model": "mimo-v2.6-flash",
           "provider": "opencodego",
           "max_tokens": 256,
           "enable_thinking": false,
           "fallback_models": [
+            {
+              "model": "deepseek-v4-flash",
+              "provider": "opencodego"
+            },
             {
               "model": "glm-4.7-flash",
               "provider": "zai"

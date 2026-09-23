@@ -165,7 +165,7 @@ Every tier has two model assignments — one for **acting** (default: implementa
 
 | Tier | Act Model | Act Provider | Plan Model | Plan Provider |
 |------|-----------|--------------|------------|---------------|
-| **trivial** | deepseek-v4-flash | opencodego | (uses act) | — |
+| **trivial** | mimo-v2.6-flash | opencodego | (uses act) | — |
 | **light** | deepseek-v4-flash | opencodego | (uses act) | — |
 | **moderate** | glm-5 | zai | glm-4.7-flash | zai |
 | **heavy** | cc/claude-sonnet-5 | claude-cli | glm-5 | zai |

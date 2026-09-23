@@ -125,8 +125,8 @@ export const DEFAULT_V04_CONFIG: V04Config = {
   // A config-load failure must not re-route traffic to providers/models the
   // catalogs don't serve — the old defaults pointed at retired bailian models.
   tier_models: {
-    trivial:   { model: 'deepseek-v4-flash', provider: 'opencodego', max_tokens: 256,  enable_thinking: false,
-                 fallback_models: [{ model: 'glm-4.7-flash', provider: 'zai' }, { model: 'glm-4.5-air', provider: 'zai' }, { model: 'mimo-v2.5', provider: 'opencodego' }] },
+    trivial:   { model: 'mimo-v2.6-flash', provider: 'opencodego', max_tokens: 256,  enable_thinking: false,
+                 fallback_models: [{ model: 'deepseek-v4-flash', provider: 'opencodego' }, { model: 'glm-4.7-flash', provider: 'zai' }, { model: 'glm-4.5-air', provider: 'zai' }, { model: 'mimo-v2.5', provider: 'opencodego' }] },
     light:     { model: 'deepseek-v4-flash', provider: 'opencodego', max_tokens: 512,  enable_thinking: false,
                  fallback_models: [{ model: 'mimo-v2.5', provider: 'opencodego' }, { model: 'glm-4.7-flash', provider: 'zai' }, { model: 'glm-4.5-air', provider: 'zai' }] },
     moderate:  { model: 'glm-5',          provider: 'zai',          max_tokens: 2048, enable_thinking: false,

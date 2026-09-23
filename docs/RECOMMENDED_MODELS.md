@@ -6,7 +6,7 @@ GateSwarm routing defaults in `v04_config.json`, `calibration/matrix-variants/qu
 
 | Tier | Primary (act) | Plan | Main fallbacks |
 |------|---------------|------|----------------|
-| trivial | opencodego `deepseek-v4-flash` | — | zai `glm-4.7-flash`, `glm-4.5-air`; Go `mimo-v2.5` |
+| trivial | opencodego `mimo-v2.6-flash` | — | Go `deepseek-v4-flash`, `mimo-v2.5`; zai `glm-4.7-flash`, `glm-4.5-air` |
 | light | opencodego `deepseek-v4-flash` | — | Go `mimo-v2.5`; zai flash |
 | moderate | zai `glm-5` | zai `glm-4.7-flash` | zai `glm-5.1`, `glm-4.7`; Go flash |
 | heavy | claude-cli `cc/claude-sonnet-5` | zai `glm-5` | zai `glm-5.1`; codex-cli `cx/gpt-6-luna` |
@@ -19,7 +19,7 @@ Orange/red quota bands keep load-shedding behavior (more ollama-cloud under stre
 
 ### OpenCode Go (`opencodego`)
 
-- Flash / low tiers: `deepseek-v4-flash`, `mimo-v2.5`
+- Flash / low tiers: `mimo-v2.6-flash`, `deepseek-v4-flash`, `mimo-v2.5`
 - Pro fallback: `deepseek-v4-pro`
 
 **Catalog gap:** `deepseek-v4.1-flash` is not listed in `HTTP_PROVIDER_MODELS` yet; **light** tier uses `deepseek-v4-flash` as the closest match.
