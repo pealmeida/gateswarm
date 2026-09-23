@@ -10,11 +10,15 @@
       "description": "Healthy state (0-40%). Use moderate/balanced tier selections.",
       "tier_models": {
         "trivial": {
-          "model": "deepseek-v4-flash",
+          "model": "mimo-v2.6-flash",
           "provider": "opencodego",
           "max_tokens": 256,
           "enable_thinking": false,
           "fallback_models": [
+            {
+              "model": "deepseek-v4-flash",
+              "provider": "opencodego"
+            },
             {
               "model": "glm-4.7-flash",
               "provider": "zai"
@@ -130,7 +134,7 @@
           "provider": "claude-cli",
           "max_tokens": 8192,
           "enable_thinking": true,
-          "plan_model": "cc/claude-fable-5-1",
+          "plan_model": "cc/claude-opus-5-5",
           "plan_provider": "claude-cli",
           "plan_max_tokens": 4096,
           "plan_enable_thinking": true,
@@ -159,11 +163,15 @@
       "description": "Warning state (40-70%). Current default/inverted matrix - balanced across all providers.",
       "tier_models": {
         "trivial": {
-          "model": "deepseek-v4-flash",
+          "model": "mimo-v2.6-flash",
           "provider": "opencodego",
           "max_tokens": 256,
           "enable_thinking": false,
           "fallback_models": [
+            {
+              "model": "deepseek-v4-flash",
+              "provider": "opencodego"
+            },
             {
               "model": "glm-4.7-flash",
               "provider": "zai"
@@ -279,7 +287,7 @@
           "provider": "claude-cli",
           "max_tokens": 8192,
           "enable_thinking": true,
-          "plan_model": "cc/claude-fable-5-1",
+          "plan_model": "cc/claude-opus-5-5",
           "plan_provider": "claude-cli",
           "plan_max_tokens": 4096,
           "plan_enable_thinking": true,
@@ -436,7 +444,7 @@
           "provider": "codex-cli",
           "max_tokens": 8192,
           "enable_thinking": true,
-          "plan_model": "cc/claude-fable-5-1",
+          "plan_model": "cc/claude-opus-5-5",
           "plan_provider": "claude-cli",
           "plan_max_tokens": 4096,
           "plan_enable_thinking": true,

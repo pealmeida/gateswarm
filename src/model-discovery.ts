@@ -109,7 +109,7 @@ function getModelHeuristics(providerId: string, modelId: string): ModelHeuristic
   if (id.includes('nemotron-3-super')) contextWindow = 1000000;
   if (id.includes('nemotron-3-nano')) contextWindow = 128000;
   if (id.includes('mimo-v2-pro') || id.includes('mimo-v2-omni')) contextWindow = 262144;
-  if (id.includes('mimo-v2.5')) contextWindow = 262144;
+  if (id.includes('mimo-v2.6') || id.includes('mimo-v2.5')) contextWindow = 262144;
   if (id.includes('hy3-preview') || id.includes('cogito')) contextWindow = 200000;
 
   // Max tokens

@@ -151,7 +151,7 @@ export const HTTP_PROVIDER_MODELS: Record<string, string[]> = {
   openrouter: ['owl-alpha', 'glm-4.7-flash', 'qwen-plus', 'gemini-2.5-flash', 'claude-sonnet-4.6', 'claude-opus-4.6'],
   opencodego: ['deepseek-v4-flash', 'deepseek-v4-pro', 'qwen3.7-plus', 'qwen3.7-max',
     'qwen3.6-plus', 'kimi-k2.5', 'kimi-k2.6', 'glm-5', 'glm-5.1',
-    'minimax-m3', 'minimax-m2.7', 'mimo-v2.5', 'mimo-v2.5-pro'],
+    'minimax-m3', 'minimax-m2.7', 'mimo-v2.6-flash', 'mimo-v2.5', 'mimo-v2.5-pro'],
   ollama: ['qwen2.5:0.5b', 'qwen2.5:1.5b'],
   'ollama-cloud': ['kimi-k2.5', 'kimi-k2.6', 'kimi-k2.7-code', 'glm-5.1', 'gemma3:12b',
     'qwen3-vl:235b', 'minimax-m2.7', 'minimax-m3', 'deepseek-v4-pro'],

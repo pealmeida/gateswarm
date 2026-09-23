@@ -6,12 +6,12 @@ GateSwarm routing defaults in `v04_config.json`, `calibration/matrix-variants/qu
 
 | Tier | Primary (act) | Plan | Main fallbacks |
 |------|---------------|------|----------------|
-| trivial | opencodego `deepseek-v4-flash` | — | zai `glm-4.7-flash`, `glm-4.5-air`; Go `mimo-v2.5` |
+| trivial | opencodego `mimo-v2.6-flash` | — | Go `deepseek-v4-flash`, `mimo-v2.5`; zai `glm-4.7-flash`, `glm-4.5-air` |
 | light | opencodego `deepseek-v4-flash` | — | Go `mimo-v2.5`; zai flash |
 | moderate | zai `glm-5` | zai `glm-4.7-flash` | zai `glm-5.1`, `glm-4.7`; Go flash |
 | heavy | claude-cli `cc/claude-sonnet-5` | zai `glm-5` | zai `glm-5.1`; codex-cli `cx/gpt-6-luna` |
 | intensive | codex-cli `cx/gpt-6-sol` | `cc/claude-sonnet-5` | `cx/gpt-6-luna`; zai `glm-5` / `glm-5.1` |
-| extreme | claude-cli `cc/claude-opus-5-5` | `cc/claude-fable-5-1` | `cx/gpt-6-astra`; zai `glm-5`; `cx/gpt-6-sol` |
+| extreme | claude-cli `cc/claude-opus-5-5` | `cc/claude-opus-5-5` (same as act) | `cx/gpt-6-astra`; zai `glm-5`; `cx/gpt-6-sol` |
 
 Orange/red quota bands keep load-shedding behavior (more ollama-cloud under stress) but use the same CLI model IDs where Codex/Claude appear.
 
@@ -19,7 +19,7 @@ Orange/red quota bands keep load-shedding behavior (more ollama-cloud under stre
 
 ### OpenCode Go (`opencodego`)
 
-- Flash / low tiers: `deepseek-v4-flash`, `mimo-v2.5`
+- Flash / low tiers: `mimo-v2.6-flash`, `deepseek-v4-flash`, `mimo-v2.5`
 - Pro fallback: `deepseek-v4-pro`
 
 **Catalog gap:** `deepseek-v4.1-flash` is not listed in `HTTP_PROVIDER_MODELS` yet; **light** tier uses `deepseek-v4-flash` as the closest match.
@@ -37,7 +37,7 @@ Orange/red quota bands keep load-shedding behavior (more ollama-cloud under stre
 |--------------|------------------------|
 | `cc/claude-sonnet-5` | `sonnet-5` |
 | `cc/claude-opus-5-5` | `opus` |
-| `cc/claude-fable-5-1` | `fable` |
+| `cc/claude-fable-5-1` | `fable` (Max / plan-gated; optional catalog alias — **not** used in default routing) |
 
 Legacy IDs (`cc/claude-sonnet-4-6`, `cc/claude-opus-4-8`, …) remain in the catalog for backward compatibility but are **not** default primaries.
 

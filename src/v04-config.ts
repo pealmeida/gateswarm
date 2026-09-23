@@ -125,8 +125,8 @@ export const DEFAULT_V04_CONFIG: V04Config = {
   // A config-load failure must not re-route traffic to providers/models the
   // catalogs don't serve — the old defaults pointed at retired bailian models.
   tier_models: {
-    trivial:   { model: 'deepseek-v4-flash', provider: 'opencodego', max_tokens: 256,  enable_thinking: false,
-                 fallback_models: [{ model: 'glm-4.7-flash', provider: 'zai' }, { model: 'glm-4.5-air', provider: 'zai' }, { model: 'mimo-v2.5', provider: 'opencodego' }] },
+    trivial:   { model: 'mimo-v2.6-flash', provider: 'opencodego', max_tokens: 256,  enable_thinking: false,
+                 fallback_models: [{ model: 'deepseek-v4-flash', provider: 'opencodego' }, { model: 'glm-4.7-flash', provider: 'zai' }, { model: 'glm-4.5-air', provider: 'zai' }, { model: 'mimo-v2.5', provider: 'opencodego' }] },
     light:     { model: 'deepseek-v4-flash', provider: 'opencodego', max_tokens: 512,  enable_thinking: false,
                  fallback_models: [{ model: 'mimo-v2.5', provider: 'opencodego' }, { model: 'glm-4.7-flash', provider: 'zai' }, { model: 'glm-4.5-air', provider: 'zai' }] },
     moderate:  { model: 'glm-5',          provider: 'zai',          max_tokens: 2048, enable_thinking: false,
@@ -139,7 +139,7 @@ export const DEFAULT_V04_CONFIG: V04Config = {
                  plan_model: 'cc/claude-sonnet-5', plan_provider: 'claude-cli', plan_max_tokens: 2048, plan_enable_thinking: true,
                  fallback_models: [{ model: 'cx/gpt-6-luna', provider: 'codex-cli' }, { model: 'glm-5', provider: 'zai' }, { model: 'glm-5.1', provider: 'zai' }] },
     extreme:   { model: 'cc/claude-opus-5-5', provider: 'claude-cli', max_tokens: 8192, enable_thinking: true,
-                 plan_model: 'cc/claude-fable-5-1', plan_provider: 'claude-cli', plan_max_tokens: 4096, plan_enable_thinking: true,
+                 plan_model: 'cc/claude-opus-5-5', plan_provider: 'claude-cli', plan_max_tokens: 4096, plan_enable_thinking: true,
                  fallback_models: [{ model: 'cx/gpt-6-astra', provider: 'codex-cli' }, { model: 'glm-5', provider: 'zai' }, { model: 'cx/gpt-6-sol', provider: 'codex-cli' }] },
   },
   feedback_loop: {
