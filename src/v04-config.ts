@@ -139,7 +139,7 @@ export const DEFAULT_V04_CONFIG: V04Config = {
                  plan_model: 'cc/claude-sonnet-5', plan_provider: 'claude-cli', plan_max_tokens: 2048, plan_enable_thinking: true,
                  fallback_models: [{ model: 'cx/gpt-6-luna', provider: 'codex-cli' }, { model: 'glm-5', provider: 'zai' }, { model: 'glm-5.1', provider: 'zai' }] },
     extreme:   { model: 'cc/claude-opus-5-5', provider: 'claude-cli', max_tokens: 8192, enable_thinking: true,
-                 plan_model: 'cc/claude-sonnet-5', plan_provider: 'claude-cli', plan_max_tokens: 4096, plan_enable_thinking: true,
+                 plan_model: 'cc/claude-opus-5-5', plan_provider: 'claude-cli', plan_max_tokens: 4096, plan_enable_thinking: true,
                  fallback_models: [{ model: 'cx/gpt-6-astra', provider: 'codex-cli' }, { model: 'glm-5', provider: 'zai' }, { model: 'cx/gpt-6-sol', provider: 'codex-cli' }] },
   },
   feedback_loop: {

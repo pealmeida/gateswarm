@@ -170,7 +170,7 @@ Every tier has two model assignments — one for **acting** (default: implementa
 | **moderate** | glm-5 | zai | glm-4.7-flash | zai |
 | **heavy** | cc/claude-sonnet-5 | claude-cli | glm-5 | zai |
 | **intensive** | cx/gpt-6-sol | codex-cli | cc/claude-sonnet-5 | claude-cli |
-| **extreme** | cc/claude-opus-5-5 | claude-cli | cc/claude-sonnet-5 | claude-cli |
+| **extreme** | cc/claude-opus-5-5 | claude-cli | cc/claude-opus-5-5 | claude-cli |
 
 Auto-detection (`detectIntentMode`) scores stem-aware keyword hits plus intent patterns. Override explicitly with `"mode": "plan"` / `"mode": "act"` in the request body, or the `X-Mode` request header.
 

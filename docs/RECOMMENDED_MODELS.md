@@ -11,7 +11,7 @@ GateSwarm routing defaults in `v04_config.json`, `calibration/matrix-variants/qu
 | moderate | zai `glm-5` | zai `glm-4.7-flash` | zai `glm-5.1`, `glm-4.7`; Go flash |
 | heavy | claude-cli `cc/claude-sonnet-5` | zai `glm-5` | zai `glm-5.1`; codex-cli `cx/gpt-6-luna` |
 | intensive | codex-cli `cx/gpt-6-sol` | `cc/claude-sonnet-5` | `cx/gpt-6-luna`; zai `glm-5` / `glm-5.1` |
-| extreme | claude-cli `cc/claude-opus-5-5` | `cc/claude-sonnet-5` | `cx/gpt-6-astra`; zai `glm-5`; `cx/gpt-6-sol` |
+| extreme | claude-cli `cc/claude-opus-5-5` | `cc/claude-opus-5-5` (same as act) | `cx/gpt-6-astra`; zai `glm-5`; `cx/gpt-6-sol` |
 
 Orange/red quota bands keep load-shedding behavior (more ollama-cloud under stress) but use the same CLI model IDs where Codex/Claude appear.
 
