@@ -98,9 +98,9 @@ export const DEFAULT_TIER_CONFIGS: Record<string, AgentTierConfig> = {
     trivial: 'zai/glm-4.5-air',
     light: 'opencodego/deepseek-v4-flash',
     moderate: 'opencodego/deepseek-v4-flash',
-    heavy: 'cc/claude-sonnet-4-6',             // Claude Code for quality
-    intensive: 'cc/claude-sonnet-4-6',
-    extreme: 'cc/claude-opus-4-8',
+    heavy: 'cc/claude-sonnet-5',
+    intensive: 'cx/gpt-6-sol',
+    extreme: 'cc/claude-opus-5-5',
   },
   // Balanced — cost/quality tradeoff (v0.5.2 aligned)
   'balanced': {
@@ -124,19 +124,19 @@ export const DEFAULT_TIER_CONFIGS: Record<string, AgentTierConfig> = {
   'claude-quality': {
     trivial: 'qwen3.5-plus',
     light: 'glm-4.7-flash',
-    moderate: 'cc/claude-sonnet-4-6',
-    heavy: 'cc/claude-sonnet-4-6',
-    intensive: 'cc/claude-sonnet-4-6',
-    extreme: 'cc/claude-opus-4-7',
+    moderate: 'cc/claude-sonnet-5',
+    heavy: 'cc/claude-sonnet-5',
+    intensive: 'cc/claude-sonnet-5',
+    extreme: 'cc/claude-opus-5-5',
   },
   // CLI-first (Codex for heavy tiers)
   'codex-heavy': {
     trivial: 'qwen3.5-plus',
     light: 'glm-4.7-flash',
     moderate: 'qwen3-coder-plus',
-    heavy: 'cx/gpt-5.3-codex',
-    intensive: 'cx/gpt-5.3-codex',
-    extreme: 'cc/claude-opus-4-7',
+    heavy: 'cx/gpt-6-luna',
+    intensive: 'cx/gpt-6-sol',
+    extreme: 'cx/gpt-6-astra',
   },
 };
 
@@ -164,7 +164,15 @@ export const DEFAULT_CLI_PROVIDERS: Record<string, CliProviderEntry> = {
     id: 'claude-cli',
     name: 'Claude Code CLI',
     type: 'cli-agent',
-    models: ['cc/claude-sonnet-4-6', 'cc/claude-opus-4-7', 'cc/claude-opus-4-8', 'cc/claude-haiku-4-5'],
+    models: [
+      'cc/claude-sonnet-5',
+      'cc/claude-opus-5-5',
+      'cc/claude-fable-5-1',
+      'cc/claude-sonnet-4-6',
+      'cc/claude-opus-4-7',
+      'cc/claude-opus-4-8',
+      'cc/claude-haiku-4-5',
+    ],
     cliConfig: {
       command: 'claude',
       argsTemplate: ['--print', '--model', '{model}', '-p', '{prompt}'],
@@ -175,6 +183,9 @@ export const DEFAULT_CLI_PROVIDERS: Record<string, CliProviderEntry> = {
       maxTokens: 64_000,
       maxConcurrent: 1,
       modelAlias: {
+        'cc/claude-sonnet-5': 'sonnet-5',
+        'cc/claude-opus-5-5': 'opus',
+        'cc/claude-fable-5-1': 'fable',
         'cc/claude-sonnet-4-6': 'claude-sonnet-4-6',
         'cc/claude-opus-4-7': 'claude-opus-4-7',
         'cc/claude-opus-4-8': 'claude-opus-4-8',
@@ -194,7 +205,15 @@ export const DEFAULT_CLI_PROVIDERS: Record<string, CliProviderEntry> = {
     id: 'codex-cli',
     name: 'OpenAI Codex CLI',
     type: 'cli-agent',
-    models: ['cx/gpt-5.5-codex', 'cx/gpt-5.4-codex', 'cx/gpt-5.3-codex', 'cx/gpt-4.1'],
+    models: [
+      'cx/gpt-6-sol',
+      'cx/gpt-6-luna',
+      'cx/gpt-6-astra',
+      'cx/gpt-5.5-codex',
+      'cx/gpt-5.4-codex',
+      'cx/gpt-5.3-codex',
+      'cx/gpt-4.1',
+    ],
     cliConfig: {
       command: 'codex',
       argsTemplate: ['exec', '-'],
@@ -205,6 +224,9 @@ export const DEFAULT_CLI_PROVIDERS: Record<string, CliProviderEntry> = {
       maxTokens: 64_000,
       maxConcurrent: 1,
       modelAlias: {
+        'cx/gpt-6-sol': 'gpt-6-sol',
+        'cx/gpt-6-luna': 'gpt-6-luna',
+        'cx/gpt-6-astra': 'gpt-6-astra',
         'cx/gpt-5.5-codex': 'gpt-5.5',
         'cx/gpt-5.4-codex': 'gpt-5.4',
         'cx/gpt-5.3-codex': 'gpt-5.3',
