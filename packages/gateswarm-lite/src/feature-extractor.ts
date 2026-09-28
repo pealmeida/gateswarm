@@ -232,7 +232,11 @@ function segmentText(prompt: string, granularity: 'word' | 'sentence'): string[]
       // Keep established compound technical tokens (for example async/await)
       // together while using Segmenter everywhere else. This preserves their
       // semantic signal and avoids changing established English scores.
-      const compounds = Array.from(prompt.matchAll(/[a-z][a-z0-9]*[-/][a-z][a-z0-9]*/gi))
+      // ICU Segmenter word boundaries differ across Node/ICU versions. Pin spans that
+      // otherwise split differently (dbt state keys, ARNs, ISO format placeholders).
+      const segmenterCompoundPattern =
+        /arn:[a-z0-9-]+(?::[a-z0-9-]*){2,}:[^\s'"]+|[A-Z]{4}-[A-Z]{2}-[A-Z]{2}T[A-Z]{2}:[A-Z]{2}:[A-Z]{2}|[a-z][a-z0-9]*[-/:][a-z][a-z0-9]*/g;
+      const compounds = Array.from(prompt.matchAll(segmenterCompoundPattern))
         .map((match) => ({ start: match.index ?? 0, end: (match.index ?? 0) + match[0].length, text: match[0] }));
       const seenCompounds = new Set<number>();
       const words = segments.flatMap((segment) => {
@@ -431,7 +435,7 @@ export function extractFeatures(prompt: string): FeatureVector {
   // them a discrete bump — explaining a named concept warrants at least
   // the light tier, not trivial.
   const COMPOUND_TECH_PATTERNS = [
-    /^[a-z][a-z0-9]*[-/][a-z][a-z0-9]*$/i,  // async/await, event-loop, call-stack
+    /^[a-z][a-z0-9]*[-/:][a-z][a-z0-9]*$/i,  // async/await, state:modified, event-loop
     /^[a-z]+_(function|method|pattern|handler|provider|controller|service|component|module|interface|api)$/i,
   ];
   const compound_tech = words.filter(w =>

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  countPromptWords,
   extractFeatures,
   heuristicScoreFromFeatures,
   type FeatureVector,
@@ -60,6 +61,12 @@ Build the import tool.
     const f = extractFeatures('Turn 2.5 kilometers into miles for me.');
 
     expect(f.scale_quantity_mentions).toBe(0);
+  });
+
+  it('keeps ICU-sensitive technical spans on stable word boundaries', () => {
+    expect(countPromptWords('artifact state:modified and more')).toBe(4);
+    expect(countPromptWords("IAM_ROLE 'arn:aws:iam::123456789:role/RedshiftRole'")).toBe(2);
+    expect(countPromptWords('format YYYY-MM-DDTHH:MM:SS for datetimes')).toBe(4);
   });
 
   it('uses Unicode-aware segmentation for Chinese, emoji-only, and minified code prompts', () => {
