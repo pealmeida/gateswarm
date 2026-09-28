@@ -223,6 +223,36 @@ function claimKeywordSpans(spans: TextSpan[], claimed: TextSpan[]): number {
   return count;
 }
 
+interface SegmenterCompoundSpan {
+  start: number;
+  end: number;
+  text: string;
+}
+
+/** Non-overlapping compound spans pinned before Intl.Segmenter (Node/ICU-stable). */
+function collectSegmenterCompoundSpans(prompt: string): SegmenterCompoundSpan[] {
+  const patterns: RegExp[] = [
+    /arn:[a-z0-9-]+(?::[a-z0-9-]*){2,}:[^\s'"]+/gi,
+    /[A-Z]{4}-[A-Z]{2}-[A-Z]{2}T[A-Z]{2}:[A-Z]{2}:[A-Z]{2}/g,
+    /[a-z][a-z0-9]*[-/:][a-z][a-z0-9]*/gi,
+  ];
+  const collected: SegmenterCompoundSpan[] = [];
+  for (const pattern of patterns) {
+    for (const match of prompt.matchAll(pattern)) {
+      const start = match.index ?? 0;
+      collected.push({ start, end: start + match[0].length, text: match[0] });
+    }
+  }
+  collected.sort((a, b) => a.start - b.start || b.end - a.end);
+  const accepted: SegmenterCompoundSpan[] = [];
+  for (const span of collected) {
+    if (!accepted.some((other) => spansOverlap(span, other))) {
+      accepted.push(span);
+    }
+  }
+  return accepted;
+}
+
 function segmentText(prompt: string, granularity: 'word' | 'sentence'): string[] {
   const Segmenter = Intl.Segmenter;
   if (typeof Segmenter === 'function') {
@@ -232,8 +262,9 @@ function segmentText(prompt: string, granularity: 'word' | 'sentence'): string[]
       // Keep established compound technical tokens (for example async/await)
       // together while using Segmenter everywhere else. This preserves their
       // semantic signal and avoids changing established English scores.
-      const compounds = Array.from(prompt.matchAll(/[a-z][a-z0-9]*[-/][a-z][a-z0-9]*/gi))
-        .map((match) => ({ start: match.index ?? 0, end: (match.index ?? 0) + match[0].length, text: match[0] }));
+      // ICU Segmenter word boundaries differ across Node/ICU versions. Pin spans that
+      // otherwise split differently (dbt state keys, ARNs, ISO format placeholders).
+      const compounds = collectSegmenterCompoundSpans(prompt);
       const seenCompounds = new Set<number>();
       const words = segments.flatMap((segment) => {
         const compoundIndex = compounds.findIndex((compound) =>
@@ -431,7 +462,7 @@ export function extractFeatures(prompt: string): FeatureVector {
   // them a discrete bump — explaining a named concept warrants at least
   // the light tier, not trivial.
   const COMPOUND_TECH_PATTERNS = [
-    /^[a-z][a-z0-9]*[-/][a-z][a-z0-9]*$/i,  // async/await, event-loop, call-stack
+    /^[a-z][a-z0-9]*[-/:][a-z][a-z0-9]*$/i,  // async/await, state:modified, event-loop
     /^[a-z]+_(function|method|pattern|handler|provider|controller|service|component|module|interface|api)$/i,
   ];
   const compound_tech = words.filter(w =>
