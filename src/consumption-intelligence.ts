@@ -21,7 +21,8 @@ import { modelMatrix, ModelEntry, EffortLevel, ProviderSummary } from './model-m
 import { agentRegistry } from './agent-registry.js';
 import { getConfig, saveConfig } from './v04-config.js';
 import { providerQuota, getMultiWindowQuota } from './provider-quota.js';
-import { getEffectiveTierModels, type QuotaBandSelection } from './quota-band-matrix.js';
+import { getEffectiveTierModels, isQuotaBandMatrixEnabled, type QuotaBandSelection } from './quota-band-matrix.js';
+import type { TierModelConfig } from './v04-config.js';
 
 // ─── Types ───────────────────────────────────────────────
 
@@ -123,8 +124,11 @@ class ConsumptionIntelligence {
    * When GATESWARM_QUOTA_BAND_MATRIX is ON, uses quota-aware matrix.
    * When OFF or on error, uses static config from v04_config.json.
    */
-  private async getEffectiveTierConfig(tier: EffortLevel): Promise<import('./v04-config.js').TierModelConfig | null> {
-    // Try quota-band matrix first (if feature is enabled)
+  async getEffectiveTierConfig(tier: EffortLevel): Promise<TierModelConfig | null> {
+    if (!isQuotaBandMatrixEnabled()) {
+      return getConfig().tier_models[tier] || null;
+    }
+
     try {
       const now = Date.now();
       if (!this.quotaBandSelection || (now - this.quotaBandCachedAt) > this.QUOTA_BAND_CACHE_MS) {
@@ -132,14 +136,13 @@ class ConsumptionIntelligence {
         this.quotaBandCachedAt = now;
       }
 
-      if (this.quotaBandSelection && this.quotaBandSelection.effectiveTierModels[tier]) {
+      if (this.quotaBandSelection?.effectiveTierModels[tier]) {
         return this.quotaBandSelection.effectiveTierModels[tier];
       }
     } catch (err) {
       console.error(`⚠️  [Intel] Failed to get quota-band matrix, using static config:`, (err as Error).message);
     }
 
-    // Fallback to static config
     return getConfig().tier_models[tier] || null;
   }
 
@@ -155,6 +158,12 @@ class ConsumptionIntelligence {
    * Call this before accessing quota band data to guarantee non-null results
    * on endpoints like /v1/score and /v06/resolve that don't invoke selectModel.
    */
+  /** Clear cached quota-band selection (tests and forced refresh). */
+  invalidateQuotaBandCache(): void {
+    this.quotaBandSelection = null;
+    this.quotaBandCachedAt = 0;
+  }
+
   async ensureQuotaBandSelection(): Promise<QuotaBandSelection | null> {
     const now = Date.now();
     if (!this.quotaBandSelection || (now - this.quotaBandCachedAt) > this.QUOTA_BAND_CACHE_MS) {

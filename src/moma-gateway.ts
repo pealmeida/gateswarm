@@ -81,6 +81,11 @@ import { estimateTokens } from './token-estimator.js';
 import { modelMatrix } from './model-matrix.js';
 import { modelDiscovery } from './model-discovery.js';
 import { consumptionIntelligence, ConsumptionDecision } from './consumption-intelligence.js';
+import {
+  fallbackModelsForTier,
+  getRoutingTierModel,
+  resolveTierModelForMode,
+} from './routing-tier-config.js';
 import { providerQuota, getMultiWindowQuota } from './provider-quota.js';
 import type { LoadBalanceDecision } from './provider-quota.js';
 import { consumptionTracker } from './consumption-tracker.js';
@@ -1192,6 +1197,7 @@ async function forwardStreamingWithFallback(options: {
   tier: EffortLevel;
   tierModel: TierModelConfig;
   cfg: V04Config;
+  tierFallbackModels?: Array<{ model: string; provider: string }>;
   agent: AgentConfig;
   body: Record<string, any>;
   messages: any[];
@@ -1200,7 +1206,7 @@ async function forwardStreamingWithFallback(options: {
   confidence: number;
   res: ServerResponse;
 }): Promise<void> {
-  const { providerId, model, tier, tierModel, cfg, agent, body, messages, requestModalities, promptText, confidence, res } = options;
+  const { providerId, model, tier, tierModel, cfg, tierFallbackModels, agent, body, messages, requestModalities, promptText, confidence, res } = options;
   const recordStreamOutcome = (target: StreamingTarget, status: 'success' | 'error', started: number) => {
     if (!agent.benchmarkEnabled) return;
     void benchmarkLogger.log({
@@ -1231,7 +1237,8 @@ async function forwardStreamingWithFallback(options: {
     return;
   }
   const targets: StreamingTarget[] = [initial];
-  for (const fallback of cfg.tier_models[tier]?.fallback_models ?? []) {
+  const streamFallbacks = tierFallbackModels ?? cfg.tier_models[tier]?.fallback_models ?? [];
+  for (const fallback of streamFallbacks) {
     if (targets.some(target => target.providerId === fallback.provider && target.model === fallback.model)) continue;
     const target = buildTarget(fallback.provider, fallback.model);
     if (target) targets.push(target);
@@ -1747,8 +1754,12 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
     console.log(`🔄 [${agent.name}] Model switch: ${continuity.lastModel} → ${model}`);
   }
 
-  // v0.5.3: plan mode override
-  const rawTier = cfg.tier_models[effort];
+  // v0.7.0: quota-band effective tier row (null when flag OFF → static cfg)
+  const routingTierRow = await getRoutingTierModel(effort);
+  const tierFallbackModels = fallbackModelsForTier(effort, cfg.tier_models, routingTierRow);
+
+  // v0.5.3: plan mode override (uses effective band row when flag ON)
+  const rawTier = routingTierRow ?? cfg.tier_models[effort];
   if (activeMode === 'plan' && rawTier?.plan_model) {
     providerId = rawTier.plan_provider || decision.provider;
     model = rawTier.plan_model;
@@ -1998,6 +2009,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
       tier: effort,
       tierModel: routedTierModel,
       cfg,
+      tierFallbackModels,
       agent,
       body,
       messages: compressedMessages,
@@ -2028,7 +2040,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
     if (!avail.ok) {
       console.log(`⚠️  [${agent.name}] CLI ${providerId}/${model} unavailable (${avail.reason}) — diverting to ${effort} fallback chain`);
       const unavailableCli = providerId;
-      const fbList = cfg.tier_models[effort]?.fallback_models ?? [];
+      const fbList = tierFallbackModels;
       for (const fb of fbList) {
         if (fb.provider === unavailableCli) continue;
         if (agentRegistry.isCliProvider(fb.provider)) {
@@ -2117,8 +2129,8 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
       if (ifb) retryTargets.push(ifb);
     }
 
-    // Supplement with static config fallbacks as backup
-    const tierCfg = cfg.tier_models[effort];
+    // Supplement with tier fallbacks (quota-band effective when flag ON)
+    const tierCfg = routingTierRow ?? cfg.tier_models[effort];
     if (tierCfg) {
       const fbModels = (tierCfg as any).fallback_models as Array<{model: string; provider: string}> | undefined;
       if (fbModels) {
@@ -2486,6 +2498,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
       tier: effort,
       tierModel: routedTierModel,
       cfg,
+      tierFallbackModels,
       agent,
       body,
       messages: compressedMessages,
@@ -2859,7 +2872,7 @@ async function init() {
         if (!tier || !['trivial','light','moderate','heavy','intensive','extreme'].includes(tier)) {
           return jsonResponse(res, 400, { error: { message: 'tier must be one of: trivial, light, moderate, heavy, intensive, extreme', type: 'bad_request' } });
         }
-        const resolved = getTierModelForMode(tier, mode);
+        const { resolved, staticResolved } = await resolveTierModelForMode(tier, mode);
         if (!resolved) {
           return jsonResponse(res, 404, { error: { message: `no model configured for tier=${tier}`, type: 'not_found' } });
         }
@@ -2886,6 +2899,13 @@ async function init() {
             max_tokens: resolved.max_tokens,
             enable_thinking: resolved.enable_thinking,
           },
+          staticResolved: staticResolved ? {
+            model: staticResolved.model,
+            provider: staticResolved.provider,
+            max_tokens: staticResolved.max_tokens,
+            enable_thinking: staticResolved.enable_thinking,
+          } : undefined,
+          matrixVariantUsed: quotaBandSelectionResolve?.matrixVariant,
           // v0.7.0: Quota-band observability
           quotaBand: quotaBandSelectionResolve?.band,
           matrixVariant: quotaBandSelectionResolve?.matrixVariant,
@@ -2915,7 +2935,11 @@ async function init() {
         }
         const modeOverride = (body.mode === 'plan' || body.mode === 'act') ? body.mode as IntentMode : undefined;
         const scored = await scoreIntentV04(body.prompt);
-        const tierModel = getTierModelForMode(scored.tier as EffortLevel, modeOverride ?? detectIntentMode(body.prompt).mode);
+        const scoreMode = modeOverride ?? detectIntentMode(body.prompt).mode;
+        const { resolved: tierModel, staticResolved: staticTierModel } = await resolveTierModelForMode(
+          scored.tier as EffortLevel,
+          scoreMode,
+        );
         
         // v0.7.0: Warm quota-band cache before accessing observability data
         await consumptionIntelligence.ensureQuotaBandSelection();
@@ -2945,6 +2969,13 @@ async function init() {
             max_tokens: tierModel.max_tokens,
             enable_thinking: tierModel.enable_thinking,
           } : null,
+          staticSelected: staticTierModel ? {
+            model: staticTierModel.model,
+            provider: staticTierModel.provider,
+            max_tokens: staticTierModel.max_tokens,
+            enable_thinking: staticTierModel.enable_thinking,
+          } : undefined,
+          matrixVariantUsed: quotaBandSelectionScore?.matrixVariant,
           mode: modeOverride ?? 'auto',
           timestamp: Date.now(),
           // v0.7.0: Quota-band observability
