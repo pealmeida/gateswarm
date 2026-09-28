@@ -1,0 +1,40 @@
+{
+  "snapshot_id": "FICTITIOUS-FIXTURE-DO-NOT-USE-IN-PROD",
+  "generated_at": "2099-01-01",
+  "observations": [
+    {
+      "schema_version": 1,
+      "source": "fixture",
+      "benchmark": "text_style_control/coding",
+      "benchmark_version": "fictional-v1",
+      "metric": "bt_rating",
+      "higher_is_better": true,
+      "source_model_alias": "glm-5-fixture",
+      "gateswarm_model_id": "glm-5",
+      "match": "exact",
+      "value": 1400,
+      "self_reported": false,
+      "source_url": "https://example.invalid/fictional/glm-5",
+      "source_date": "2099-01-01",
+      "fetched_at": "2099-01-01",
+      "license": "FICTITIOUS"
+    },
+    {
+      "schema_version": 1,
+      "source": "fixture",
+      "benchmark": "text_style_control/coding",
+      "benchmark_version": "fictional-v1",
+      "metric": "bt_rating",
+      "higher_is_better": true,
+      "source_model_alias": "glm-5.1-fixture",
+      "gateswarm_model_id": "glm-5.1",
+      "match": "exact",
+      "value": 1550,
+      "self_reported": false,
+      "source_url": "https://example.invalid/fictional/glm-5.1",
+      "source_date": "2099-01-01",
+      "fetched_at": "2099-01-01",
+      "license": "FICTITIOUS"
+    }
+  ]
+}

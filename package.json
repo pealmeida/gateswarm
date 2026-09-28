@@ -76,7 +76,8 @@
     "dotenv": "^17.4.2",
     "gateswarm-lite": "^0.1.0",
     "idb-keyval": "^6.2.1",
-    "tiktoken": "^1.0.22"
+    "tiktoken": "^1.0.22",
+    "yaml": "^2.6.1"
   },
   "optionalDependencies": {
     "@huggingface/transformers": "^3.4.0",

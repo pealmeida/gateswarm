@@ -86,6 +86,8 @@ import {
   getRoutingTierModel,
   resolveTierModelForMode,
 } from './routing-tier-config.js';
+import { detectTaskCategory } from './task-category.js';
+import { buildBenchmarkTransparency, getBenchmarkPriorHeaderValue } from './benchmark-prior.js';
 import { providerQuota, getMultiWindowQuota } from './provider-quota.js';
 import type { LoadBalanceDecision } from './provider-quota.js';
 import { consumptionTracker } from './consumption-tracker.js';
@@ -1715,6 +1717,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
 
   const modeDetection = detectIntentMode(promptText);
   const activeMode: IntentMode = modeOverride ?? modeDetection.mode;
+  const taskCategoryDetection = detectTaskCategory(promptText);
 
   // ─── v0.5.6: Token Consumption Intelligence Routing (async with probing) ──────
   // MoMA: estimate over flattened text (media parts count as placeholders);
@@ -1728,6 +1731,8 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
       estimatedPromptTokens,
       source: 'request',
       requireVision: requestModalities.vision,
+      taskCategory: taskCategoryDetection.category,
+      taskCategoryConfidence: taskCategoryDetection.confidence,
     });
   } catch {
     console.log(`🧠 [${agent.name}] Intelligence engine failed — using static config`);
@@ -2876,6 +2881,11 @@ async function init() {
         if (!resolved) {
           return jsonResponse(res, 404, { error: { message: `no model configured for tier=${tier}`, type: 'not_found' } });
         }
+
+        const promptForCategory = typeof body.prompt === 'string' ? body.prompt : '';
+        const benchmarkTransparency = await buildBenchmarkTransparency(promptForCategory, resolved);
+        res.setHeader('X-Task-Category', benchmarkTransparency.category);
+        res.setHeader('X-Benchmark-Prior', getBenchmarkPriorHeaderValue());
         
         // v0.7.0: Warm quota-band cache before accessing observability data
         await consumptionIntelligence.ensureQuotaBandSelection();
@@ -2893,6 +2903,9 @@ async function init() {
         return jsonResponse(res, 200, {
           tier,
           mode,
+          category: benchmarkTransparency.category,
+          categoryConfidence: benchmarkTransparency.categoryConfidence,
+          benchmark: benchmarkTransparency.benchmark,
           resolved: {
             model: resolved.model,
             provider: resolved.provider,
@@ -2940,6 +2953,10 @@ async function init() {
           scored.tier as EffortLevel,
           scoreMode,
         );
+
+        const benchmarkTransparency = await buildBenchmarkTransparency(body.prompt, tierModel);
+        res.setHeader('X-Task-Category', benchmarkTransparency.category);
+        res.setHeader('X-Benchmark-Prior', getBenchmarkPriorHeaderValue());
         
         // v0.7.0: Warm quota-band cache before accessing observability data
         await consumptionIntelligence.ensureQuotaBandSelection();
@@ -2956,6 +2973,9 @@ async function init() {
         
         return jsonResponse(res, 200, {
           prompt: body.prompt,
+          category: benchmarkTransparency.category,
+          categoryConfidence: benchmarkTransparency.categoryConfidence,
+          benchmark: benchmarkTransparency.benchmark,
           score: scored.value,
           tier: scored.tier,
           method: scored.method,

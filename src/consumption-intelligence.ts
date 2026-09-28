@@ -23,6 +23,15 @@ import { getConfig, saveConfig } from './v04-config.js';
 import { providerQuota, getMultiWindowQuota } from './provider-quota.js';
 import { getEffectiveTierModels, isQuotaBandMatrixEnabled, type QuotaBandSelection } from './quota-band-matrix.js';
 import type { TierModelConfig } from './v04-config.js';
+import type { TaskCategory } from './task-category.js';
+import {
+  getBenchmarkPriorHeaderValue,
+  rankCandidates,
+  shouldApplyBenchmarkReorder,
+  shouldComputeBenchmarkPrior,
+  type BenchmarkModelExplanation,
+  type ModelCandidate,
+} from './benchmark-prior.js';
 
 // ─── Types ───────────────────────────────────────────────
 
@@ -40,6 +49,18 @@ export interface ConsumptionDecision {
   // tier was actually used for user traffic.
   source: 'request' | 'health-check' | 'balance-check' | 'recovery-check';
   timestamp: number;
+  taskCategory?: TaskCategory;
+  benchmarkShadow?: {
+    category: TaskCategory;
+    categoryConfidence: number;
+    wouldReorder: boolean;
+    order: ModelCandidate[];
+    explanations: BenchmarkModelExplanation[];
+    snapshotSha256: string | null;
+    snapshotId: string | null;
+    mode: 'off' | 'shadow' | 'on';
+    applied: boolean;
+  };
 }
 
 export type DecisionReason =
@@ -50,7 +71,8 @@ export type DecisionReason =
   | 'consumption_balanced'
   | 'provider_preferred'
   | 'static_fallback'
-  | 'vision_widened';
+  | 'vision_widened'
+  | 'benchmark_reorder';
 
 export interface ConsumptionStats {
   totalTokensIn: number;
@@ -389,6 +411,8 @@ class ConsumptionIntelligence {
     source?: 'request' | 'health-check' | 'balance-check' | 'recovery-check';
     /** MoMA: request carries image/video parts — restrict to vision-capable models. */
     requireVision?: boolean;
+    taskCategory?: TaskCategory;
+    taskCategoryConfidence?: number;
   }): Promise<ConsumptionDecision> {
     // MoMA: per-request modality needs override the tier's static requirements.
     const reqs: TierRequirements = options?.requireVision
@@ -410,7 +434,7 @@ class ConsumptionIntelligence {
     if (staticCfg && staticVisionOk && options?.source !== 'recovery-check') {
       const probe = await this.probeProvider(staticCfg.provider);
       if (probe.healthy && this.isProviderHealthy(staticCfg.provider)) {
-        const decision: ConsumptionDecision = {
+        let decision: ConsumptionDecision = {
           provider: staticCfg.provider,
           model: staticCfg.model,
           tier,
@@ -425,7 +449,9 @@ class ConsumptionIntelligence {
           })),
           source: options?.source || 'request',
           timestamp: Date.now(),
+          taskCategory: options?.taskCategory,
         };
+        decision = await this.applyBenchmarkBandReorder(decision, staticCfg, options);
         this.decisions.push(decision);
         if (this.decisions.length > this.maxDecisionHistory) this.decisions.shift();
         console.log(`🧠 [Intel] ${tier} → ${decision.provider}/${decision.model} (static_primary, conf=${decision.confidence.toFixed(2)})`);
@@ -565,7 +591,7 @@ class ConsumptionIntelligence {
       reason: `score=${s.score.toFixed(1)}`,
     }));
 
-    const decision: ConsumptionDecision = {
+    let decision: ConsumptionDecision = {
       provider: best.provider,
       model: best.id,
       tier,
@@ -576,13 +602,111 @@ class ConsumptionIntelligence {
       alternatives,
       source: options?.source || 'request',
       timestamp: Date.now(),
+      taskCategory: options?.taskCategory,
     };
+
+    decision = await this.applyBenchmarkBandReorder(decision, staticCfg, options);
 
     this.decisions.push(decision);
     if (this.decisions.length > this.maxDecisionHistory) this.decisions.shift();
 
     console.log(`🧠 [Intel] ${tier} → ${decision.provider}/${decision.model} (${decision.reason}, conf=${decision.confidence.toFixed(2)})`);
     return decision;
+  }
+
+  private async filterBandCandidates(
+    staticCfg: TierModelConfig,
+    options?: {
+      excludeProviders?: string[];
+      estimatedPromptTokens?: number;
+      requireVision?: boolean;
+    },
+  ): Promise<ModelCandidate[]> {
+    const exclude = new Set(options?.excludeProviders || []);
+    const estTokens = options?.estimatedPromptTokens || 500;
+    const seeds: ModelCandidate[] = [
+      { provider: staticCfg.provider, model: staticCfg.model },
+      ...(staticCfg.fallback_models || []),
+    ];
+    const out: ModelCandidate[] = [];
+    for (const c of seeds) {
+      if (exclude.has(c.provider)) continue;
+      if (!this.isProviderHealthy(c.provider)) continue;
+      if (options?.requireVision && !this.modelSupportsVision(c.provider, c.model)) continue;
+      const entry = modelMatrix.getModel(c.provider, c.model);
+      if (entry && entry.contextWindow > 0 && entry.contextWindow < estTokens) continue;
+      if (!['ollama', 'ollama-cloud'].includes(c.provider)) {
+        const probe = await this.probeProvider(c.provider);
+        if (!probe.healthy) continue;
+      }
+      out.push(c);
+    }
+    return out;
+  }
+
+  private async applyBenchmarkBandReorder(
+    decision: ConsumptionDecision,
+    staticCfg: TierModelConfig | null,
+    options?: {
+      taskCategory?: TaskCategory;
+      taskCategoryConfidence?: number;
+      excludeProviders?: string[];
+      estimatedPromptTokens?: number;
+      requireVision?: boolean;
+    },
+  ): Promise<ConsumptionDecision> {
+    if (!staticCfg || !shouldComputeBenchmarkPrior()) {
+      return decision;
+    }
+    const category = options?.taskCategory ?? 'general';
+    const categoryConfidence = options?.taskCategoryConfidence ?? 0;
+    const filtered = await this.filterBandCandidates(staticCfg, options);
+    if (filtered.length === 0) {
+      return decision;
+    }
+
+    const matrixIndex = new Map<string, number>();
+    filtered.forEach((c, i) => matrixIndex.set(`${c.provider}/${c.model}`, i));
+
+    const ranked = await rankCandidates(filtered, category, {
+      category,
+      categoryConfidence,
+      matrixIndex,
+    });
+
+    const mode = getBenchmarkPriorHeaderValue();
+    const shadow = {
+      category,
+      categoryConfidence,
+      wouldReorder: ranked.wouldReorder,
+      order: ranked.order,
+      explanations: ranked.explanations,
+      snapshotSha256: ranked.snapshotSha256,
+      snapshotId: ranked.snapshotId,
+      mode,
+      applied: false,
+    };
+
+    let next = { ...decision, benchmarkShadow: shadow, taskCategory: category };
+
+    if (shouldApplyBenchmarkReorder(category) && ranked.wouldReorder && ranked.order.length > 0) {
+      const primary = ranked.order[0];
+      const alternatives = ranked.order.slice(1).map(c => ({
+        provider: c.provider,
+        model: c.model,
+        reason: 'benchmark_reorder',
+      }));
+      next = {
+        ...next,
+        provider: primary.provider,
+        model: primary.model,
+        reason: 'benchmark_reorder',
+        alternatives,
+        benchmarkShadow: { ...shadow, applied: true },
+      };
+    }
+
+    return next;
   }
 
   /**

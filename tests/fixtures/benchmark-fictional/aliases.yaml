@@ -1,0 +1,6 @@
+version: 1
+models:
+  glm-5:
+    providers: [zai]
+  glm-5.1:
+    providers: [zai]

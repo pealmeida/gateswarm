@@ -1,0 +1,137 @@
+version: 1
+reviewed_by: null
+reviewed_at: null
+match_confidence:
+  exact: 1.0
+  variant: 0.7
+  family: 0.4
+models:
+  cc/claude-opus-5-5:
+    providers: [claude-cli]
+    gateswarm_effort: cli-default
+    sources:
+      lmarena:
+        - { alias: claude-opus-5.5-high, subsets: [text_style_control], match: variant }
+        - { alias: claude-opus-5.5-max, subsets: [webdev], match: variant }
+      aa:
+        - { slug: claude-opus-5-5, variant: "max with fallback", match: variant }
+  cc/claude-sonnet-5:
+    providers: [claude-cli]
+    sources:
+      lmarena:
+        - { alias: claude-sonnet-5-high, match: variant }
+      aa:
+        - { slug: claude-sonnet-5, variant: max, match: variant }
+  cx/gpt-6-astra:
+    providers: [codex-cli]
+    sources:
+      lmarena:
+        - { alias: gpt-6-astra-max, match: variant }
+      aa:
+        - { slug: gpt-6-astra, match: exact }
+  cx/gpt-6-sol:
+    providers: [codex-cli]
+    sources:
+      lmarena:
+        - { alias: gpt-6-sol-max, match: variant }
+      aa:
+        - { slug: gpt-6-sol, match: exact }
+  cx/gpt-6-luna:
+    providers: [codex-cli]
+    sources:
+      lmarena:
+        - { alias: gpt-6-luna-max, match: variant }
+      aa:
+        - { slug: gpt-6-luna, match: exact }
+  glm-5:
+    providers: [zai]
+    gateswarm_effort: thinking_off
+    sources:
+      lmarena:
+        - { alias: glm-5, match: family }
+      aa:
+        - { slug: glm-5, match: family }
+  glm-5.1:
+    providers: [zai]
+    sources:
+      lmarena:
+        - { alias: glm-5.1, match: family }
+      aa:
+        - { slug: glm-5.1, match: family }
+  glm-4.7:
+    providers: [zai]
+    sources:
+      lmarena:
+        - { alias: glm-4.7, match: family }
+      aa:
+        - { slug: glm-4.7, match: family }
+  glm-4.7-flash:
+    providers: [zai]
+    sources:
+      lmarena:
+        - { alias: glm-4.7-flash, match: family }
+      aa:
+        - { slug: glm-4.7-flash, match: family }
+  glm-4.5-air:
+    providers: [zai]
+    sources:
+      lmarena:
+        - { alias: glm-4.5-air, match: family }
+      aa:
+        - { slug: glm-4.5-air, match: family }
+  deepseek-v4-flash:
+    providers: [opencodego]
+    sources:
+      lmarena:
+        - { alias: deepseek-v4-flash, match: family }
+      aa:
+        - { slug: deepseek-v4-flash, variant: "0731 (max)", match: family }
+  deepseek-v4-pro:
+    providers: [ollama-cloud]
+    sources:
+      lmarena:
+        - { alias: deepseek-v4-pro, match: family }
+      aa:
+        - { slug: deepseek-v4-pro, variant: "0813 (max)", match: family }
+  mimo-v2.6-flash:
+    providers: [opencodego]
+    sources:
+      lmarena:
+        - { alias: mimo-v2.6-flash, match: exact }
+      aa:
+        - { slug: mimo-v2.6-flash, match: exact }
+  mimo-v2.5:
+    providers: [opencodego]
+    sources:
+      lmarena:
+        - { alias: mimo-v2.5, match: exact }
+      aa:
+        - { slug: mimo-v2-5-0424, match: family }
+  minimax-m2.7:
+    providers: [ollama-cloud]
+    sources:
+      lmarena:
+        - { alias: minimax-m2.7, match: family }
+      aa:
+        - { slug: minimax-m2.7, match: family }
+  minimax-m3:
+    providers: [ollama-cloud]
+    sources:
+      lmarena:
+        - { alias: minimax-m3, match: family }
+      aa:
+        - { slug: minimax-m3, match: family }
+  kimi-k2.6:
+    providers: [ollama-cloud]
+    sources:
+      lmarena:
+        - { alias: kimi-k2.6, match: family }
+      aa:
+        - { slug: kimi-k2.6, match: family }
+  kimi-k2.7-code:
+    providers: [ollama-cloud]
+    sources:
+      lmarena:
+        - { alias: kimi-k2.7-code, subsets: [webdev], match: exact }
+      aa:
+        - { slug: kimi-k2-7-code, match: exact }

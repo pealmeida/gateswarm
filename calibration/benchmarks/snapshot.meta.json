@@ -1,0 +1,7 @@
+{
+  "snapshot_id": "skeleton-2026-09-28",
+  "generated_at": "2026-09-28",
+  "sources": [],
+  "snapshot_sha256": null,
+  "note": "Initial valid empty snapshot. Weekly workflow opens a PR with collected observations."
+}

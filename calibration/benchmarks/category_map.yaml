@@ -1,0 +1,29 @@
+version: 1
+categories:
+  code:
+    benchmarks:
+      - id: text_style_control/coding
+        weight: 1.0
+      - id: webdev
+        weight: 0.7
+  agentic:
+    benchmarks:
+      - id: agent
+        weight: 0.5
+  reasoning:
+    benchmarks:
+      - id: math
+        weight: 0.5
+  long_context:
+    benchmarks:
+      - id: aa-lcr
+        weight: 1.0
+  writing:
+    global_weight: 0.5
+    benchmarks:
+      - id: creative_writing
+        weight: 1.0
+      - id: instruction_following
+        weight: 0.7
+  general:
+    benchmarks: []
