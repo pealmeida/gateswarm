@@ -6,7 +6,7 @@
    "tier": "intensive"
   },
   "analytics-engineer-dbt-10": {
-   "score": 0.33980983902419004,
+   "score": 0.34138627617943473,
    "tier": "heavy"
   },
   "analytics-engineer-dbt-11": {
@@ -26,7 +26,7 @@
    "tier": "intensive"
   },
   "analytics-engineer-dbt-15": {
-   "score": 0.39738731560927965,
+   "score": 0.3977132132744157,
    "tier": "intensive"
   },
   "analytics-engineer-dbt-16": {
@@ -70,7 +70,7 @@
    "tier": "light"
   },
   "analytics-engineer-dbt-7": {
-   "score": 0.3651066967443243,
+   "score": 0.36519950228725634,
    "tier": "heavy"
   },
   "analytics-engineer-dbt-8": {
@@ -414,7 +414,7 @@
    "tier": "heavy"
   },
   "cloud-data-engineer-18": {
-   "score": 0.40195200945706144,
+   "score": 0.4051697605554446,
    "tier": "intensive"
   },
   "cloud-data-engineer-19": {
@@ -722,7 +722,7 @@
    "tier": "intensive"
   },
   "data-analyst-59": {
-   "score": 0.4402592035527535,
+   "score": 0.44268449709397906,
    "tier": "intensive"
   },
   "data-analyst-6": {
@@ -922,7 +922,7 @@
    "tier": "intensive"
   },
   "data-engineer-7": {
-   "score": 0.3412314961299507,
+   "score": 0.3419536859797953,
    "tier": "heavy"
   },
   "data-engineer-8": {
