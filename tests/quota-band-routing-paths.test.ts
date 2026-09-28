@@ -11,7 +11,11 @@ import {
 } from '../src/quota-band-matrix.js';
 import { consumptionIntelligence } from '../src/consumption-intelligence.js';
 import { quotaSync } from '../src/quota-sync.js';
-import { consumptionTracker } from '../src/consumption-tracker.js';
+import {
+  consumptionTracker,
+  type ConsumptionReport,
+  type WindowConsumption,
+} from '../src/consumption-tracker.js';
 import {
   allowedModelsInTierRow,
   fallbackModelsForTier,
@@ -28,6 +32,35 @@ const MATRICES = JSON.parse(
 
 const originalEnv = process.env.GATESWARM_QUOTA_BAND_MATRIX;
 
+function emptyWindowConsumption(): WindowConsumption {
+  const now = Date.now();
+  return {
+    requests: 0,
+    tokensIn: 0,
+    tokensOut: 0,
+    totalTokens: 0,
+    cost: 0,
+    errors: 0,
+    avgLatencyMs: 0,
+    windowMs: 0,
+    windowStart: now,
+    windowEnd: now,
+    hoursCovered: 0,
+  };
+}
+
+function emptyConsumptionReport(): ConsumptionReport {
+  const window = emptyWindowConsumption();
+  return {
+    generatedAt: Date.now(),
+    totalProviders: 0,
+    totalFiveHour: window,
+    totalWeekly: window,
+    totalMonthly: window,
+    providers: [],
+  };
+}
+
 function mockQuotaSyncFixture(maxPct: number): void {
   vi.spyOn(quotaSync, 'getRealQuotaData').mockReturnValue({
     zai: {
@@ -37,10 +70,7 @@ function mockQuotaSyncFixture(maxPct: number): void {
       syncedAt: new Date().toISOString(),
     },
   });
-  vi.spyOn(consumptionTracker, 'buildReport').mockReturnValue({
-    generatedAt: new Date().toISOString(),
-    providers: [],
-  } as ReturnType<typeof consumptionTracker.buildReport>);
+  vi.spyOn(consumptionTracker, 'buildReport').mockReturnValue(emptyConsumptionReport());
 }
 
 function bandPct(band: QuotaBand): number {
@@ -125,10 +155,7 @@ describe('quota-band routing paths (routing-tier-config)', () => {
 
     it('yellow_no_quota_data when flag ON and no quota readings', async () => {
       vi.spyOn(quotaSync, 'getRealQuotaData').mockReturnValue({});
-      vi.spyOn(consumptionTracker, 'buildReport').mockReturnValue({
-        generatedAt: new Date().toISOString(),
-        providers: [],
-      } as ReturnType<typeof consumptionTracker.buildReport>);
+      vi.spyOn(consumptionTracker, 'buildReport').mockReturnValue(emptyConsumptionReport());
       const selection = await getEffectiveTierModels();
       expect(selection?.matrixVariant).toBe('yellow_no_quota_data');
       expect(selection?.band).toBe('yellow');
