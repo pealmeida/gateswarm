@@ -1,0 +1,8 @@
+version: 1
+categories:
+  code:
+    benchmarks:
+      - id: text_style_control/coding
+        weight: 1.0
+  general:
+    benchmarks: []

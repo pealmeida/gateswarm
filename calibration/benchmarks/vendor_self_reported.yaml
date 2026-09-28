@@ -1,0 +1,4 @@
+# Curated vendor self-reported scores (weight 0.4 in router).
+# Each entry MUST include source_url and source_date. No invented values.
+version: 1
+entries: []
