@@ -236,3 +236,23 @@ export async function preDelegationCheck(input: PreDelegationInput, opts: PreDel
   );
   return result;
 }
+
+/**
+ * Fire-and-forget hook for the delegation/routing path. No-op unless
+ * GATESWARM_JEV_MODE=shadow. Never throws, never awaited by callers, never
+ * alters routing: output is only the JSONL log (and an optional note callback).
+ */
+export function preDelegationObserve(
+  input: PreDelegationInput,
+  opts: PreDelegationOptions & { onNote?: (note: string) => void } = {},
+): void {
+  try {
+    const env = opts.env ?? process.env;
+    if (getJevMode(env) !== 'shadow') return;
+    void preDelegationCheck(input, opts)
+      .then((r) => { try { opts.onNote?.(r.note); } catch { /* fail-open */ } })
+      .catch(() => { /* fail-open */ });
+  } catch {
+    /* fail-open */
+  }
+}

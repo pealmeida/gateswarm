@@ -76,3 +76,26 @@ describe('createJevRiskFn', () => {
     expect(await createJevRiskFn({ apiKey: 'k', fetchImpl: slow, timeoutMs: 20 })([], { large: false })).toBeNull();
   });
 });
+
+describe('preDelegationObserve (delegation hook)', () => {
+  it('is a no-op when mode is off', async () => {
+    const { preDelegationObserve } = await import('../src/jev/pre-delegation.js');
+    const m = mk(); const jev = vi.fn();
+    preDelegationObserve({ task: 'change login session' }, { env: {}, jevRisk: jev, writeRecord: m.writeRecord });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(jev).not.toHaveBeenCalled(); expect(m.recs).toHaveLength(0);
+  });
+  it('logs asynchronously in shadow mode and never throws', async () => {
+    const { preDelegationObserve } = await import('../src/jev/pre-delegation.js');
+    const m = mk(); const notes: string[] = [];
+    preDelegationObserve({ task: 'change login session' }, { env: shadow, jevRisk: async () => { throw new Error('boom'); }, writeRecord: m.writeRecord, onNote: (n) => notes.push(n) });
+    await new Promise((r) => setTimeout(r, 30));
+    expect(m.recs).toHaveLength(1); expect(m.recs[0]).not.toHaveProperty('task');
+    expect(notes[0]).toContain('jev-pre-delegation');
+  });
+  it('real API response shape parses (answers.risk.choice)', async () => {
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ model: JEV_MODEL, answers: { risk: { type: 'choice', choice: 'high', confidence: 1, probabilities: { low: 0, medium: 0, high: 1 } } }, usage: { input_tokens: 398, output_tokens: 38 } }), { status: 200 })) as unknown as typeof fetch;
+    const fn = createJevRiskFn({ apiKey: 'k', fetchImpl });
+    expect(await fn(['auth_session'], { large: false })).toBe('high');
+  });
+});
