@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { jevShadowObserve } from './jev/shadow.js';
 import * as dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
 dotenv.config();
@@ -1709,6 +1710,12 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
   let rawScore = v04Score.rawValue ?? v04Score.value;
   let effort: EffortLevel = v04Score.tier ?? 'moderate';
 
+  // Jev shadow (J0): observe-only, flag-gated (GATESWARM_JEV_MODE=shadow, default off).
+  // Fire-and-forget + fail-open; never alters tier/model. Skipped for explicit overrides.
+  if (!effortOverride) {
+    jevShadowObserve({ prompt: promptText, scorerTier: effort, scorerScore: score, source: 'route' });
+  }
+
   // ─── v0.4.4: Context Continuity Anchor ─────────────────────
   // Extract session ID from request body or generate from agent+prompt hash
   const sessionId = body.session_id
@@ -2948,6 +2955,8 @@ async function init() {
         }
         const modeOverride = (body.mode === 'plan' || body.mode === 'act') ? body.mode as IntentMode : undefined;
         const scored = await scoreIntentV04(body.prompt);
+        // Jev shadow (J0): observe-only; response is unchanged.
+        jevShadowObserve({ prompt: body.prompt, scorerTier: String(scored.tier), scorerScore: scored.value, source: 'score' });
         const scoreMode = modeOverride ?? detectIntentMode(body.prompt).mode;
         const { resolved: tierModel, staticResolved: staticTierModel } = await resolveTierModelForMode(
           scored.tier as EffortLevel,
