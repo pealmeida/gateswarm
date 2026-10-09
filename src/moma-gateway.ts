@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { jevShadowObserve } from './jev/shadow.js';
+import { preDelegationObserve } from './jev/pre-delegation.js';
 import * as dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
 dotenv.config();
@@ -1715,6 +1716,8 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
   if (!effortOverride) {
     jevShadowObserve({ prompt: promptText, scorerTier: effort, scorerScore: score, source: 'route' });
   }
+  // Jev pre-delegation guard (informative): flags/risk to JSONL only; no-op unless shadow; never alters routing.
+  preDelegationObserve({ task: promptText, privacy: body.privacy === 'private' ? 'private' : 'public' });
 
   // ─── v0.4.4: Context Continuity Anchor ─────────────────────
   // Extract session ID from request body or generate from agent+prompt hash
