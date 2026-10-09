@@ -193,7 +193,7 @@ const PROVIDER_QUOTA_CONFIGS: Record<string, Partial<ProviderQuota>> = {
     tokensRemaining: 50000,
   },
   'bailian': {
-    name: 'Bailian (Coding Plan)',
+    name: 'Bailian (Token Plan)',
     rpm: 60,
     rpd: 5000,
     rpmRemaining: 60,

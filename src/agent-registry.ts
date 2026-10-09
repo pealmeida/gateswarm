@@ -146,7 +146,8 @@ export const DEFAULT_TIER_CONFIGS: Record<string, AgentTierConfig> = {
 // config can be validated against real catalogs without the (gitignored)
 // data/agent-registry.json being present (e.g. in CI).
 export const HTTP_PROVIDER_MODELS: Record<string, string[]> = {
-  bailian: ['qwen3.6-plus', 'qwen3.5-plus', 'qwen3-coder-plus', 'qwen3.6-max-preview', 'qwen4.6'],
+  bailian: ['qwen3.8-max', 'qwen3.8-flash', 'qwen3.7-max', 'qwen3.7-plus', 'qwen3.6-flash',
+    'glm-5.2', 'glm-5.3', 'deepseek-v4-pro', 'deepseek-v4-flash-0731', 'deepseek-v4.1-flash'],
   zai: ['glm-4.5-air', 'glm-4.7', 'glm-4.7-flash', 'glm-5', 'glm-5-turbo', 'glm-5.1'],
   openrouter: ['owl-alpha', 'glm-4.7-flash', 'qwen-plus', 'gemini-2.5-flash', 'claude-sonnet-4.6', 'claude-opus-4.6'],
   opencodego: ['deepseek-v4-flash', 'deepseek-v4-pro', 'qwen3.7-plus', 'qwen3.7-max',
@@ -326,9 +327,9 @@ export class AgentRegistry {
     // Set up HTTP providers from env
     this.registerProvider({
       id: 'bailian',
-      name: 'Alibaba Bailian (Coding Plan)',
+      name: 'Bailian (Token Plan)',
       type: 'http-api',
-      baseUrl: process.env.BAILIAN_BASE || 'https://coding-intl.dashscope.aliyuncs.com/v1',
+      baseUrl: process.env.BAILIAN_BASE || 'https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1',
       apiKey: process.env.BAILIAN_KEY || process.env.OPENAI_API_KEY || '',
       models: HTTP_PROVIDER_MODELS.bailian,
     });
