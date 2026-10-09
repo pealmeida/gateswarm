@@ -449,7 +449,7 @@ Run via `npx tsx src/gateswarm-cli.ts <command>` or alias as `gateswarm`.
 | Z.AI (GLM Coding Lite) | `zai` | glm-4.7-flash, glm-4.7, glm-5, glm-5.1 |
 | Ollama Cloud | `ollama-cloud` | minimax-m2.7, minimax-m3, kimi-k2.6, kimi-k2.7-code, deepseek-v4-pro |
 | Ollama (local, optional) | `ollama` | qwen2.5:0.5b |
-| Alibaba Bailian | `bailian` | qwen3.5-plus, qwen3.6-plus, qwen3-coder-plus |
+| Bailian (Token Plan) | `bailian` | qwen3.8-max, qwen3.8-flash, qwen3.7-max, qwen3.7-plus, qwen3.6-flash, glm-5.2, glm-5.3, deepseek-v4-pro, deepseek-v4-flash-0731, deepseek-v4.1-flash |
 | OpenCodeGo | `opencodego` | qwen3.7-plus, qwen3.7-max, deepseek-v4-flash/pro, kimi |
 
 > Provider model catalogs are validated against the routing config by
