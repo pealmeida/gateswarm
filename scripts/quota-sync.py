@@ -7,9 +7,8 @@ Runs as a cron job every 5 minutes.
 Data sources:
   - Codex CLI: ~/.codex/sessions/*.jsonl (token counts per session)
   - Claude CLI: session limit messages + ~/.claude/ files
-  - OpenCode Go: API usage metadata (cumulative from chat responses)
-  - ZAI: API usage metadata
-  - Ollama Cloud: API + ~/.ollama/ files
+  - ZAI, Bailian: GateSwarm consumption history (data/consumption-history.json)
+    Plan limits come from env vars (GATESWARM_QUOTA_*); unknown limits report usedPct=null.
 """
 
 import json
@@ -103,7 +102,7 @@ def scrape_codex():
     windows = {}
     for w in ["5h", "7d", "30d"]:
         windows[w] = {
-            "usedPct": buckets[w] / LIMITS[w]["tokens"] * 100 if LIMITS[w]["tokens"] else 0,
+            "usedPct": buckets[w] / LIMITS[w]["tokens"] * 100 if LIMITS[w]["tokens"] else None,
             "usedTokens": buckets[w],
             "limitTokens": LIMITS[w]["tokens"],
             "usedRequests": req_counts[w],
@@ -172,7 +171,7 @@ def scrape_claude():
     windows = {}
     for w in ["5h", "7d", "30d"]:
         windows[w] = {
-            "usedPct": 0,
+            "usedPct": None,  # plan limit unknown; use /status in the CLI for real remaining quota
             "usedTokens": buckets[w],
             "resetAt": "rolling",
             "resetType": "rolling",
@@ -185,170 +184,73 @@ def scrape_claude():
         "windows": windows,
     }
 
-# ─── OpenCode Go (from API usage + consumption history) ──
+# ─── HTTP providers (from GateSwarm consumption history) ──
 
-def scrape_opencodego():
+def _env_limit(name):
+    """Optional plan limit from the environment (tokens). Unset/invalid => unknown (None)."""
+    raw = os.environ.get(name, "").strip()
+    try:
+        v = float(raw)
+        return v if v > 0 else None
+    except ValueError:
+        return None
+
+def scrape_from_history(provider, limits):
     """
-    OpenCode Go doesn't expose a quota API.
-    We read the GateSwarm consumption history for actual token counts.
+    Sum GateSwarm's own tracked tokens per window for `provider`.
+    `limits` maps window ("5h"/"7d"/"30d") -> token limit or None. When a limit is unknown
+    usedPct is null (NOT 0), so consumers never mistake "unknown" for "idle".
+    Plan limits are plan-specific; set them via environment, e.g.
+      GATESWARM_QUOTA_ZAI_5H_TOKENS, GATESWARM_QUOTA_ZAI_7D_TOKENS,
+      GATESWARM_QUOTA_BAILIAN_30D_TOKENS
     """
     history_file = Path(__file__).parent.parent / "data" / "consumption-history.json"
     if not history_file.exists():
         return None
-
     try:
         history = json.loads(history_file.read_text())
-    except:
+    except Exception:
         return None
 
-    provider_data = history.get("providers", {}).get("opencodego", {})
-    buckets = provider_data.get("buckets", {})
-
-    now_ms = int(time.time() * 1000)
-    hour_ms = 3600 * 1000
-
-    windows_data = {}
-    for name, window_s in [("5h", WINDOW_5H), ("7d", WINDOW_7D), ("30d", WINDOW_30D)]:
-        window_ms = window_s * 1000
-        start_ms = now_ms - window_ms
-
-        total_tokens = 0
-        total_requests = 0
-
-        for bucket_hour, bucket in buckets.items():
-            bh = int(bucket_hour)
-            if bh > start_ms:
-                total_tokens += bucket.get("tokensIn", 0) + bucket.get("tokensOut", 0)
-                total_requests += bucket.get("requests", 0)
-
-        windows_data[name] = {
-            "usedTokens": total_tokens,
-            "usedRequests": total_requests,
-            "limitTokens": 50000 if name == "5h" else (300000 if name == "7d" else 500000),
-            "limitRequests": None,
-            "usedPctTokens": round(total_tokens / 50000 * 100, 1) if name == "5h" else (
-                round(total_tokens / 300000 * 100, 1) if name == "7d" else
-                round(total_tokens / 500000 * 100, 1)
-            ),
-            "usedPctRequests": None,
-            "resetAt": "rolling" if name != "30d" else "1st of month UTC",
-            "resetType": "rolling" if name != "30d" else "fixed",
-        }
-
-    return {
-        "provider": "opencodego",
-        "syncedAt": datetime.now(tz=timezone.utc).isoformat() + "Z",
-        "source": "consumption-history",
-        "windows": windows_data,
-    }
-
-# ─── ZAI (from consumption history) ──────────────────────
-
-def scrape_zai():
-    """Read ZAI usage from GateSwarm consumption history."""
-    history_file = Path(__file__).parent.parent / "data" / "consumption-history.json"
-    if not history_file.exists():
-        return None
-
-    try:
-        history = json.loads(history_file.read_text())
-    except:
-        return None
-
-    provider_data = history.get("providers", {}).get("zai", {})
-    buckets = provider_data.get("buckets", {})
-
+    buckets = history.get("providers", {}).get(provider, {}).get("buckets", {})
     now_ms = int(time.time() * 1000)
 
     windows_data = {}
-    limits = {"5h": 30000, "7d": 200000, "30d": None}
-
     for name, window_s in [("5h", WINDOW_5H), ("7d", WINDOW_7D), ("30d", WINDOW_30D)]:
-        window_ms = window_s * 1000
-        start_ms = now_ms - window_ms
-
+        start_ms = now_ms - window_s * 1000
         total_tokens = 0
         total_requests = 0
-
         for bucket_hour, bucket in buckets.items():
-            bh = int(bucket_hour)
-            if bh > start_ms:
+            if int(bucket_hour) > start_ms:
                 total_tokens += bucket.get("tokensIn", 0) + bucket.get("tokensOut", 0)
                 total_requests += bucket.get("requests", 0)
-
-        limit = limits[name]
-        used_pct = (total_tokens / limit * 100) if limit else 0
+        limit = limits.get(name)
         windows_data[name] = {
-            "usedPct": round(used_pct, 1) if limit else 0,
+            "usedPct": round(total_tokens / limit * 100, 1) if limit else None,
             "usedTokens": total_tokens,
             "limitTokens": limit,
             "usedRequests": total_requests,
-            "resetAt": "rolling" if name == "5h" else ("Monday 00:00 UTC" if name == "7d" else "never"),
-            "resetType": "rolling" if name == "5h" else ("fixed" if name == "7d" else "rolling"),
+            "resetAt": "rolling" if name != "30d" else "plan cycle",
+            "resetType": "rolling",
         }
 
     return {
-        "provider": "zai",
+        "provider": provider,
         "syncedAt": datetime.now(tz=timezone.utc).isoformat() + "Z",
         "source": "consumption-history",
         "windows": windows_data,
     }
 
-# ─── Ollama Cloud (from consumption history) ─────────────
+def scrape_zai():
+    return scrape_from_history("zai", {
+        "5h": _env_limit("GATESWARM_QUOTA_ZAI_5H_TOKENS"),
+        "7d": _env_limit("GATESWARM_QUOTA_ZAI_7D_TOKENS"),
+    })
 
-def scrape_ollama_cloud():
-    """Read Ollama Cloud usage from GateSwarm consumption history."""
-    history_file = Path(__file__).parent.parent / "data" / "consumption-history.json"
-    if not history_file.exists():
-        return None
-
-    try:
-        history = json.loads(history_file.read_text())
-    except:
-        return None
-
-    provider_data = history.get("providers", {}).get("ollama-cloud", {})
-    buckets = provider_data.get("buckets", {})
-
-    now_ms = int(time.time() * 1000)
-
-    windows_data = {}
-    limits_tokens = {"5h": 50000, "7d": 500000, "30d": None}
-    limits_req = {"5h": 200, "7d": 2000, "30d": None}
-
-    for name, window_s in [("5h", WINDOW_5H), ("7d", WINDOW_7D), ("30d", WINDOW_30D)]:
-        window_ms = window_s * 1000
-        start_ms = now_ms - window_ms
-
-        total_tokens = 0
-        total_requests = 0
-
-        for bucket_hour, bucket in buckets.items():
-            bh = int(bucket_hour)
-            if bh > start_ms:
-                total_tokens += bucket.get("tokensIn", 0) + bucket.get("tokensOut", 0)
-                total_requests += bucket.get("requests", 0)
-
-        lt = limits_tokens[name]
-        lr = limits_req[name]
-        used_pct_tok = (total_tokens / lt * 100) if lt else 0
-        used_pct_req = (total_requests / lr * 100) if lr else 0
-        windows_data[name] = {
-            "usedPct": round(max(used_pct_tok, used_pct_req), 1),
-            "usedTokens": total_tokens,
-            "limitTokens": lt,
-            "usedRequests": total_requests,
-            "limitRequests": lr,
-            "resetAt": "01:00 UTC (session)" if name == "5h" else ("Monday 01:00 UTC" if name == "7d" else "never"),
-            "resetType": "rolling" if name == "5h" else ("fixed" if name == "7d" else "rolling"),
-        }
-
-    return {
-        "provider": "ollama-cloud",
-        "syncedAt": datetime.now(tz=timezone.utc).isoformat() + "Z",
-        "source": "consumption-history",
-        "windows": windows_data,
-    }
+def scrape_bailian():
+    return scrape_from_history("bailian", {
+        "30d": _env_limit("GATESWARM_QUOTA_BAILIAN_30D_TOKENS"),
+    })
 
 # ─── Main ────────────────────────────────────────────────
 
@@ -358,9 +260,8 @@ def main():
     scrapers = [
         ("codex-cli", scrape_codex),
         ("claude-cli", scrape_claude),
-        ("opencodego", scrape_opencodego),
         ("zai", scrape_zai),
-        ("ollama-cloud", scrape_ollama_cloud),
+        ("bailian", scrape_bailian),
     ]
 
     for name, scraper in scrapers:

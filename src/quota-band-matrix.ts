@@ -32,7 +32,7 @@ import type { TierModelConfig } from './v04-config.js';
 import { getConfig } from './v04-config.js';
 import { quotaSync } from './quota-sync.js';
 import { consumptionTracker } from './consumption-tracker.js';
-import { getMultiWindowQuota } from './provider-quota.js';
+import { getMultiWindowQuota, providerQuota } from './provider-quota.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -97,13 +97,18 @@ export interface ProviderRuleCondition {
   provider?: string;
   providers?: string[];
   window: 'fiveHour' | 'weekly' | 'monthly';
-  threshold: number;
+  threshold?: number;
   logic?: 'AND' | 'OR';
+  /** Monthly-window pace check: fire when usedPct / elapsedCyclePct >= this ratio (e.g. 1.2 = 120% of linear pace). Needs GATESWARM_BAILIAN_CYCLE_START_DAY. */
+  pace_ratio_threshold?: number;
+  /** Fire while the provider's quota circuit breaker is open (1308 / insufficient_quota). */
+  breaker?: boolean;
 }
 
 export interface ProviderRuleAction {
   tier: EffortLevel;
-  remove?: Array<{ provider: string }>;
+  /** Remove a provider (or, with `model`, a single model) from the tier. */
+  remove?: Array<{ provider: string; model?: string }>;
   demote_primary?: boolean;
   promote?: { provider: string; model: string };
 }
@@ -229,7 +234,7 @@ export function getProviderQuotaPercentages(): ProviderQuotaPercentage[] {
 
   // 2. consumptionTracker — historical usage (fallback for providers not in quotaSync)
   const windowQuotas: Record<string, any> = {};
-  const providers = ['ollama', 'ollama-cloud', 'opencodego', 'zai', 'openrouter', 'bailian', 'claude-cli', 'codex-cli'];
+  const providers = ['ollama', 'zai', 'bailian', 'claude-cli', 'codex-cli'];
   for (const provider of providers) {
     const multiWindow = getMultiWindowQuota(provider);
     if (multiWindow) {
@@ -290,47 +295,54 @@ export function selectBand(maxPct: number): QuotaBand {
 
 // ─── Provider Overlay Application ────────────────────────
 
+/**
+ * Linear-pace ratio for a monthly credit cycle: usedPct / elapsedCyclePct.
+ * Returns null when the cycle start is unknown (GATESWARM_BAILIAN_CYCLE_START_DAY unset) or too early to judge.
+ */
+export function monthlyPaceRatio(usedPct: number | null, now: Date = new Date(), cycleStartDay?: number): number | null {
+  if (usedPct === null) return null;
+  const day = cycleStartDay ?? Number(process.env.GATESWARM_BAILIAN_CYCLE_START_DAY);
+  if (!Number.isFinite(day) || day < 1 || day > 28) return null;
+  const y = now.getUTCFullYear(), m = now.getUTCMonth();
+  let start = Date.UTC(y, m, day);
+  if (start > now.getTime()) start = Date.UTC(y, m - 1, day);
+  const elapsedPct = ((now.getTime() - start) / (30 * 24 * 3600_000)) * 100;
+  if (elapsedPct < 5) return null; // too early in the cycle for a meaningful ratio
+  return usedPct / Math.min(elapsedPct, 100);
+}
+
+function providerPctFor(window: ProviderRuleCondition['window'], prov: ProviderQuotaPercentage): number | null {
+  if (window === 'fiveHour') return prov.fiveHourPct;
+  if (window === 'weekly') return prov.weeklyPct;
+  return prov.monthlyPct;
+}
+
+function evaluateOne(condition: ProviderRuleCondition, pid: string, providerPcts: ProviderQuotaPercentage[]): boolean {
+  if (condition.breaker) return providerQuota.isBreakerOpen(pid);
+  const prov = providerPcts.find(p => p.provider === pid);
+  if (!prov) return false;
+  const pct = providerPctFor(condition.window, prov);
+  if (condition.pace_ratio_threshold !== undefined) {
+    const ratio = monthlyPaceRatio(pct);
+    return ratio !== null && ratio >= condition.pace_ratio_threshold;
+  }
+  return pct !== null && condition.threshold !== undefined && pct >= condition.threshold;
+}
+
 function evaluateProviderRuleCondition(
   condition: ProviderRuleCondition,
   providerPcts: ProviderQuotaPercentage[],
 ): boolean {
-  const { provider, providers, window, threshold, logic = 'OR' } = condition;
-
-  if (provider) {
-    // Single provider rule
-    const prov = providerPcts.find(p => p.provider === provider);
-    if (!prov) return false;
-
-    let pct: number | null = null;
-    if (window === 'fiveHour') pct = prov.fiveHourPct;
-    else if (window === 'weekly') pct = prov.weeklyPct;
-    else if (window === 'monthly') pct = prov.monthlyPct;
-
-    return pct !== null && pct >= threshold;
-  }
-
+  const { provider, providers, logic = 'OR' } = condition;
+  if (provider) return evaluateOne(condition, provider, providerPcts);
   if (providers) {
-    // Multiple providers rule
-    const results = providers.map(pid => {
-      const prov = providerPcts.find(p => p.provider === pid);
-      if (!prov) return false;
-
-      let pct: number | null = null;
-      if (window === 'fiveHour') pct = prov.fiveHourPct;
-      else if (window === 'weekly') pct = prov.weeklyPct;
-      else if (window === 'monthly') pct = prov.monthlyPct;
-
-      return pct !== null && pct >= threshold;
-    });
-
-    if (logic === 'AND') return results.every(r => r);
-    return results.some(r => r);
+    const results = providers.map(pid => evaluateOne(condition, pid, providerPcts));
+    return logic === 'AND' ? results.every(r => r) : results.some(r => r);
   }
-
   return false;
 }
 
-function applyProviderOverlays(
+export function applyProviderOverlays(
   baseTierModels: Record<EffortLevel, TierModelConfig>,
   providerPcts: ProviderQuotaPercentage[],
   matrices: QuotaBandMatrices,
@@ -348,33 +360,27 @@ function applyProviderOverlays(
         const tierConfig = effectiveTierModels[action.tier];
         if (!tierConfig) continue;
 
-        // Remove providers
+        // Remove providers (or single models when `model` is given)
         if (action.remove) {
-          for (const { provider } of action.remove) {
-            // Remove from primary
-            if (tierConfig.provider === provider) {
-              // Find first fallback that's not being removed
-              const fallback = tierConfig.fallback_models?.find(
-                f => !action.remove!.some(r => r.provider === f.provider)
-              );
-              if (fallback) {
-                tierConfig.provider = fallback.provider;
-                tierConfig.model = fallback.model;
-              }
-            }
+          const removed = (provider?: string, model?: string) =>
+            action.remove!.some(r => r.provider === provider && (!r.model || r.model === model));
 
-            // Remove from fallbacks
-            if (tierConfig.fallback_models) {
-              tierConfig.fallback_models = tierConfig.fallback_models.filter(
-                f => f.provider !== provider
-              );
+          if (removed(tierConfig.provider, tierConfig.model)) {
+            // Replace the primary with the first fallback that is not being removed
+            const fallback = tierConfig.fallback_models?.find(f => !removed(f.provider, f.model));
+            if (fallback) {
+              tierConfig.provider = fallback.provider;
+              tierConfig.model = fallback.model;
             }
+          }
 
-            // Remove from plan config
-            if (tierConfig.plan_provider === provider) {
-              tierConfig.plan_provider = tierConfig.provider;
-              tierConfig.plan_model = undefined;
-            }
+          if (tierConfig.fallback_models) {
+            tierConfig.fallback_models = tierConfig.fallback_models.filter(f => !removed(f.provider, f.model));
+          }
+
+          if (removed(tierConfig.plan_provider, tierConfig.plan_model)) {
+            tierConfig.plan_provider = tierConfig.provider;
+            tierConfig.plan_model = undefined;
           }
         }
 

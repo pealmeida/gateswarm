@@ -47,6 +47,9 @@ export interface ProviderQuota {
   consecutive429s: number;
   throttled: boolean;
   throttledUntil: number;
+  /** Circuit breaker: set when the provider reported quota exhaustion (e.g. Z.AI 1308, insufficient_quota). Epoch ms; 0/undefined = closed. */
+  breakerUntil?: number;
+  breakerReason?: string;
   healthScore: number;       // 0–100, higher = better
 
   // ── Cost estimate ──
@@ -106,29 +109,11 @@ const MULTI_WINDOW_QUOTAS: Record<string, MultiWindowQuotaConfig> = {
     weekly:  { requests: null, tokens: null, resetAt: 'never', resetType: 'rolling' },
     monthly: { requests: null, tokens: null, resetAt: 'never', resetType: 'rolling' },
   },
-  'ollama-cloud': {
-    // Conservative defaults; override via config when provider limits differ.
-    fiveHour: { requests: 200,    tokens: 50000,  resetAt: '01:00 UTC (session)',   resetType: 'rolling' },
-    weekly:  { requests: 2000,   tokens: 500000, resetAt: 'Monday 01:00 UTC',      resetType: 'fixed' },
-    monthly: { requests: null,    tokens: null,   resetAt: 'never',                 resetType: 'rolling' },
-  },
-  'opencodego': {
-    // Conservative defaults; override via config when provider limits differ.
-    fiveHour: { requests: null,   tokens: 50000,  resetAt: 'rolling 5h',            resetType: 'rolling' },
-    weekly:  { requests: null,   tokens: 300000, resetAt: 'rolling 7d',            resetType: 'rolling' },
-    monthly: { requests: null,   tokens: 500000, resetAt: '1st of month UTC',      resetType: 'fixed' },
-  },
   'zai': {
     // Conservative defaults; override via config when provider limits differ.
     fiveHour: { requests: null,   tokens: 30000,  resetAt: 'rolling 5h',            resetType: 'rolling' },
     weekly:  { requests: null,   tokens: 200000, resetAt: 'Monday 00:00 UTC',      resetType: 'fixed' },
     monthly: { requests: null,   tokens: null,   resetAt: 'never',                 resetType: 'rolling' },
-  },
-  'openrouter': {
-    // Conservative defaults; override via config when provider limits differ.
-    fiveHour: { requests: 100,    tokens: 25000,  resetAt: '00:00 UTC',             resetType: 'rolling' },
-    weekly:  { requests: 1000,    tokens: null,   resetAt: 'Monday 00:00 UTC',      resetType: 'fixed' },
-    monthly: { requests: null,    tokens: null,   resetAt: 'never',                 resetType: 'rolling' },
   },
   'bailian': {
     // Conservative defaults; override via config when provider limits differ.
@@ -156,52 +141,76 @@ const PROVIDER_QUOTA_CONFIGS: Record<string, Partial<ProviderQuota>> = {
     tokensDailyLimit: Infinity,
     tokensRemaining: Infinity,
   },
-  'ollama-cloud': {
-    name: 'Ollama Cloud (Hosted)',
-    rpm: 100,
-    rpd: 10000,
-    rpmRemaining: 100,
-    rpdRemaining: 10000,
-    tokensDailyLimit: 500000,
-    tokensRemaining: 500000,
-  },
-  'opencodego': {
-    name: 'OpenCode Go',
-    rpm: 50,
-    rpd: 5000,
-    rpmRemaining: 50,
-    rpdRemaining: 5000,
-    tokensDailyLimit: 300000,
-    tokensRemaining: 300000,
-  },
   'zai': {
     name: 'ZAI (GLM Coding Lite)',
+    // Z.AI Coding plans meter credits per rolling 5h window + weekly, not tokens/day.
+    // Real exhaustion is detected by the circuit breaker (error 1308) and quota-sync.
     rpm: 30,
-    rpd: 3000,
+    rpd: Infinity,
     rpmRemaining: 30,
-    rpdRemaining: 3000,
-    tokensDailyLimit: 200000,
-    tokensRemaining: 200000,
-  },
-  'openrouter': {
-    name: 'OpenRouter (Free)',
-    rpm: 20,
-    rpd: 200,
-    rpmRemaining: 20,
-    rpdRemaining: 200,
-    tokensDailyLimit: 50000,
-    tokensRemaining: 50000,
+    rpdRemaining: Infinity,
+    tokensDailyLimit: Infinity,
+    tokensRemaining: Infinity,
   },
   'bailian': {
     name: 'Bailian (Token Plan)',
+    // Token Plan is metered in monthly credits; exhaustion is caught by the circuit
+    // breaker (insufficient_quota) and the monthly-pace overlay, not a daily token cap.
     rpm: 60,
-    rpd: 5000,
+    rpd: Infinity,
     rpmRemaining: 60,
-    rpdRemaining: 5000,
-    tokensDailyLimit: 500000,
-    tokensRemaining: 500000,
+    rpdRemaining: Infinity,
+    tokensDailyLimit: Infinity,
+    tokensRemaining: Infinity,
   },
 };
+
+
+// ─── Circuit breaker (quota exhaustion) ──────────────────
+
+export interface QuotaExhaustion {
+  kind: 'zai_1308' | 'insufficient_quota' | 'quota_exceeded';
+  /** Epoch ms until which the provider should be considered exhausted. */
+  until: number;
+  reason: string;
+}
+
+const MIN_BREAKER_MS = 60_000;
+const MAX_5H_BREAKER_MS = 6 * 3600_000;
+const MAX_WEEKLY_BREAKER_MS = 7 * 24 * 3600_000;
+/** Cooldown before re-probing when the provider gives no reset time (monthly/credit exhaustion). */
+const DEFAULT_UNKNOWN_RESET_MS = 60 * 60_000;
+
+/**
+ * Detect "quota exhausted until reset" errors (as opposed to a transient 429).
+ * Z.AI returns business code 1308 ("... 5 hour limit ... reset at YYYY-MM-DD HH:MM:SS");
+ * OpenAI-compatible providers return `insufficient_quota`.
+ * Timestamps without a zone are interpreted with GATESWARM_ZAI_RESET_UTC_OFFSET_HOURS (default 8,
+ * Z.AI's home timezone) and always clamped, so a wrong guess cannot lock a provider out for long.
+ */
+export function classifyQuotaExhaustion(status: number, body: unknown, now: number = Date.now()): QuotaExhaustion | null {
+  const text = (typeof body === 'string' ? body : (() => { try { return JSON.stringify(body); } catch { return ''; } })()) || '';
+  const lower = text.toLowerCase();
+  const has1308 = status === 1308 || /["':\s]1308["',}\s]/.test(text);
+  const insufficient = lower.includes('insufficient_quota') || lower.includes('insufficient quota');
+  if (!has1308 && !insufficient && !(status === 429 && /(quota|limit)[^"]{0,40}(exhaust|reached|exceed)/i.test(text))) return null;
+
+  const weekly = /week/i.test(text);
+  const maxMs = weekly ? MAX_WEEKLY_BREAKER_MS : MAX_5H_BREAKER_MS;
+  let until = 0;
+  const m = text.match(/(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})(Z|[+-]\d{2}:?\d{2})?/);
+  if (m) {
+    const offH = Number(process.env.GATESWARM_ZAI_RESET_UTC_OFFSET_HOURS ?? 8);
+    let ms: number;
+    if (m[7]) ms = Date.parse(`${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}${m[7]}`);
+    else ms = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]) - offH * 3600_000;
+    if (Number.isFinite(ms)) until = ms;
+  }
+  const kind: QuotaExhaustion['kind'] = has1308 ? 'zai_1308' : insufficient ? 'insufficient_quota' : 'quota_exceeded';
+  if (!until) until = now + (has1308 ? MAX_5H_BREAKER_MS / 2 : DEFAULT_UNKNOWN_RESET_MS);
+  until = Math.min(Math.max(until, now + MIN_BREAKER_MS), now + maxMs);
+  return { kind, until, reason: kind };
+}
 
 // ─── Quota Manager ───────────────────────────────────────
 
@@ -250,6 +259,12 @@ class ProviderQuotaManager {
           current.estimatedCost = savedQuota.estimatedCost || 0;
           current.tokensToday = savedQuota.tokensToday || 0;
           current.requestsToday = savedQuota.requestsToday || 0;
+          if ((savedQuota.breakerUntil || 0) > Date.now()) {
+            current.breakerUntil = savedQuota.breakerUntil;
+            current.breakerReason = savedQuota.breakerReason;
+            current.throttled = true;
+            current.throttledUntil = savedQuota.breakerUntil!;
+          }
         }
       }
       console.log(`📊 Provider Quota: loaded cumulative stats (${Object.keys(saved.quotas).length} providers)`);
@@ -311,11 +326,46 @@ class ProviderQuotaManager {
     this.markDirty();
   }
 
+
+  /** Open the per-provider circuit breaker until `until` (epoch ms). Applies to every model of the provider. */
+  openBreaker(provider: string, until: number, reason: string): void {
+    const quota = this.state.quotas[provider];
+    if (!quota) return;
+    const wasOpen = this.isBreakerOpen(provider);
+    quota.breakerUntil = Math.max(quota.breakerUntil || 0, until);
+    quota.breakerReason = reason;
+    quota.throttled = true;
+    quota.throttledUntil = Math.max(quota.throttledUntil, quota.breakerUntil);
+    if (!wasOpen) {
+      console.log(`🔌 [Quota] circuit breaker OPEN for ${provider} (${reason}) until ${new Date(quota.breakerUntil).toISOString()}`);
+    }
+    this.markDirty();
+  }
+
+  isBreakerOpen(provider: string): boolean {
+    const q = this.state.quotas[provider];
+    return !!q && (q.breakerUntil || 0) > Date.now();
+  }
+
+  getOpenBreakers(): Array<{ provider: string; until: number; reason: string }> {
+    const now = Date.now();
+    return Object.values(this.state.quotas)
+      .filter(q => (q.breakerUntil || 0) > now)
+      .map(q => ({ provider: q.provider, until: q.breakerUntil!, reason: q.breakerReason || 'quota' }));
+  }
+
+  /** Inspect an upstream failure and open the breaker when it is a quota-exhaustion error. Returns the detection, if any. */
+  noteUpstreamFailure(provider: string, status: number, body: unknown): QuotaExhaustion | null {
+    const hit = classifyQuotaExhaustion(status, body);
+    if (hit) this.openBreaker(provider, hit.until, hit.reason);
+    return hit;
+  }
+
   recordSuccess(provider: string): void {
     const quota = this.state.quotas[provider];
     if (!quota) return;
     quota.consecutive429s = 0;
-    quota.throttled = false;
+    if (!this.isBreakerOpen(provider)) quota.throttled = false;
     // v0.5.6 routing-fix: a successful request proves the provider is healthy.
     // Decay accumulated rateLimitHits (half-life ~3 successes) instead of
     // leaving them as a permanent penalty that tanks the health score.
@@ -431,6 +481,10 @@ class ProviderQuotaManager {
   shouldSwitch(provider: string): { shouldSwitch: boolean; reason: string } {
     const quota = this.state.quotas[provider];
     if (!quota) return { shouldSwitch: false, reason: 'unknown' };
+
+    if ((quota.breakerUntil || 0) > Date.now()) {
+      return { shouldSwitch: true, reason: `quota breaker open (${quota.breakerReason || 'quota'}) until ${new Date(quota.breakerUntil!).toISOString()}` };
+    }
 
     if (quota.throttled && quota.throttledUntil > Date.now()) {
       return { shouldSwitch: true, reason: 'throttled' };

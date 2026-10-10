@@ -16,12 +16,12 @@
           "enable_thinking": false,
           "fallback_models": [
             {
-              "model": "glm-5.3-flash",
-              "provider": "zai"
-            },
-            {
               "model": "qwen3.8-flash",
               "provider": "bailian"
+            },
+            {
+              "model": "glm-5.3-flash",
+              "provider": "zai"
             },
             {
               "model": "qwen2.5:1.5b",
@@ -30,14 +30,14 @@
           ]
         },
         "light": {
-          "model": "glm-5.3-flash",
-          "provider": "zai",
-          "max_tokens": 512,
+          "model": "deepseek-v4-flash-0731",
+          "provider": "bailian",
+          "max_tokens": 1024,
           "enable_thinking": false,
           "fallback_models": [
             {
-              "model": "deepseek-v4-flash-0731",
-              "provider": "bailian"
+              "model": "glm-5.3-flash",
+              "provider": "zai"
             },
             {
               "model": "qwen3.8-flash",
@@ -47,7 +47,7 @@
         },
         "moderate": {
           "model": "glm-5.3",
-          "provider": "zai",
+          "provider": "bailian",
           "max_tokens": 2048,
           "enable_thinking": false,
           "plan_model": "deepseek-v4.1-flash",
@@ -61,11 +61,11 @@
             },
             {
               "model": "glm-5.3",
-              "provider": "bailian"
+              "provider": "zai"
             },
             {
-              "model": "glm-5.1",
-              "provider": "zai"
+              "model": "qwen3.7-plus",
+              "provider": "bailian"
             }
           ]
         },
@@ -74,8 +74,8 @@
           "provider": "claude-cli",
           "max_tokens": 4096,
           "enable_thinking": true,
-          "plan_model": "glm-5.3",
-          "plan_provider": "zai",
+          "plan_model": "qwen3.8-max",
+          "plan_provider": "bailian",
           "plan_max_tokens": 2048,
           "plan_enable_thinking": false,
           "fallback_models": [
@@ -128,16 +128,16 @@
           "plan_enable_thinking": true,
           "fallback_models": [
             {
-              "model": "cx/gpt-6-astra",
-              "provider": "codex-cli"
-            },
-            {
               "model": "cx/gpt-6-sol",
               "provider": "codex-cli"
             },
             {
               "model": "qwen3.8-max",
               "provider": "bailian"
+            },
+            {
+              "model": "cx/gpt-6-astra",
+              "provider": "codex-cli"
             }
           ]
         }
@@ -157,7 +157,7 @@
           "enable_thinking": false,
           "fallback_models": [
             {
-              "model": "deepseek-v4-flash-0731",
+              "model": "qwen3.8-flash",
               "provider": "bailian"
             },
             {
@@ -165,30 +165,30 @@
               "provider": "zai"
             },
             {
-              "model": "qwen3.8-flash",
-              "provider": "bailian"
+              "model": "qwen2.5:1.5b",
+              "provider": "ollama"
             }
           ]
         },
         "light": {
           "model": "deepseek-v4-flash-0731",
           "provider": "bailian",
-          "max_tokens": 512,
+          "max_tokens": 1024,
           "enable_thinking": false,
           "fallback_models": [
             {
-              "model": "qwen3.8-flash",
-              "provider": "bailian"
-            },
-            {
               "model": "glm-5.3-flash",
               "provider": "zai"
+            },
+            {
+              "model": "qwen3.8-flash",
+              "provider": "bailian"
             }
           ]
         },
         "moderate": {
           "model": "glm-5.3",
-          "provider": "zai",
+          "provider": "bailian",
           "max_tokens": 2048,
           "enable_thinking": false,
           "plan_model": "glm-5.3-flash",
@@ -197,19 +197,15 @@
           "plan_enable_thinking": false,
           "fallback_models": [
             {
-              "model": "glm-5.1",
+              "model": "qwen3.8-flash",
+              "provider": "bailian"
+            },
+            {
+              "model": "glm-5.3",
               "provider": "zai"
             },
             {
-              "model": "glm-4.7",
-              "provider": "zai"
-            },
-            {
-              "model": "glm-5.3-flash",
-              "provider": "zai"
-            },
-            {
-              "model": "deepseek-v4-flash-0731",
+              "model": "qwen3.7-plus",
               "provider": "bailian"
             }
           ]
@@ -219,8 +215,8 @@
           "provider": "claude-cli",
           "max_tokens": 4096,
           "enable_thinking": true,
-          "plan_model": "glm-5.3",
-          "plan_provider": "zai",
+          "plan_model": "qwen3.8-max",
+          "plan_provider": "bailian",
           "plan_max_tokens": 2048,
           "plan_enable_thinking": false,
           "fallback_models": [
@@ -273,15 +269,15 @@
           "plan_enable_thinking": true,
           "fallback_models": [
             {
-              "model": "cx/gpt-6-astra",
+              "model": "cx/gpt-6-sol",
               "provider": "codex-cli"
             },
             {
-              "model": "glm-5.3",
-              "provider": "zai"
+              "model": "qwen3.8-max",
+              "provider": "bailian"
             },
             {
-              "model": "cx/gpt-6-sol",
+              "model": "cx/gpt-6-astra",
               "provider": "codex-cli"
             }
           ]
@@ -296,8 +292,8 @@
       "description": "Alert state (70-85%). Shift heavy workloads away from hot providers.",
       "tier_models": {
         "trivial": {
-          "model": "glm-5.3-flash",
-          "provider": "zai",
+          "model": "qwen3.8-flash",
+          "provider": "bailian",
           "max_tokens": 256,
           "enable_thinking": false,
           "fallback_models": [
@@ -332,8 +328,8 @@
           ]
         },
         "moderate": {
-          "model": "glm-5.3",
-          "provider": "zai",
+          "model": "qwen3.8-flash",
+          "provider": "bailian",
           "max_tokens": 2048,
           "enable_thinking": false,
           "plan_model": "glm-5.3-flash",
@@ -604,12 +600,12 @@
     }
   },
   "provider_rules": {
-    "go_high": {
-      "description": "Bailian quota >70% in 5h window",
+    "bailian_pace": {
+      "description": "Bailian monthly credit pace >=120% of the linear cycle pace (needs GATESWARM_BAILIAN_CYCLE_START_DAY and a monthly usage % from quota-sync). Sheds Bailian from moderate+ tiers.",
       "condition": {
         "provider": "bailian",
-        "window": "fiveHour",
-        "threshold": 70
+        "window": "monthly",
+        "pace_ratio_threshold": 1.2
       },
       "actions": [
         {
@@ -647,7 +643,35 @@
       ]
     },
     "zai_high": {
-      "description": "ZAI quota >70% in 5h window",
+      "description": "Z.AI yellow (>=50% of 5h window): drop the 3x-credit glm-5.3 from moderate/heavy; flash models stay.",
+      "condition": {
+        "provider": "zai",
+        "window": "fiveHour",
+        "threshold": 50
+      },
+      "actions": [
+        {
+          "tier": "moderate",
+          "remove": [
+            {
+              "provider": "zai",
+              "model": "glm-5.3"
+            }
+          ]
+        },
+        {
+          "tier": "heavy",
+          "remove": [
+            {
+              "provider": "zai",
+              "model": "glm-5.3"
+            }
+          ]
+        }
+      ]
+    },
+    "zai_orange": {
+      "description": "Z.AI orange (>=70% of 5h window): remove Z.AI from moderate and above.",
       "condition": {
         "provider": "zai",
         "window": "fiveHour",
@@ -656,19 +680,19 @@
       "actions": [
         {
           "tier": "moderate",
-          "demote_primary": true,
-          "promote": {
-            "provider": "bailian",
-            "model": "qwen3.7-plus"
-          }
+          "remove": [
+            {
+              "provider": "zai"
+            }
+          ]
         },
         {
           "tier": "heavy",
-          "demote_primary": true,
-          "promote": {
-            "provider": "bailian",
-            "model": "deepseek-v4-pro"
-          }
+          "remove": [
+            {
+              "provider": "zai"
+            }
+          ]
         },
         {
           "tier": "intensive",
@@ -688,12 +712,107 @@
         }
       ]
     },
-    "claude_high": {
-      "description": "Claude CLI quota >70% in 5h window",
+    "zai_red": {
+      "description": "Z.AI red (>=85% of 5h window): remove Z.AI from every tier.",
+      "condition": {
+        "provider": "zai",
+        "window": "fiveHour",
+        "threshold": 85
+      },
+      "actions": [
+        {
+          "tier": "trivial",
+          "remove": [
+            {
+              "provider": "zai"
+            }
+          ]
+        },
+        {
+          "tier": "light",
+          "remove": [
+            {
+              "provider": "zai"
+            }
+          ]
+        },
+        {
+          "tier": "moderate",
+          "remove": [
+            {
+              "provider": "zai"
+            }
+          ]
+        },
+        {
+          "tier": "heavy",
+          "remove": [
+            {
+              "provider": "zai"
+            }
+          ]
+        },
+        {
+          "tier": "intensive",
+          "remove": [
+            {
+              "provider": "zai"
+            }
+          ]
+        },
+        {
+          "tier": "extreme",
+          "remove": [
+            {
+              "provider": "zai"
+            }
+          ]
+        }
+      ]
+    },
+    "claude_yellow": {
+      "description": "Claude yellow (>=40% of 5h window): Opus leaves the pool; Sonnet stays.",
       "condition": {
         "provider": "claude-cli",
         "window": "fiveHour",
-        "threshold": 70
+        "threshold": 40
+      },
+      "actions": [
+        {
+          "tier": "heavy",
+          "remove": [
+            {
+              "provider": "claude-cli",
+              "model": "cc/claude-opus-5-5"
+            }
+          ]
+        },
+        {
+          "tier": "intensive",
+          "remove": [
+            {
+              "provider": "claude-cli",
+              "model": "cc/claude-opus-5-5"
+            }
+          ]
+        },
+        {
+          "tier": "extreme",
+          "remove": [
+            {
+              "provider": "claude-cli",
+              "model": "cc/claude-opus-5-5"
+            }
+          ]
+        }
+      ]
+    },
+    "claude_high": {
+      "description": "Claude orange (>=60% of 5h window): Claude Code leaves heavy and intensive.",
+      "condition": {
+        "provider": "claude-cli",
+        "window": "fiveHour",
+        "threshold": 60
       },
       "actions": [
         {
@@ -706,24 +825,111 @@
         },
         {
           "tier": "intensive",
-          "demote_primary": true,
-          "promote": {
-            "provider": "codex-cli",
-            "model": "cx/gpt-6-sol"
-          }
+          "remove": [
+            {
+              "provider": "claude-cli"
+            }
+          ]
+        }
+      ]
+    },
+    "claude_red": {
+      "description": "Claude red (>=80% of 5h window): Claude Code leaves every tier.",
+      "condition": {
+        "provider": "claude-cli",
+        "window": "fiveHour",
+        "threshold": 80
+      },
+      "actions": [
+        {
+          "tier": "trivial",
+          "remove": [
+            {
+              "provider": "claude-cli"
+            }
+          ]
+        },
+        {
+          "tier": "light",
+          "remove": [
+            {
+              "provider": "claude-cli"
+            }
+          ]
+        },
+        {
+          "tier": "moderate",
+          "remove": [
+            {
+              "provider": "claude-cli"
+            }
+          ]
+        },
+        {
+          "tier": "heavy",
+          "remove": [
+            {
+              "provider": "claude-cli"
+            }
+          ]
+        },
+        {
+          "tier": "intensive",
+          "remove": [
+            {
+              "provider": "claude-cli"
+            }
+          ]
         },
         {
           "tier": "extreme",
-          "demote_primary": true,
-          "promote": {
-            "provider": "codex-cli",
-            "model": "cx/gpt-6-sol"
-          }
+          "remove": [
+            {
+              "provider": "claude-cli"
+            }
+          ]
+        }
+      ]
+    },
+    "codex_yellow": {
+      "description": "Codex yellow (>=50% of 5h window): Astra (smallest allowance) leaves the pool.",
+      "condition": {
+        "provider": "codex-cli",
+        "window": "fiveHour",
+        "threshold": 50
+      },
+      "actions": [
+        {
+          "tier": "heavy",
+          "remove": [
+            {
+              "provider": "codex-cli",
+              "model": "cx/gpt-6-astra"
+            }
+          ]
+        },
+        {
+          "tier": "intensive",
+          "remove": [
+            {
+              "provider": "codex-cli",
+              "model": "cx/gpt-6-astra"
+            }
+          ]
+        },
+        {
+          "tier": "extreme",
+          "remove": [
+            {
+              "provider": "codex-cli",
+              "model": "cx/gpt-6-astra"
+            }
+          ]
         }
       ]
     },
     "codex_high": {
-      "description": "Codex CLI quota >70% in 5h window",
+      "description": "Codex orange (>=70% of 5h window): Sol leaves intensive/extreme; Luna stays for heavy.",
       "condition": {
         "provider": "codex-cli",
         "window": "fiveHour",
@@ -732,19 +938,311 @@
       "actions": [
         {
           "tier": "intensive",
-          "demote_primary": true,
-          "promote": {
-            "provider": "bailian",
-            "model": "deepseek-v4-pro"
-          }
+          "remove": [
+            {
+              "provider": "codex-cli",
+              "model": "cx/gpt-6-sol"
+            }
+          ]
         },
         {
           "tier": "extreme",
-          "demote_primary": true,
-          "promote": {
-            "provider": "bailian",
-            "model": "deepseek-v4-pro"
-          }
+          "remove": [
+            {
+              "provider": "codex-cli",
+              "model": "cx/gpt-6-sol"
+            }
+          ]
+        }
+      ]
+    },
+    "codex_red": {
+      "description": "Codex red (>=85% of 5h window): Codex leaves every tier.",
+      "condition": {
+        "provider": "codex-cli",
+        "window": "fiveHour",
+        "threshold": 85
+      },
+      "actions": [
+        {
+          "tier": "trivial",
+          "remove": [
+            {
+              "provider": "codex-cli"
+            }
+          ]
+        },
+        {
+          "tier": "light",
+          "remove": [
+            {
+              "provider": "codex-cli"
+            }
+          ]
+        },
+        {
+          "tier": "moderate",
+          "remove": [
+            {
+              "provider": "codex-cli"
+            }
+          ]
+        },
+        {
+          "tier": "heavy",
+          "remove": [
+            {
+              "provider": "codex-cli"
+            }
+          ]
+        },
+        {
+          "tier": "intensive",
+          "remove": [
+            {
+              "provider": "codex-cli"
+            }
+          ]
+        },
+        {
+          "tier": "extreme",
+          "remove": [
+            {
+              "provider": "codex-cli"
+            }
+          ]
+        }
+      ]
+    },
+    "breaker_zai": {
+      "description": "Circuit breaker open for zai (quota exhausted until reset: Z.AI 1308 / insufficient_quota): remove from every tier.",
+      "condition": {
+        "provider": "zai",
+        "window": "fiveHour",
+        "breaker": true
+      },
+      "actions": [
+        {
+          "tier": "trivial",
+          "remove": [
+            {
+              "provider": "zai"
+            }
+          ]
+        },
+        {
+          "tier": "light",
+          "remove": [
+            {
+              "provider": "zai"
+            }
+          ]
+        },
+        {
+          "tier": "moderate",
+          "remove": [
+            {
+              "provider": "zai"
+            }
+          ]
+        },
+        {
+          "tier": "heavy",
+          "remove": [
+            {
+              "provider": "zai"
+            }
+          ]
+        },
+        {
+          "tier": "intensive",
+          "remove": [
+            {
+              "provider": "zai"
+            }
+          ]
+        },
+        {
+          "tier": "extreme",
+          "remove": [
+            {
+              "provider": "zai"
+            }
+          ]
+        }
+      ]
+    },
+    "breaker_bailian": {
+      "description": "Circuit breaker open for bailian (quota exhausted until reset: Z.AI 1308 / insufficient_quota): remove from every tier.",
+      "condition": {
+        "provider": "bailian",
+        "window": "fiveHour",
+        "breaker": true
+      },
+      "actions": [
+        {
+          "tier": "trivial",
+          "remove": [
+            {
+              "provider": "bailian"
+            }
+          ]
+        },
+        {
+          "tier": "light",
+          "remove": [
+            {
+              "provider": "bailian"
+            }
+          ]
+        },
+        {
+          "tier": "moderate",
+          "remove": [
+            {
+              "provider": "bailian"
+            }
+          ]
+        },
+        {
+          "tier": "heavy",
+          "remove": [
+            {
+              "provider": "bailian"
+            }
+          ]
+        },
+        {
+          "tier": "intensive",
+          "remove": [
+            {
+              "provider": "bailian"
+            }
+          ]
+        },
+        {
+          "tier": "extreme",
+          "remove": [
+            {
+              "provider": "bailian"
+            }
+          ]
+        }
+      ]
+    },
+    "breaker_claude": {
+      "description": "Circuit breaker open for claude-cli (quota exhausted until reset: Z.AI 1308 / insufficient_quota): remove from every tier.",
+      "condition": {
+        "provider": "claude-cli",
+        "window": "fiveHour",
+        "breaker": true
+      },
+      "actions": [
+        {
+          "tier": "trivial",
+          "remove": [
+            {
+              "provider": "claude-cli"
+            }
+          ]
+        },
+        {
+          "tier": "light",
+          "remove": [
+            {
+              "provider": "claude-cli"
+            }
+          ]
+        },
+        {
+          "tier": "moderate",
+          "remove": [
+            {
+              "provider": "claude-cli"
+            }
+          ]
+        },
+        {
+          "tier": "heavy",
+          "remove": [
+            {
+              "provider": "claude-cli"
+            }
+          ]
+        },
+        {
+          "tier": "intensive",
+          "remove": [
+            {
+              "provider": "claude-cli"
+            }
+          ]
+        },
+        {
+          "tier": "extreme",
+          "remove": [
+            {
+              "provider": "claude-cli"
+            }
+          ]
+        }
+      ]
+    },
+    "breaker_codex": {
+      "description": "Circuit breaker open for codex-cli (quota exhausted until reset: Z.AI 1308 / insufficient_quota): remove from every tier.",
+      "condition": {
+        "provider": "codex-cli",
+        "window": "fiveHour",
+        "breaker": true
+      },
+      "actions": [
+        {
+          "tier": "trivial",
+          "remove": [
+            {
+              "provider": "codex-cli"
+            }
+          ]
+        },
+        {
+          "tier": "light",
+          "remove": [
+            {
+              "provider": "codex-cli"
+            }
+          ]
+        },
+        {
+          "tier": "moderate",
+          "remove": [
+            {
+              "provider": "codex-cli"
+            }
+          ]
+        },
+        {
+          "tier": "heavy",
+          "remove": [
+            {
+              "provider": "codex-cli"
+            }
+          ]
+        },
+        {
+          "tier": "intensive",
+          "remove": [
+            {
+              "provider": "codex-cli"
+            }
+          ]
+        },
+        {
+          "tier": "extreme",
+          "remove": [
+            {
+              "provider": "codex-cli"
+            }
+          ]
         }
       ]
     },
@@ -804,5 +1302,6 @@
         }
       ]
     }
-  }
+  },
+  "_thresholds_note": "Per-provider bands (yellow/orange/red): Z.AI 50/70/85, Claude 40/60/80, Codex 50/70/85, Bailian by monthly pace. Values are conservative defaults \u2014 the user's Claude/Codex/Token Plan tiers are not known yet; tune per subscription."
 }

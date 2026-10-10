@@ -30,13 +30,19 @@ The system divides quota consumption into four bands:
 
 ### Provider Overlays
 
-When a provider exceeds 70% quota in the 5h window, specific overlays are applied:
+Overlays are evaluated **per provider** with their own yellow/orange/red thresholds (defaults are conservative and
+configurable in `provider_rules`; Claude/Codex/Token Plan tiers are plan-dependent, tune for your subscription):
 
-- **go_high**: OpenCode Go >70% — removes from moderate+ tiers
-- **zai_high**: ZAI >70% — demotes from moderate/heavy, removes from intensive+
-- **claude_high**: Claude CLI >70% — removes from heavy, demotes from intensive/extreme
-- **codex_high**: Codex CLI >70% — demotes from intensive/extreme
-- **both_http_high**: Both opencodego AND zai >70% — promotes ollama-cloud across all tiers
+| Provider | Yellow | Orange | Red |
+|---|---|---|---|
+| Z.AI (`zai_high`, `zai_orange`, `zai_red`) | 50% 5h: drop `glm-5.3` from moderate/heavy | 70%: out of moderate+ | 85%: out of every tier |
+| Claude (`claude_yellow`, `claude_high`, `claude_red`) | 40%: Opus leaves the pool | 60%: out of heavy/intensive | 80%: out of every tier |
+| Codex (`codex_yellow`, `codex_high`, `codex_red`) | 50%: Astra leaves the pool | 70%: Sol leaves intensive/extreme | 85%: out of every tier |
+| Bailian (`bailian_pace`) | monthly pace ≥120% of the linear cycle pace → out of moderate+ (needs `GATESWARM_BAILIAN_CYCLE_START_DAY` and a monthly limit) | | |
+| Circuit breaker (`breaker_zai`, `breaker_bailian`, `breaker_claude`, `breaker_codex`) | open breaker (1308 / `insufficient_quota`) → out of every tier until reset | | |
+
+`remove` actions accept an optional `model`, so a single model (e.g. Opus, Astra) can be pulled without dropping the provider.
+`both_http_high` is kept for completeness (it needs a 5h percentage for both HTTP providers).
 
 ## Configuration
 
@@ -192,7 +198,7 @@ The test suite covers:
 
 ✅ Load band matrices (Green/Yellow/Orange/Red)  
 ✅ Select band by max(%) across providers (5h → weekly fallback)  
-✅ Apply provider overlays (5 rules: go_high, zai_high, claude_high, codex_high, both_http_high)  
+✅ Apply provider overlays (5 rules: zai_*, claude_*, codex_*, bailian_pace, breaker_*, both_http_high)  
 ✅ Feature flag OFF = bit-identical 0.6.x  
 ✅ Missing/stale → Yellow + reason  
 ✅ Transparency: headers + body fields + CLI  
