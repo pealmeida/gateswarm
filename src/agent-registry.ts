@@ -84,32 +84,32 @@ export interface RegistryState {
 // ─── Default Tier Mappings ─────────────────────────────
 
 export const DEFAULT_TIER_CONFIGS: Record<string, AgentTierConfig> = {
-  // Cost-optimized — v0.5.2 aligned with available models
+  // Cost-optimized — Z.AI + Bailian Token Plan only (no CLI quota)
   'cost-optimized': {
-    trivial: 'zai/glm-4.5-air',               // Free cloud 7B — fast, free tier
-    light: 'opencodego/deepseek-v4-flash',     // Fast summaries, Q&A
-    moderate: 'opencodego/deepseek-v4-flash',  // Code-capable analysis (flash is faster/cheaper)
-    heavy: 'opencodego/deepseek-v4-pro',       // Deep reasoning
-    intensive: 'opencodego/glm-5.1',           // Complex systems
-    extreme: 'opencodego/deepseek-v4-pro',      // Elite reasoning (deepseek-v4-pro is stable)
+    trivial: 'bailian/deepseek-v4.1-flash',
+    light: 'zai/glm-5.3-flash',
+    moderate: 'zai/glm-5.3',
+    heavy: 'bailian/qwen3.8-max',
+    intensive: 'bailian/deepseek-v4-pro',
+    extreme: 'bailian/qwen3.8-max',
   },
   // Quality-focused — CLI providers for heavy tiers
   'quality': {
-    trivial: 'zai/glm-4.5-air',
-    light: 'opencodego/deepseek-v4-flash',
-    moderate: 'opencodego/deepseek-v4-flash',
-    heavy: 'cc/claude-sonnet-5',
+    trivial: 'bailian/deepseek-v4.1-flash',
+    light: 'zai/glm-5.3-flash',
+    moderate: 'zai/glm-5.3',
+    heavy: 'cc/claude-sonnet-5-5',
     intensive: 'cx/gpt-6-sol',
     extreme: 'cc/claude-opus-5-5',
   },
-  // Balanced — cost/quality tradeoff (v0.5.2 aligned)
+  // Balanced — cost/quality tradeoff
   'balanced': {
-    trivial: 'zai/glm-4.5-air',
-    light: 'opencodego/deepseek-v4-flash',
-    moderate: 'opencodego/deepseek-v4-flash',
-    heavy: 'opencodego/deepseek-v4-pro',
-    intensive: 'opencodego/glm-5.1',
-    extreme: 'opencodego/qwen3.7-max',
+    trivial: 'bailian/deepseek-v4.1-flash',
+    light: 'zai/glm-5.3-flash',
+    moderate: 'zai/glm-5.3',
+    heavy: 'bailian/qwen3.8-max',
+    intensive: 'bailian/deepseek-v4-pro',
+    extreme: 'bailian/qwen3.7-max',
   },
   // OpenRouter benchmark
   'benchmark': {
@@ -122,18 +122,18 @@ export const DEFAULT_TIER_CONFIGS: Record<string, AgentTierConfig> = {
   },
   // CLI-first (Claude Code for heavy tiers)
   'claude-quality': {
-    trivial: 'qwen3.5-plus',
-    light: 'glm-4.7-flash',
-    moderate: 'cc/claude-sonnet-5',
-    heavy: 'cc/claude-sonnet-5',
-    intensive: 'cc/claude-sonnet-5',
+    trivial: 'bailian/qwen3.8-flash',
+    light: 'zai/glm-5.3-flash',
+    moderate: 'cc/claude-sonnet-5-5',
+    heavy: 'cc/claude-sonnet-5-5',
+    intensive: 'cc/claude-sonnet-5-5',
     extreme: 'cc/claude-opus-5-5',
   },
   // CLI-first (Codex for heavy tiers)
   'codex-heavy': {
-    trivial: 'qwen3.5-plus',
-    light: 'glm-4.7-flash',
-    moderate: 'qwen3-coder-plus',
+    trivial: 'bailian/qwen3.8-flash',
+    light: 'zai/glm-5.3-flash',
+    moderate: 'zai/glm-5.3',
     heavy: 'cx/gpt-6-luna',
     intensive: 'cx/gpt-6-sol',
     extreme: 'cx/gpt-6-astra',
@@ -146,15 +146,12 @@ export const DEFAULT_TIER_CONFIGS: Record<string, AgentTierConfig> = {
 // config can be validated against real catalogs without the (gitignored)
 // data/agent-registry.json being present (e.g. in CI).
 export const HTTP_PROVIDER_MODELS: Record<string, string[]> = {
-  bailian: ['qwen3.6-plus', 'qwen3.5-plus', 'qwen3-coder-plus', 'qwen3.6-max-preview', 'qwen4.6'],
-  zai: ['glm-4.5-air', 'glm-4.7', 'glm-4.7-flash', 'glm-5', 'glm-5-turbo', 'glm-5.1'],
+  bailian: ['qwen3.8-max', 'qwen3.8-flash', 'qwen3.7-max', 'qwen3.7-plus', 'qwen3.6-flash',
+    'glm-5.2', 'glm-5.3', 'deepseek-v4-pro', 'deepseek-v4-flash-0731', 'deepseek-v4.1-flash'],
+  zai: ['glm-4.5', 'glm-4.5-air', 'glm-4.6', 'glm-4.7', 'glm-5', 'glm-5-turbo', 'glm-5.1',
+    'glm-5.2', 'glm-5.3', 'glm-5.3-flash', 'glm-5.3-flashx'],
   openrouter: ['owl-alpha', 'glm-4.7-flash', 'qwen-plus', 'gemini-2.5-flash', 'claude-sonnet-4.6', 'claude-opus-4.6'],
-  opencodego: ['deepseek-v4-flash', 'deepseek-v4-pro', 'qwen3.7-plus', 'qwen3.7-max',
-    'qwen3.6-plus', 'kimi-k2.5', 'kimi-k2.6', 'glm-5', 'glm-5.1',
-    'minimax-m3', 'minimax-m2.7', 'mimo-v2.6-flash', 'mimo-v2.5', 'mimo-v2.5-pro'],
   ollama: ['qwen2.5:0.5b', 'qwen2.5:1.5b'],
-  'ollama-cloud': ['kimi-k2.5', 'kimi-k2.6', 'kimi-k2.7-code', 'glm-5.1', 'gemma3:12b',
-    'qwen3-vl:235b', 'minimax-m2.7', 'minimax-m3', 'deepseek-v4-pro'],
 };
 
 // ─── CLI Provider Defaults ─────────────────────────────
@@ -165,12 +162,8 @@ export const DEFAULT_CLI_PROVIDERS: Record<string, CliProviderEntry> = {
     name: 'Claude Code CLI',
     type: 'cli-agent',
     models: [
-      'cc/claude-sonnet-5',
+      'cc/claude-sonnet-5-5',
       'cc/claude-opus-5-5',
-      'cc/claude-fable-5-1',
-      'cc/claude-sonnet-4-6',
-      'cc/claude-opus-4-7',
-      'cc/claude-opus-4-8',
       'cc/claude-haiku-4-5',
     ],
     cliConfig: {
@@ -183,12 +176,8 @@ export const DEFAULT_CLI_PROVIDERS: Record<string, CliProviderEntry> = {
       maxTokens: 64_000,
       maxConcurrent: 1,
       modelAlias: {
-        'cc/claude-sonnet-5': 'sonnet-5',
-        'cc/claude-opus-5-5': 'opus',
-        'cc/claude-fable-5-1': 'fable',
-        'cc/claude-sonnet-4-6': 'claude-sonnet-4-6',
-        'cc/claude-opus-4-7': 'claude-opus-4-7',
-        'cc/claude-opus-4-8': 'claude-opus-4-8',
+        'cc/claude-sonnet-5-5': 'claude-sonnet-5-5',
+        'cc/claude-opus-5-5': 'claude-opus-5-5',
         'cc/claude-haiku-4-5': 'claude-haiku-4-5',
       },
       healthCheck: { command: '"${GATESWARM_ROOT:-.}"/bin/cli-health-probe.sh claude-cli', expectedExitCode: 0 },
@@ -209,10 +198,6 @@ export const DEFAULT_CLI_PROVIDERS: Record<string, CliProviderEntry> = {
       'cx/gpt-6-sol',
       'cx/gpt-6-luna',
       'cx/gpt-6-astra',
-      'cx/gpt-5.5-codex',
-      'cx/gpt-5.4-codex',
-      'cx/gpt-5.3-codex',
-      'cx/gpt-4.1',
     ],
     cliConfig: {
       command: 'codex',
@@ -227,10 +212,6 @@ export const DEFAULT_CLI_PROVIDERS: Record<string, CliProviderEntry> = {
         'cx/gpt-6-sol': 'gpt-6-sol',
         'cx/gpt-6-luna': 'gpt-6-luna',
         'cx/gpt-6-astra': 'gpt-6-astra',
-        'cx/gpt-5.5-codex': 'gpt-5.5',
-        'cx/gpt-5.4-codex': 'gpt-5.4',
-        'cx/gpt-5.3-codex': 'gpt-5.3',
-        'cx/gpt-4.1': 'gpt-4.1',
       },
       healthCheck: { command: '"${GATESWARM_ROOT:-.}"/bin/cli-health-probe.sh codex-cli', expectedExitCode: 0 },
       quota: {
@@ -246,7 +227,7 @@ export const DEFAULT_CLI_PROVIDERS: Record<string, CliProviderEntry> = {
     id: 'pi-agent',
     name: 'Pi Agent (local)',
     type: 'cli-agent',
-    models: ['pi/qwen3.5-plus', 'pi/glm-4.7-flash'],
+    models: ['pi/qwen3.8-flash', 'pi/glm-5.3-flash'],
     cliConfig: {
       command: 'node',
       argsTemplate: [process.env.HOME + '/.pi/agent/src/index.js', '-p', '{prompt}', '--model', '{model}', '--json'],
@@ -257,8 +238,8 @@ export const DEFAULT_CLI_PROVIDERS: Record<string, CliProviderEntry> = {
       maxTokens: 32_000,
       maxConcurrent: 2,
       modelAlias: {
-        'pi/qwen3.5-plus': 'qwen3.5-plus',
-        'pi/glm-4.7-flash': 'glm-4.7-flash',
+        'pi/qwen3.8-flash': 'qwen3.8-flash',
+        'pi/glm-5.3-flash': 'glm-5.3-flash',
       },
       healthCheck: { command: '"${GATESWARM_ROOT:-.}"/bin/cli-health-probe.sh pi-agent', expectedExitCode: 0 },
     },
@@ -267,7 +248,7 @@ export const DEFAULT_CLI_PROVIDERS: Record<string, CliProviderEntry> = {
     id: 'hermes-agent',
     name: 'Hermes Agent (self-improving)',
     type: 'cli-agent',
-    models: ['hm/glm-4.7', 'hm/glm-4.7-flash'],
+    models: ['hm/glm-5.3', 'hm/glm-5.3-flash'],
     cliConfig: {
       command: 'node',
       argsTemplate: ['/usr/local/lib/hermes-agent/src/agent.js', '-p', '{prompt}', '--model', '{model}', '--json'],
@@ -278,8 +259,8 @@ export const DEFAULT_CLI_PROVIDERS: Record<string, CliProviderEntry> = {
       maxTokens: 32_000,
       maxConcurrent: 2,
       modelAlias: {
-        'hm/glm-4.7': 'glm-4.7',
-        'hm/glm-4.7-flash': 'glm-4.7-flash',
+        'hm/glm-5.3': 'glm-5.3',
+        'hm/glm-5.3-flash': 'glm-5.3-flash',
       },
       healthCheck: { command: '"${GATESWARM_ROOT:-.}"/bin/cli-health-probe.sh hermes-agent', expectedExitCode: 0 },
     },
@@ -288,7 +269,7 @@ export const DEFAULT_CLI_PROVIDERS: Record<string, CliProviderEntry> = {
     id: 'openclaw-agent',
     name: 'OpenClaw Agent (sessions_spawn)',
     type: 'cli-agent',
-    models: ['oc/bailian/qwen3.5-plus', 'oc/zai/glm-4.7-flash'],
+    models: ['oc/bailian/qwen3.8-flash', 'oc/zai/glm-5.3-flash'],
     cliConfig: {
       command: 'openclaw',
       argsTemplate: ['agent', '--agent', 'main', '--model', '{model}', '--message', '{prompt}', '--timeout', '120', '--json'],
@@ -299,8 +280,8 @@ export const DEFAULT_CLI_PROVIDERS: Record<string, CliProviderEntry> = {
       maxTokens: 32_000,
       maxConcurrent: 3,
       modelAlias: {
-        'oc/bailian/qwen3.5-plus': 'bailian/qwen3.5-plus',
-        'oc/zai/glm-4.7-flash': 'zai/glm-4.7-flash',
+        'oc/bailian/qwen3.8-flash': 'bailian/qwen3.8-flash',
+        'oc/zai/glm-5.3-flash': 'zai/glm-5.3-flash',
       },
     },
   },
@@ -326,9 +307,9 @@ export class AgentRegistry {
     // Set up HTTP providers from env
     this.registerProvider({
       id: 'bailian',
-      name: 'Alibaba Bailian (Coding Plan)',
+      name: 'Bailian (Token Plan)',
       type: 'http-api',
-      baseUrl: process.env.BAILIAN_BASE || 'https://coding-intl.dashscope.aliyuncs.com/v1',
+      baseUrl: process.env.BAILIAN_BASE || 'https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1',
       apiKey: process.env.BAILIAN_KEY || process.env.OPENAI_API_KEY || '',
       models: HTTP_PROVIDER_MODELS.bailian,
     });
@@ -353,30 +334,12 @@ export class AgentRegistry {
     // });
 
     this.registerProvider({
-      id: 'opencodego',
-      name: 'OpenCode Go (Multi-model)',
-      type: 'http-api',
-      baseUrl: process.env.OPENCODEGO_BASE || 'https://opencode.ai/zen/go/v1',
-      apiKey: process.env.OPENCODEGO_KEY || '',
-      models: HTTP_PROVIDER_MODELS.opencodego,
-    });
-
-    this.registerProvider({
       id: 'ollama',
       name: 'Ollama (Local CPU)',
       type: 'http-api',
       baseUrl: process.env.OLLAMA_BASE || 'http://127.0.0.1:11434/v1',
       apiKey: process.env.OLLAMA_KEY || 'ollama',
       models: HTTP_PROVIDER_MODELS.ollama,
-    });
-
-    this.registerProvider({
-      id: 'ollama-cloud',
-      name: 'Ollama Cloud (Hosted)',
-      type: 'http-api',
-      baseUrl: process.env.OLLAMA_CLOUD_BASE || 'https://ollama.com/v1',
-      apiKey: process.env.OLLAMA_CLOUD_KEY || process.env.OLLAMA_API_KEY || '',
-      models: HTTP_PROVIDER_MODELS['ollama-cloud'],
     });
 
     // Load persisted state (providers + agents)
@@ -603,7 +566,7 @@ export class AgentRegistry {
   /**
    * Find the provider whose catalog lists this exact model name.
    * Providers are checked in registration order, so shared models
-   * (e.g. glm-5.1 on both zai and ollama-cloud) resolve deterministically
+   * (e.g. glm-5.1 on both zai and bailian) resolve deterministically
    * to the first registered provider that serves them.
    */
   findProviderForModel(model: string): string | null {
@@ -643,14 +606,8 @@ export class AgentRegistry {
     if (model.startsWith('zai/')) {
       return { providerId: 'zai', model: model.replace('zai/', '') };
     }
-    if (model.startsWith('opencodego/')) {
-      return { providerId: 'opencodego', model: model.replace('opencodego/', '') };
-    }
     if (model.startsWith('ollama/')) {
       return { providerId: 'ollama', model: model.replace('ollama/', '') };
-    }
-    if (model.startsWith('ollama-cloud/')) {
-      return { providerId: 'ollama-cloud', model: model.replace('ollama-cloud/', '') };
     }
 
     // No prefix — exact catalog lookup across registered providers. Any model a
@@ -664,10 +621,6 @@ export class AgentRegistry {
     // Z.AI models: glm-*
     if (model.startsWith('glm-')) {
       return { providerId: 'zai', model };
-    }
-    // OpenCodeGo models: deepseek-*, qwen3.7-*
-    if (model.startsWith('deepseek-') || model.startsWith('qwen3.7-')) {
-      return { providerId: 'opencodego', model };
     }
     // Bailian models: qwen*, kimi*, MiniMax*
     if (model.startsWith('qwen') || model.startsWith('kimi') || model.startsWith('MiniMax')) {

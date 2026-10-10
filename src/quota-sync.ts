@@ -5,9 +5,7 @@
  * then feeds the values into the consumption tracker.
  *
  * Supported providers:
- *   - OpenCode Go (opencode.ai dashboard)
  *   - ZAI (z.ai dashboard)
- *   - Ollama Cloud (ollama.com dashboard)
  *
  * Approach: Same as CodexBar — read the real provider dashboard values.
  * Runs as a periodic cron job (every 5 minutes).
@@ -31,7 +29,7 @@ export interface ProviderQuotaSnapshot {
   /** Windows */
   windows: {
     [windowName: string]: {
-      usedPct: number;       // 0-100
+      usedPct: number | null; // 0-100; null = plan limit unknown
       usedTokens?: number;   // if available
       limitTokens?: number;  // if available
       resetAt?: string;      // human-readable
@@ -64,6 +62,19 @@ class QuotaSyncManager {
       console.log(`🔄 Quota Sync: loaded ${Object.keys(this.state.snapshots).length} snapshots`);
     } catch {
       console.log('🔄 Quota Sync: starting fresh');
+    }
+  }
+
+  /** Re-read the sync file written by the external cron; returns true when it changed. */
+  async reload(): Promise<boolean> {
+    try {
+      const raw = await fs.readFile(SYNC_FILE, 'utf-8');
+      const next = JSON.parse(raw) as QuotaSyncState;
+      if (next.updatedAt === this.state.updatedAt && Object.keys(next.snapshots || {}).length === Object.keys(this.state.snapshots).length) return false;
+      this.state = next;
+      return true;
+    } catch {
+      return false;
     }
   }
 
@@ -101,7 +112,11 @@ class QuotaSyncManager {
   }> {
     const result: Record<string, any> = {};
 
+    // Data older than GATESWARM_QUOTA_MAX_AGE_MIN (default 15) is "unknown" (null), never 0 / never trusted.
+    const maxAgeMs = (Number(process.env.GATESWARM_QUOTA_MAX_AGE_MIN) > 0 ? Number(process.env.GATESWARM_QUOTA_MAX_AGE_MIN) : 15) * 60_000;
     for (const snapshot of Object.values(this.state.snapshots)) {
+      const t = Date.parse(String(snapshot.syncedAt ?? '').replace('+00:00Z', 'Z'));
+      if (Number.isNaN(t) || Date.now() - t > maxAgeMs) continue;
       const w = snapshot.windows;
       result[snapshot.provider] = {
         fiveHourUsedPct: w['5h']?.usedPct ?? w['session']?.usedPct ?? null,
@@ -146,25 +161,6 @@ export const quotaSync = new QuotaSyncManager();
  * dashboard, extract the values, and call quotaSync.updateSnapshot().
  */
 export const SCRAPE_CONFIGS = {
-  opencodego: {
-    name: 'OpenCode Go',
-    url: 'https://opencode.ai/zen',
-    loginRequired: true,
-    selectors: {
-      '5h': {
-        barSelector: '[data-quota="5h"], .quota-bar:nth-child(1)',
-        textSelector: '[data-quota="5h-percentage"], .quota-bar:nth-child(1) .percentage',
-      },
-      weekly: {
-        barSelector: '[data-quota="weekly"], .quota-bar:nth-child(2)',
-        textSelector: '[data-quota="weekly-percentage"], .quota-bar:nth-child(2) .percentage',
-      },
-      monthly: {
-        barSelector: '[data-quota="monthly"], .quota-bar:nth-child(3)',
-        textSelector: '[data-quota="monthly-percentage"], .quota-bar:nth-child(3) .percentage',
-      },
-    },
-  },
   zai: {
     name: 'ZAI',
     url: 'https://z.ai/dashboard',
@@ -177,21 +173,6 @@ export const SCRAPE_CONFIGS = {
       '5h': {
         barSelector: '[data-quota="5h"], .quota-section:nth-child(2)',
         textSelector: '[data-quota="5h-percentage"]',
-      },
-    },
-  },
-  'ollama-cloud': {
-    name: 'Ollama Cloud',
-    url: 'https://ollama.com/dashboard',
-    loginRequired: true,
-    selectors: {
-      session: {
-        barSelector: '[data-quota="session"], .session-quota',
-        textSelector: '[data-quota="session-percentage"]',
-      },
-      weekly: {
-        barSelector: '[data-quota="weekly"], .weekly-quota',
-        textSelector: '[data-quota="weekly-percentage"]',
       },
     },
   },

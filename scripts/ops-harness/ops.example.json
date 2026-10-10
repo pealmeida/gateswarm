@@ -1,0 +1,9 @@
+{
+  "ssh_aliases": ["my-ssh-alias"],
+  "docker_exec_containers": [],
+  "curl_allowed_hosts": [],
+  "step_limit": 20,
+  "command_timeout": 60,
+  "wall_time_limit": 150,
+  "extra_deny_patterns": []
+}

@@ -153,7 +153,7 @@ The six built-in default tiers are defined in `DEFAULT_V04_CONFIG`; deployments 
 | **trivial** | 0.000000 – 0.196029 | deepseek-v4-flash | opencodego | 256 | — |
 | **light** | 0.196029 – 0.264209 | deepseek-v4-flash | opencodego | 512 | — |
 | **moderate** | 0.264209 – 0.324887 | glm-5 | zai | 2048 | — |
-| **heavy** | 0.324887 – 0.365850 | cc/claude-sonnet-5 | claude-cli | 4096 | ✓ |
+| **heavy** | 0.324887 – 0.365850 | cc/claude-sonnet-5-5 | claude-cli | 4096 | ✓ |
 | **intensive** | 0.365850 – 0.523832 | cx/gpt-6-sol | codex-cli | 4096 | ✓ |
 | **extreme** | 0.523832 – 1.000000 | cc/claude-opus-5-5 | claude-cli | 8192 | ✓ |
 
@@ -168,8 +168,8 @@ Every tier has two model assignments — one for **acting** (default: implementa
 | **trivial** | mimo-v2.6-flash | opencodego | (uses act) | — |
 | **light** | deepseek-v4-flash | opencodego | (uses act) | — |
 | **moderate** | glm-5 | zai | glm-4.7-flash | zai |
-| **heavy** | cc/claude-sonnet-5 | claude-cli | glm-5 | zai |
-| **intensive** | cx/gpt-6-sol | codex-cli | cc/claude-sonnet-5 | claude-cli |
+| **heavy** | cc/claude-sonnet-5-5 | claude-cli | glm-5 | zai |
+| **intensive** | cx/gpt-6-sol | codex-cli | cc/claude-sonnet-5-5 | claude-cli |
 | **extreme** | cc/claude-opus-5-5 | claude-cli | cc/claude-opus-5-5 | claude-cli |
 
 Auto-detection (`detectIntentMode`) scores stem-aware keyword hits plus intent patterns. Override explicitly with `"mode": "plan"` / `"mode": "act"` in the request body, or the `X-Mode` request header.
@@ -449,7 +449,7 @@ Run via `npx tsx src/gateswarm-cli.ts <command>` or alias as `gateswarm`.
 | Z.AI (GLM Coding Lite) | `zai` | glm-4.7-flash, glm-4.7, glm-5, glm-5.1 |
 | Ollama Cloud | `ollama-cloud` | minimax-m2.7, minimax-m3, kimi-k2.6, kimi-k2.7-code, deepseek-v4-pro |
 | Ollama (local, optional) | `ollama` | qwen2.5:0.5b |
-| Alibaba Bailian | `bailian` | qwen3.5-plus, qwen3.6-plus, qwen3-coder-plus |
+| Bailian (Token Plan) | `bailian` | qwen3.8-max, qwen3.8-flash, qwen3.7-max, qwen3.7-plus, qwen3.6-flash, glm-5.2, glm-5.3, deepseek-v4-pro, deepseek-v4-flash-0731, deepseek-v4.1-flash |
 | OpenCodeGo | `opencodego` | qwen3.7-plus, qwen3.7-max, deepseek-v4-flash/pro, kimi |
 
 > Provider model catalogs are validated against the routing config by

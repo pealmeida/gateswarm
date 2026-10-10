@@ -1,0 +1,5 @@
+ops.local.json
+logs/
+.venv/
+__pycache__/
+.pytest_cache/

@@ -36,7 +36,6 @@ function inferProvider(model: string): string | null {
   if (model.startsWith('openrouter/')) return 'openrouter';
   if (model.startsWith('bailian/')) return 'bailian';
   if (model.startsWith('zai/')) return 'zai';
-  if (model.startsWith('opencodego/')) return 'opencodego';
   // Exact catalog lookup (mirrors agentRegistry.findProviderForModel): any model a
   // provider catalog lists resolves to that provider without a bespoke prefix rule.
   for (const [pid, models] of Object.entries(HTTP_PROVIDER_MODELS)) {
@@ -46,7 +45,6 @@ function inferProvider(model: string): string | null {
     if (p.models.includes(model)) return pid;
   }
   if (model.startsWith('glm-')) return 'zai';
-  if (model.startsWith('deepseek-') || model.startsWith('qwen3.7-')) return 'opencodego';
   if (model.startsWith('qwen') || model.startsWith('kimi') || model.startsWith('MiniMax')) return 'bailian';
   return null; // unknown — resolveModel would default to bailian
 }

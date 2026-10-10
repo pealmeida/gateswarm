@@ -130,7 +130,7 @@ npx tsx src/gateswarm-cli.ts status
 npx tsx src/gateswarm-cli.ts models
 
 # Set model for tier
-npx tsx src/gateswarm-cli.ts model intensive qwen3.6-plus bailian
+npx tsx src/gateswarm-cli.ts model intensive qwen3.8-max bailian
 
 # Toggle reasoning
 npx tsx src/gateswarm-cli.ts reasoning extreme on

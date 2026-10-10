@@ -32,12 +32,12 @@
     "extreme":    [0.4611, 1.00]
   },
   "tier_models": {
-    "trivial":   {"model": "glm-4.5-air",    "provider": "zai",     "max_tokens": 256},
-    "light":     {"model": "glm-4.7-flash",   "provider": "zai",     "max_tokens": 512},
-    "moderate":  {"model": "qwen3-coder-plus","provider": "bailian", "max_tokens": 2048},
-    "heavy":     {"model": "glm-5.1",         "provider": "zai",     "max_tokens": 2048},
-    "intensive": {"model": "qwen3.5-plus",    "provider": "bailian", "max_tokens": 4096},
-    "extreme":   {"model": "qwen3.6-plus",    "provider": "bailian", "max_tokens": 8192}
+    "trivial":   {"model": "glm-5.3-flash",  "provider": "zai",     "max_tokens": 1024},
+    "light":     {"model": "glm-5.3-flash",   "provider": "zai",     "max_tokens": 512},
+    "moderate":  {"model": "qwen3.8-flash",  "provider": "bailian", "max_tokens": 2048},
+    "heavy":     {"model": "qwen3.8-max",    "provider": "bailian",     "max_tokens": 2048},
+    "intensive": {"model": "qwen3.7-max",    "provider": "bailian", "max_tokens": 4096},
+    "extreme":   {"model": "qwen3.8-max",    "provider": "bailian", "max_tokens": 8192}
   },
   "score_statistics": {
     "min": 0.129,
