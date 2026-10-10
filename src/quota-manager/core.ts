@@ -140,7 +140,7 @@ export function computeStates(sync: SyncFile | null | undefined, now: number, op
 export interface CalibrationRecord {
   schema_version: 'quota-calibration.v1';
   ts: string;
-  source: 'battery' | 'survey';
+  source: 'battery' | 'survey' | 'live';
   battery?: string;
   provider: string;
   window: WindowName;

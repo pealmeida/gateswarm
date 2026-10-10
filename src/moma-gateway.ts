@@ -97,7 +97,9 @@ import { providerConcurrency } from './provider-concurrency.js';
 import type { LoadBalanceDecision } from './provider-quota.js';
 import { consumptionTracker } from './consumption-tracker.js';
 import { quotaSync } from './quota-sync.js';
-import { getManagerView, paths as quotaManagerPaths } from './quota-manager/index.js';
+import { getManagerView, paths as quotaManagerPaths, nativeQuota } from './quota-manager/index.js';
+import { detectIntent, loadCapabilities, planIntent, parseMode, runDeterministic, runMultimodal, summarize as summarizeModalities, listDeterministicHandlers } from './modality/index.js';
+import { detectFlags as detectRiskFlags } from './jev/pre-delegation.js';
 import { getCliProvidersEnabled } from './v04-config.js';
 import { getUnusableProviderBodyReason, providerFailureKindForHttp, providerHealth } from './adapters/provider-health.js';
 import { turboQuantCompress, MODEL_CONTEXT_WINDOWS } from './turboquant-compressor.js';
@@ -1308,6 +1310,7 @@ async function forwardStreamingWithFallback(options: {
         const kind = providerFailureKindForHttp(response.status, errorBody);
         logUpstreamFailure(target.providerId, response.status, errorBody);
         providerHealth.recordFailure(target.providerId, kind, target.label, upstreamFailureHealthDetail(target.providerId, response.status, errorBody), healthAttempt);
+        nativeQuota.observe(target.providerId, false, null, tier);
         continue;
       }
 
@@ -1316,6 +1319,7 @@ async function forwardStreamingWithFallback(options: {
         const completed = await pipeSseResponse(response, res, target.model, () => createVoteRequest(agent.id, promptText, tier, confidence));
         if (completed) {
           providerHealth.recordSuccess(target.providerId, healthAttempt);
+          nativeQuota.observe(target.providerId, true, Date.now() - started, tier);
           recordStreamOutcome(target, 'success', started);
         } else {
           providerHealth.recordFailure(target.providerId, 'transport', target.label, 'stream read failure', healthAttempt);
@@ -1337,6 +1341,7 @@ async function forwardStreamingWithFallback(options: {
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'Access-Control-Allow-Origin': '*' });
       writeJsonCompletionAsSse(res, data, target.model, vote);
       providerHealth.recordSuccess(target.providerId, healthAttempt);
+      nativeQuota.observe(target.providerId, true, Date.now() - started, tier);
       recordStreamOutcome(target, 'success', started);
       return;
     } catch (error: any) {
@@ -1482,6 +1487,58 @@ async function forwardToProvider(
 
 // ─── Route Handlers ────────────────────────────────────
 
+// ─── Modality / deterministic routing (GATESWARM_MODALITY_ROUTING, GATESWARM_DETERMINISTIC_ROUTING; both default off) ───
+const modalityCaps = loadCapabilities();
+const providerConfigured = (pid: string): boolean => !!(agentRegistry.getProviderBaseUrl(pid) && agentRegistry.getProviderApiKey(pid));
+function modalityModes() { return { modality: parseMode(process.env.GATESWARM_MODALITY_ROUTING), deterministic: parseMode(process.env.GATESWARM_DETERMINISTIC_ROUTING) }; }
+function logModality(row: Record<string, unknown>): void {
+  const f = join(process.env.GATESWARM_ROOT ?? '.', 'data', 'modality-routing.jsonl'); // never contains prompt text
+  void import('node:fs').then((fs) => fs.promises.mkdir(dirname(f), { recursive: true }).then(() => fs.promises.appendFile(f, JSON.stringify(row) + '\n'))).catch(() => undefined);
+}
+/** Returns true when the request was fully answered here (deterministic / multimodal / clear error). Fail-open otherwise. */
+async function handleModalityRouting(req: IncomingMessage, res: ServerResponse, body: any, promptText: string, agent: AgentConfig): Promise<boolean> {
+  const modes = modalityModes();
+  if (modes.modality === 'off' && modes.deterministic === 'off') return false;
+  try {
+    const intent = detectIntent(body, req.headers as Record<string, unknown>, promptText);
+    const plan = planIntent(intent, {
+      modalityMode: modes.modality, deterministicMode: modes.deterministic, capabilities: modalityCaps, isConfigured: providerConfigured,
+      bandOf: (p) => nativeQuota.bandOf(p), breakerOpen: (p) => providerQuota.isBreakerOpen(p),
+    });
+    const planned = plan.kind === 'llm' ? 'llm' : plan.kind === 'deterministic' ? `deterministic:${plan.handler}` : plan.kind === 'multimodal' ? `multimodal:${plan.target.provider}/${plan.target.model}` : `error:${plan.code}`;
+    const shadow = (intent.deterministic && modes.deterministic === 'shadow') || (intent.output !== 'text' && modes.modality === 'shadow');
+    const live = (plan.kind === 'deterministic' && modes.deterministic === 'on') || (plan.kind !== 'deterministic' && plan.kind !== 'llm' && modes.modality === 'on');
+    if (plan.kind !== 'llm' || intent.via !== 'none') logModality({ ts: new Date().toISOString(), agent: agent.id, output: intent.output, via: intent.via, planned, live, reasons: plan.reasons });
+    if (!live) { if (shadow && plan.kind !== 'llm') res.setHeader('X-Modality-Shadow', planned.slice(0, 120)); return false; }
+    res.setHeader('X-Modality-Route', planned.slice(0, 120));
+    const chatWrap = (content: string, extra: Record<string, unknown>) => ({ id: `chatcmpl-mod-${Date.now()}`, object: 'chat.completion', created: Math.floor(Date.now() / 1000), model: String(extra.model ?? 'gateswarm-modality'), choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' }], usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 }, gateswarm: extra });
+    if (plan.kind === 'error') { jsonResponse(res, plan.status, { error: { message: plan.message, type: `modality_${plan.code}` } }); return true; }
+    if (plan.kind === 'deterministic') {
+      const r = runDeterministic(plan.handler, intent.deterministic!.input);
+      if (!r.ok) { jsonResponse(res, 422, { error: { message: `deterministic handler ${plan.handler}: ${r.error}`, type: 'deterministic_error' } }); return true; }
+      res.setHeader('X-Routed-Model', `deterministic/${plan.handler}`);
+      jsonResponse(res, 200, chatWrap(r.output ?? '', { model: `deterministic/${plan.handler}`, handler: plan.handler, llm: false }));
+      return true;
+    }
+    if (plan.kind === 'multimodal') {
+      for (const target of [plan.target, ...plan.alternatives]) {
+        const baseUrl = agentRegistry.getProviderBaseUrl(target.provider); const apiKey = agentRegistry.getProviderApiKey(target.provider);
+        if (!baseUrl || !apiKey) continue;
+        const r = await runMultimodal(target, intent, { baseUrl, apiKey }, body);
+        nativeQuota.observe(target.quotaProvider ?? target.provider, r.ok, r.latencyMs, `modality:${intent.output}`);
+        if (r.ok) {
+          res.setHeader('X-Routed-Model', `${target.provider}/${target.model}`);
+          jsonResponse(res, 200, chatWrap(`[${r.kind} generated by ${target.model}; see gateswarm.data]`, { model: `${target.provider}/${target.model}`, modality: r.kind, data: r.data, contentType: r.contentType }));
+          return true;
+        }
+      }
+      jsonResponse(res, 502, { error: { message: `multimodal providers failed for ${intent.output} (tried ${[plan.target, ...plan.alternatives].map((t) => t.provider + '/' + t.model).join(', ')})`, type: 'modality_upstream_error' } });
+      return true;
+    }
+    return false;
+  } catch { return false; } // fail-open: normal LLM routing
+}
+
 async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, agent: AgentConfig): Promise<void> {
   // Keep routing decisions stable while async selection/fallback work is in
   // flight; getConfig() can otherwise hot-reload between individual attempts.
@@ -1521,6 +1578,8 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
   }
 
 
+
+  if (await handleModalityRouting(req, res, body, promptText, agent)) return;
 
 // Mode override: body.mode or X-Mode header; else auto-detect
   let modeOverride: IntentMode | null = null;
@@ -1780,7 +1839,23 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
 
   // v0.7.0: quota-band effective tier row (null when flag OFF → static cfg)
   const routingTierRow = await getRoutingTierModel(effort);
-  const tierFallbackModels = fallbackModelsForTier(effort, cfg.tier_models, routingTierRow);
+  let tierFallbackModels = fallbackModelsForTier(effort, cfg.tier_models, routingTierRow);
+
+  // Native dynamic quota routing (GATESWARM_DYNAMIC_ROUTING=off|shadow|on, default off). shadow = compute + log only.
+  // Skipped for plan mode, vision/audio (capability constraints) and when the flag is off. Fail-open to the static chain.
+  let dynamicReason = '';
+  if (activeMode !== 'plan' && !requestModalities.vision && !requestModalities.audio && nativeQuota.mode !== 'off') {
+    const highRisk = detectRiskFlags(promptText).some((f) => f === 'auth_session' || f === 'migration_rls' || f === 'secrets' || f === 'production');
+    const dyn = nativeQuota.decide({
+      tier: effort, primary: { provider: providerId, model }, fallbacks: tierFallbackModels, highRisk,
+      breakerOpen: (pid) => providerQuota.isBreakerOpen(pid),
+    });
+    dynamicReason = dyn.header ? `dyn[${dyn.mode}]: ${dyn.header}` : '';
+    if (dyn.applied && dyn.result?.changed) {
+      console.log(`🧭 [${agent.name}] dynamic routing ${effort}: ${providerId}/${model} → ${dyn.primary.provider}/${dyn.primary.model} (${dyn.header})`);
+      providerId = dyn.primary.provider; model = dyn.primary.model; tierFallbackModels = dyn.fallbacks;
+    }
+  }
 
   // v0.5.3: plan mode override (uses effective band row when flag ON)
   const rawTier = routingTierRow ?? cfg.tier_models[effort];
@@ -2324,6 +2399,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
           logUpstreamFailure(target.providerId, resp.status, errorText);
           providerQuota.noteUpstreamFailure(target.providerId, resp.status, errorText);
           quotaAdvisorObserveFailure(target.providerId, resp.status, errorText, interactionId);
+          nativeQuota.observe(target.providerId, false, null, effort);
         }
         const healthDetail = !resp.ok
           ? upstreamFailureHealthDetail(target.providerId, resp.status, errorText)
@@ -2424,6 +2500,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
       // ─── v0.5.3: Provider Quota tracking ───────────
       providerQuota.recordRequest(actualTarget.providerId, tokensIn + tokensOut);
       providerQuota.recordSuccess(actualTarget.providerId);
+      nativeQuota.observe(actualTarget.providerId, true, responseLatency, effort);
 
       // ─── v0.5.3: Consumption Tracker (5h/weekly/monthly) ───
       const responseLatency2 = latency || (Date.now() - startTime);
@@ -2518,7 +2595,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
       res.setHeader('X-Routed-Model', `${actualTarget.providerId}/${actualTarget.model}`);
       res.setHeader('X-Routed-Tier', effort);
       res.setHeader('X-Routing-Method', decision.source || 'request');
-      if (decision.reason) res.setHeader('X-Routing-Reason', decision.reason);
+      if (decision.reason || dynamicReason) res.setHeader('X-Routing-Reason', [decision.reason, dynamicReason].filter(Boolean).join(' ; ').slice(0, 400));
       
       // v0.7.0: Quota-band observability headers
       const quotaBandSelection = consumptionIntelligence.getQuotaBandSelection();
@@ -2769,6 +2846,11 @@ async function init() {
   await consumptionTracker.initialize();
   await quotaSync.initialize();
 
+  // Native quota router: in-memory quota state with internal refresh timer (fail-open) + optimizer proposals.
+  nativeQuota.setTierChains(() => Object.fromEntries(Object.entries(getConfig().tier_models).map(([t, m]) => [t, { primary: { provider: m.provider, model: m.model }, fallbacks: (m.fallback_models ?? []).map((f) => ({ provider: f.provider, model: f.model })) }])));
+  await nativeQuota.start();
+  console.log(`🧭 [QuotaRouter] dynamic routing mode=${nativeQuota.mode}`);
+
   // v0.5.5: Feed real dashboard quota data into provider health scoring on startup
   const realQuotaData = quotaSync.getRealQuotaData();
   if (Object.keys(realQuotaData).length > 0) {
@@ -2881,6 +2963,7 @@ async function init() {
           feedback: 'enabled',
           llmJudge: getConfig().feedback_loop.llmJudgeModel,
           quotaBreakers: providerQuota.getOpenBreakers(),
+          dynamicRouting: (() => { const q = nativeQuota.snapshot(); return { mode: q.mode, ageSec: q.ageSec, refreshError: q.lastRefreshError, decisions: q.decisions.total, changed: q.decisions.changed, avgLatencyUs: q.decisions.avgLatencyUs, providers: q.providers.map((p) => ({ provider: p.provider, band: p.band, pct: p.maxUsedPct, confidence: p.confidence })) }; })(),
           concurrency: providerConcurrency.snapshot(),
           configReload: getConfigReloadHealth(),
           scorerHealth: getScorerHealth(),
@@ -3175,7 +3258,11 @@ async function init() {
       if (url.pathname === '/v1/quota-manager' && method === 'GET') {
         const view = await getManagerView(quotaManagerPaths(process.env.GATESWARM_ROOT));
         const breakers = providerQuota.getAllQuotas().filter((q) => q.throttled).map((q) => q.provider);
-        return jsonResponse(res, 200, { ...view, circuitBreakerOpen: breakers });
+        return jsonResponse(res, 200, { ...view, circuitBreakerOpen: breakers, native: nativeQuota.snapshot(), optimizer: nativeQuota.getOptimizerProposal() });
+      }
+
+      if (url.pathname === '/v1/modality' && method === 'GET') {
+        return jsonResponse(res, 200, { modes: modalityModes(), outputs: summarizeModalities(modalityCaps, providerConfigured).map((o) => ({ modality: o.modality, status: o.status, note: o.note, active: o.active.map((c) => ({ provider: c.provider, model: c.model, endpoint: c.endpoint, source: c.source })) })), deterministicHandlers: listDeterministicHandlers() });
       }
 
       // Quota analysis (report + proposed tier_models diff; NEVER applied). Cached 120s so it cannot spam Jev.

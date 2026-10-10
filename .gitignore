@@ -108,3 +108,6 @@ data/quota-manager-*.json
 data/quota-manager/
 data/quota-manager.*
 data/quota-calibration.jsonl
+data/dynamic-routing.jsonl
+data/modality-routing.jsonl
+data/quota-manager/optimizer-proposal.json
