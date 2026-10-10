@@ -9,8 +9,8 @@ GateSwarm routing defaults in `v04_config.json`, `src/v04-config.ts`, `calibrati
 | trivial (`max_tokens` 1024) | bailian `deepseek-v4.1-flash` | — | zai `glm-5.3-flash`; bailian `qwen3.8-flash`; ollama `qwen2.5:1.5b` |
 | light | zai `glm-5.3-flash` | — | bailian `deepseek-v4-flash-0731`, `qwen3.8-flash` |
 | moderate | zai `glm-5.3` | bailian `deepseek-v4.1-flash` | bailian `qwen3.8-flash`, `glm-5.3`; zai `glm-5.1` |
-| heavy | claude-cli `cc/claude-sonnet-5` | zai `glm-5.3` | bailian `qwen3.8-max`, `deepseek-v4-pro`; codex-cli `cx/gpt-6-luna` |
-| intensive | codex-cli `cx/gpt-6-sol` | `cc/claude-sonnet-5` | `cc/claude-sonnet-5`; bailian `qwen3.8-max`; `cx/gpt-6-luna` |
+| heavy | claude-cli `cc/claude-sonnet-5-5` | zai `glm-5.3` | bailian `qwen3.8-max`, `deepseek-v4-pro`; codex-cli `cx/gpt-6-luna` |
+| intensive | codex-cli `cx/gpt-6-sol` | `cc/claude-sonnet-5-5` | `cc/claude-sonnet-5-5`; bailian `qwen3.8-max`; `cx/gpt-6-luna` |
 | extreme | claude-cli `cc/claude-opus-5-5` | `cc/claude-opus-5-5` (same as act) | `cx/gpt-6-astra`, `cx/gpt-6-sol`; bailian `qwen3.8-max` |
 
 The Bailian, Z.AI, Claude and Codex reasoning models always think: with a small `max_tokens` the visible answer can come back empty, which is why the trivial tier uses 1024.
@@ -31,7 +31,7 @@ Text models: `qwen3.8-max`, `qwen3.8-flash`, `qwen3.7-max`, `qwen3.7-plus`, `qwe
 
 | GateSwarm ID | Claude CLI name |
 |--------------|-----------------|
-| `cc/claude-sonnet-5` | `sonnet-5` |
+| `cc/claude-sonnet-5-5` | `claude-sonnet-5-5` |
 | `cc/claude-opus-5-5` | `opus` |
 | `cc/claude-haiku-4-5` | `claude-haiku-4-5` |
 

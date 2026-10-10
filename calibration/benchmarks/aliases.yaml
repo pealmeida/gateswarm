@@ -15,7 +15,7 @@ models:
         - { alias: claude-opus-5.5-max, subsets: [webdev], match: variant }
       aa:
         - { slug: claude-opus-5-5, variant: "max with fallback", match: variant }
-  cc/claude-sonnet-5:
+  cc/claude-sonnet-5-5:
     providers: [claude-cli]
     sources:
       lmarena:

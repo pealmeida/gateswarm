@@ -98,7 +98,7 @@ export const DEFAULT_TIER_CONFIGS: Record<string, AgentTierConfig> = {
     trivial: 'bailian/deepseek-v4.1-flash',
     light: 'zai/glm-5.3-flash',
     moderate: 'zai/glm-5.3',
-    heavy: 'cc/claude-sonnet-5',
+    heavy: 'cc/claude-sonnet-5-5',
     intensive: 'cx/gpt-6-sol',
     extreme: 'cc/claude-opus-5-5',
   },
@@ -124,9 +124,9 @@ export const DEFAULT_TIER_CONFIGS: Record<string, AgentTierConfig> = {
   'claude-quality': {
     trivial: 'bailian/qwen3.8-flash',
     light: 'zai/glm-5.3-flash',
-    moderate: 'cc/claude-sonnet-5',
-    heavy: 'cc/claude-sonnet-5',
-    intensive: 'cc/claude-sonnet-5',
+    moderate: 'cc/claude-sonnet-5-5',
+    heavy: 'cc/claude-sonnet-5-5',
+    intensive: 'cc/claude-sonnet-5-5',
     extreme: 'cc/claude-opus-5-5',
   },
   // CLI-first (Codex for heavy tiers)
@@ -162,7 +162,7 @@ export const DEFAULT_CLI_PROVIDERS: Record<string, CliProviderEntry> = {
     name: 'Claude Code CLI',
     type: 'cli-agent',
     models: [
-      'cc/claude-sonnet-5',
+      'cc/claude-sonnet-5-5',
       'cc/claude-opus-5-5',
       'cc/claude-haiku-4-5',
     ],
@@ -176,7 +176,7 @@ export const DEFAULT_CLI_PROVIDERS: Record<string, CliProviderEntry> = {
       maxTokens: 64_000,
       maxConcurrent: 1,
       modelAlias: {
-        'cc/claude-sonnet-5': 'claude-sonnet-5',
+        'cc/claude-sonnet-5-5': 'claude-sonnet-5-5',
         'cc/claude-opus-5-5': 'claude-opus-5-5',
         'cc/claude-haiku-4-5': 'claude-haiku-4-5',
       },

@@ -70,7 +70,7 @@
           ]
         },
         "heavy": {
-          "model": "cc/claude-sonnet-5",
+          "model": "cc/claude-sonnet-5-5",
           "provider": "claude-cli",
           "max_tokens": 4096,
           "enable_thinking": true,
@@ -98,13 +98,13 @@
           "provider": "codex-cli",
           "max_tokens": 4096,
           "enable_thinking": true,
-          "plan_model": "cc/claude-sonnet-5",
+          "plan_model": "cc/claude-sonnet-5-5",
           "plan_provider": "claude-cli",
           "plan_max_tokens": 2048,
           "plan_enable_thinking": true,
           "fallback_models": [
             {
-              "model": "cc/claude-sonnet-5",
+              "model": "cc/claude-sonnet-5-5",
               "provider": "claude-cli"
             },
             {
@@ -215,7 +215,7 @@
           ]
         },
         "heavy": {
-          "model": "cc/claude-sonnet-5",
+          "model": "cc/claude-sonnet-5-5",
           "provider": "claude-cli",
           "max_tokens": 4096,
           "enable_thinking": true,
@@ -243,7 +243,7 @@
           "provider": "codex-cli",
           "max_tokens": 4096,
           "enable_thinking": true,
-          "plan_model": "cc/claude-sonnet-5",
+          "plan_model": "cc/claude-sonnet-5-5",
           "plan_provider": "claude-cli",
           "plan_max_tokens": 2048,
           "plan_enable_thinking": true,
