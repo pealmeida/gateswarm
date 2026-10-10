@@ -6,14 +6,16 @@ GateSwarm routing defaults in `v04_config.json`, `src/v04-config.ts`, `calibrati
 
 | Tier | Primary (act) | Plan | Main fallbacks |
 |------|---------------|------|----------------|
-| trivial (`max_tokens` 1024) | bailian `deepseek-v4.1-flash` | — | zai `glm-5.3-flash`; bailian `qwen3.8-flash`; ollama `qwen2.5:1.5b` |
-| light | zai `glm-5.3-flash` | — | bailian `deepseek-v4-flash-0731`, `qwen3.8-flash` |
-| moderate | zai `glm-5.3` | bailian `deepseek-v4.1-flash` | bailian `qwen3.8-flash`, `glm-5.3`; zai `glm-5.1` |
-| heavy | claude-cli `cc/claude-sonnet-5-5` | zai `glm-5.3` | bailian `qwen3.8-max`, `deepseek-v4-pro`; codex-cli `cx/gpt-6-luna` |
+| trivial (`max_tokens` 1024) | bailian `deepseek-v4.1-flash` | — | bailian `qwen3.8-flash`; zai `glm-5.3-flash`; ollama `qwen2.5:1.5b` |
+| light (`max_tokens` 1024) | bailian `deepseek-v4-flash-0731` | — | zai `glm-5.3-flash`; bailian `qwen3.8-flash` |
+| moderate | bailian `glm-5.3` | bailian `deepseek-v4.1-flash` | bailian `qwen3.8-flash`; zai `glm-5.3` (prefer off-peak); bailian `qwen3.7-plus` |
+| heavy | claude-cli `cc/claude-sonnet-5-5` | bailian `qwen3.8-max` | bailian `qwen3.8-max`, `deepseek-v4-pro`; codex-cli `cx/gpt-6-luna` |
 | intensive | codex-cli `cx/gpt-6-sol` | `cc/claude-sonnet-5-5` | `cc/claude-sonnet-5-5`; bailian `qwen3.8-max`; `cx/gpt-6-luna` |
-| extreme | claude-cli `cc/claude-opus-5-5` | `cc/claude-opus-5-5` (same as act) | `cx/gpt-6-astra`, `cx/gpt-6-sol`; bailian `qwen3.8-max` |
+| extreme | claude-cli `cc/claude-opus-5-5` | `cc/claude-opus-5-5` (same as act) | `cx/gpt-6-sol`; bailian `qwen3.8-max`; `cx/gpt-6-astra` (last resort) |
 
 The Bailian, Z.AI, Claude and Codex reasoning models always think: with a small `max_tokens` the visible answer can come back empty, which is why the trivial tier uses 1024.
+
+Quota-aware balancing: Bailian (large, monthly Token Plan quota) carries trivial/light/moderate; Z.AI (small 5h/weekly credit window) is a reserve; Claude Code and Codex are reserved for heavy/intensive/extreme. The self-eval judge (`feedback_loop.llmJudgeModel`) is `bailian/qwen3.8-flash` so it does not spend Z.AI credits. Plan limits are plan-dependent and configurable; check your own subscription.
 
 Quota bands (`quota_band_matrices.json`) reuse the same model IDs; load-shedding now promotes Bailian models instead of Ollama Cloud / OpenCode Go.
 

@@ -357,7 +357,7 @@ describe('DoD Gap B: Flag OFF Observability', () => {
       const moderate = result.effectiveTierModels.moderate;
       expect(moderate).toBeDefined();
       expect(moderate.model).toBe('glm-5.3');
-      expect(moderate.provider).toBe('zai');
+      expect(moderate.provider).toBe('bailian');
       
       // Verify bit-identical to v04_config.json baseline
       const heavy = result.effectiveTierModels.heavy;

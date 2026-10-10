@@ -136,7 +136,7 @@ export const DEFAULT_V04_CONFIG: V04Config = {
     retrainAfterInteractions: 500,
     minSamplesPerTier: 50,
     maxWeightChangePct: 0.20,
-    llmJudgeModel: 'zai/glm-4.7',
+    llmJudgeModel: 'bailian/qwen3.8-flash',
     llmJudgeSamplingRate: 0.10,
     cascadeRetraining: false, // ordinal cascade gate-failed 2026-07-12; see ensemble._weights_note
     cascadeRetrainingSource: 'real_feedback_labels',

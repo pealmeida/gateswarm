@@ -68,12 +68,12 @@
       "enable_thinking": false,
       "fallback_models": [
         {
-          "model": "glm-5.3-flash",
-          "provider": "zai"
-        },
-        {
           "model": "qwen3.8-flash",
           "provider": "bailian"
+        },
+        {
+          "model": "glm-5.3-flash",
+          "provider": "zai"
         },
         {
           "model": "qwen2.5:1.5b",
@@ -82,14 +82,14 @@
       ]
     },
     "light": {
-      "model": "glm-5.3-flash",
-      "provider": "zai",
-      "max_tokens": 512,
+      "model": "deepseek-v4-flash-0731",
+      "provider": "bailian",
+      "max_tokens": 1024,
       "enable_thinking": false,
       "fallback_models": [
         {
-          "model": "deepseek-v4-flash-0731",
-          "provider": "bailian"
+          "model": "glm-5.3-flash",
+          "provider": "zai"
         },
         {
           "model": "qwen3.8-flash",
@@ -99,7 +99,7 @@
     },
     "moderate": {
       "model": "glm-5.3",
-      "provider": "zai",
+      "provider": "bailian",
       "max_tokens": 2048,
       "enable_thinking": false,
       "plan_model": "deepseek-v4.1-flash",
@@ -113,11 +113,11 @@
         },
         {
           "model": "glm-5.3",
-          "provider": "bailian"
+          "provider": "zai"
         },
         {
-          "model": "glm-5.1",
-          "provider": "zai"
+          "model": "qwen3.7-plus",
+          "provider": "bailian"
         }
       ]
     },
@@ -126,8 +126,8 @@
       "provider": "claude-cli",
       "max_tokens": 4096,
       "enable_thinking": true,
-      "plan_model": "glm-5.3",
-      "plan_provider": "zai",
+      "plan_model": "qwen3.8-max",
+      "plan_provider": "bailian",
       "plan_max_tokens": 2048,
       "plan_enable_thinking": false,
       "fallback_models": [
@@ -180,16 +180,16 @@
       "plan_enable_thinking": true,
       "fallback_models": [
         {
-          "model": "cx/gpt-6-astra",
-          "provider": "codex-cli"
-        },
-        {
           "model": "cx/gpt-6-sol",
           "provider": "codex-cli"
         },
         {
           "model": "qwen3.8-max",
           "provider": "bailian"
+        },
+        {
+          "model": "cx/gpt-6-astra",
+          "provider": "codex-cli"
         }
       ]
     }
@@ -198,7 +198,7 @@
     "retrainAfterInteractions": 500,
     "minSamplesPerTier": 50,
     "maxWeightChangePct": 0.2,
-    "llmJudgeModel": "zai/glm-4.7",
+    "llmJudgeModel": "bailian/qwen3.8-flash",
     "llmJudgeSamplingRate": 0.1,
     "cascadeRetraining": false,
     "cascadeRetrainingSource": "real_feedback_labels",
