@@ -91,6 +91,7 @@ import {
 import { detectTaskCategory } from './task-category.js';
 import { buildBenchmarkTransparency, getBenchmarkPriorHeaderValue } from './benchmark-prior.js';
 import { providerQuota, getMultiWindowQuota } from './provider-quota.js';
+import { providerConcurrency } from './provider-concurrency.js';
 import type { LoadBalanceDecision } from './provider-quota.js';
 import { consumptionTracker } from './consumption-tracker.js';
 import { quotaSync } from './quota-sync.js';
@@ -680,13 +681,15 @@ async function handleDirectRoute(
     });
 
     if (!response.ok) {
+      const errorBody = await response.text().catch(() => '');
+      // Circuit breaker: quota exhausted (Z.AI 1308 / insufficient_quota) => provider out until reset
+      providerQuota.noteUpstreamFailure(providerId, response.status, errorBody);
       // v0.5.5: Record rate-limit errors so provider health degrades
       if (response.status === 429 || response.status === 1305 || response.status === 1308) {
         providerQuota.record429(providerId);
         modelMatrix.recordError(providerId, cleanModel, `rate-limited (${response.status})`);
         console.log(`⚠️  [${agent.name}] Direct route ${providerId}/${cleanModel} rate-limited (${response.status})`);
       }
-      const errorBody = await response.text().catch(() => '');
       logUpstreamFailure(providerId, response.status, errorBody);
       const failureKind = providerFailureKindForHttp(response.status, errorBody);
       providerHealth.recordFailure(
@@ -1660,6 +1663,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
           }
           const errorText = await resp.text().catch(() => '');
           logUpstreamFailure(trivialCfg.provider, resp.status, errorText);
+          providerQuota.noteUpstreamFailure(trivialCfg.provider, resp.status, errorText);
           const healthDetail = upstreamFailureHealthDetail(trivialCfg.provider, resp.status, errorText);
           if (resp.status === 429 || resp.status === 1305 || resp.status === 1308) {
             providerQuota.record429(trivialCfg.provider);
@@ -2168,6 +2172,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
     const retryDeadline = Date.now() + FALLBACK_GLOBAL_BUDGET_MS;
     const attemptedTargets: string[] = [];
     const skippedTargets: string[] = [];
+    let releaseSlot: () => void = () => {};
 
     try {
     for (let targetIndex = 0; targetIndex < retryTargets.length; targetIndex++) {
@@ -2190,6 +2195,12 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
       // Skip providers that are throttled or have critically low health.
       // This prevents the cascade failure where we try 5+ providers that are
       // all rate-limited, wasting 30+ seconds on guaranteed failures.
+      if (providerQuota.isBreakerOpen(target.providerId)) {
+        const why = providerQuota.shouldSwitch(target.providerId).reason;
+        console.log(`⏭️  [${agent.name}] Skipping ${target.label}: ${why}`);
+        skippedTargets.push(`${target.label} (${why})`);
+        continue;
+      }
       if (!target.isCli) {
         const switchCheck = providerQuota.shouldSwitch(target.providerId);
         if (switchCheck.shouldSwitch) {
@@ -2198,6 +2209,16 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
           continue;
         }
       }
+
+      // Per-provider concurrency cap: wait briefly for a slot, otherwise fall through to the next target.
+      releaseSlot();
+      const slot = await providerConcurrency.acquire(target.providerId, Math.min(15_000, Math.max(0, fallbackAttemptTimeoutMs(retryDeadline))));
+      if (!slot) {
+        console.log(`⏭️  [${agent.name}] Skipping ${target.label}: concurrency limit reached`);
+        skippedTargets.push(`${target.label} (concurrency limit)`);
+        continue;
+      }
+      releaseSlot = slot;
 
       const healthAttempt = providerHealth.beginAttempt(target.providerId);
       attemptedTargets.push(target.label);
@@ -2292,7 +2313,10 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
         });
         clearTimeout(reqTimeoutId);
         const errorText = !resp.ok ? await resp.text().catch(() => '') : '';
-        if (!resp.ok) logUpstreamFailure(target.providerId, resp.status, errorText);
+        if (!resp.ok) {
+          logUpstreamFailure(target.providerId, resp.status, errorText);
+          providerQuota.noteUpstreamFailure(target.providerId, resp.status, errorText);
+        }
         const healthDetail = !resp.ok
           ? upstreamFailureHealthDetail(target.providerId, resp.status, errorText)
           : '';
@@ -2361,6 +2385,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
       }
     }
 
+    releaseSlot();
     if (!data) {
       const attempted = attemptedTargets.length > 0 ? attemptedTargets.join(' → ') : 'none';
       const skipped = skippedTargets.length > 0 ? skippedTargets.join(' → ') : 'none';
@@ -2503,6 +2528,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
         : 'text');
       return jsonResponse(res, 200, data);
     } catch (err: any) {
+      releaseSlot();
       console.error(`❌ Provider error: ${err.message}`);
       return jsonResponse(res, 502, { error: { message: err.message, type: 'gateway_error' } });
     }
@@ -2742,6 +2768,21 @@ async function init() {
     console.log('📊 [Quota] Applied real dashboard data to health scores');
   }
 
+  // Re-read quota-sync.json periodically (written by scripts/quota-sync.py, see scripts/QUOTA_SYNC_README.md)
+  const quotaSyncReloadMs = Number(process.env.GATESWARM_QUOTA_SYNC_RELOAD_MS ?? 300_000);
+  if (quotaSyncReloadMs > 0) {
+    setInterval(async () => {
+      try {
+        if (await quotaSync.reload()) {
+          const fresh = quotaSync.getRealQuotaData();
+          if (Object.keys(fresh).length > 0) providerQuota.applyRealQuotaData(fresh);
+        }
+      } catch (err) {
+        console.error('❌ [QuotaSync] reload failed:', (err as Error).message);
+      }
+    }, quotaSyncReloadMs).unref();
+  }
+
   // ─── v0.5: Register CLI Providers ─────────────────────
   if (getCliProvidersEnabled()) {
     agentRegistry.registerDefaultCliProviders();
@@ -2830,6 +2871,8 @@ async function init() {
           ensemble: 'enabled',
           feedback: 'enabled',
           llmJudge: getConfig().feedback_loop.llmJudgeModel,
+          quotaBreakers: providerQuota.getOpenBreakers(),
+          concurrency: providerConcurrency.snapshot(),
           configReload: getConfigReloadHealth(),
           scorerHealth: getScorerHealth(),
           capabilities: {
