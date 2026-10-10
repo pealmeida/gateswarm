@@ -1,45 +1,41 @@
-# Recommended models (September 2026)
+# Recommended models (October 2026)
 
-GateSwarm routing defaults in `v04_config.json`, `calibration/matrix-variants/quota_band_matrices.json` (green/yellow bands), and `src/agent-registry.ts` follow this matrix. Prefix convention: `cc/` → Claude Code CLI, `cx/` → Codex CLI.
+GateSwarm routing defaults in `v04_config.json`, `src/v04-config.ts`, `calibration/matrix-variants/quota_band_matrices.json` and `src/agent-registry.ts` follow this matrix. Prefix convention: `cc/` → Claude Code CLI, `cx/` → Codex CLI. Providers in use: Z.AI, Bailian (Token Plan), Claude Code, Codex, and local Ollama as a last resort. OpenCode Go and Ollama Cloud were removed.
 
 ## Routing matrix (`tier_models`)
 
 | Tier | Primary (act) | Plan | Main fallbacks |
 |------|---------------|------|----------------|
-| trivial | opencodego `mimo-v2.6-flash` | — | Go `deepseek-v4-flash`, `mimo-v2.5`; zai `glm-4.7-flash`, `glm-4.5-air` |
-| light | opencodego `deepseek-v4-flash` | — | Go `mimo-v2.5`; zai flash |
-| moderate | zai `glm-5` | zai `glm-4.7-flash` | zai `glm-5.1`, `glm-4.7`; Go flash |
-| heavy | claude-cli `cc/claude-sonnet-5` | zai `glm-5` | zai `glm-5.1`; codex-cli `cx/gpt-6-luna` |
-| intensive | codex-cli `cx/gpt-6-sol` | `cc/claude-sonnet-5` | `cx/gpt-6-luna`; zai `glm-5` / `glm-5.1` |
-| extreme | claude-cli `cc/claude-opus-5-5` | `cc/claude-opus-5-5` (same as act) | `cx/gpt-6-astra`; zai `glm-5`; `cx/gpt-6-sol` |
+| trivial (`max_tokens` 1024) | bailian `deepseek-v4.1-flash` | — | bailian `qwen3.8-flash`; zai `glm-5.3-flash`; ollama `qwen2.5:1.5b` |
+| light (`max_tokens` 1024) | bailian `deepseek-v4-flash-0731` | — | zai `glm-5.3-flash`; bailian `qwen3.8-flash` |
+| moderate | bailian `glm-5.3` | bailian `deepseek-v4.1-flash` | bailian `qwen3.8-flash`; zai `glm-5.3` (prefer off-peak); bailian `qwen3.7-plus` |
+| heavy | claude-cli `cc/claude-sonnet-5-5` | bailian `qwen3.8-max` | bailian `qwen3.8-max`, `deepseek-v4-pro`; codex-cli `cx/gpt-6-luna` |
+| intensive | codex-cli `cx/gpt-6-sol` | `cc/claude-sonnet-5-5` | `cc/claude-sonnet-5-5`; bailian `qwen3.8-max`; `cx/gpt-6-luna` |
+| extreme | claude-cli `cc/claude-opus-5-5` | `cc/claude-opus-5-5` (same as act) | `cx/gpt-6-sol`; bailian `qwen3.8-max`; `cx/gpt-6-astra` (last resort) |
 
-Orange/red quota bands keep load-shedding behavior (more ollama-cloud under stress) but use the same CLI model IDs where Codex/Claude appear.
+The Bailian, Z.AI, Claude and Codex reasoning models always think: with a small `max_tokens` the visible answer can come back empty, which is why the trivial tier uses 1024.
+
+Quota-aware balancing: Bailian (large, monthly Token Plan quota) carries trivial/light/moderate; Z.AI (small 5h/weekly credit window) is a reserve; Claude Code and Codex are reserved for heavy/intensive/extreme. The self-eval judge (`feedback_loop.llmJudgeModel`) is `bailian/qwen3.8-flash` so it does not spend Z.AI credits. Plan limits are plan-dependent and configurable; check your own subscription.
+
+Quota bands (`quota_band_matrices.json`) reuse the same model IDs; load-shedding now promotes Bailian models instead of Ollama Cloud / OpenCode Go.
 
 ## Provider catalogs (in-repo)
 
-### OpenCode Go (`opencodego`)
+### Bailian Token Plan (`bailian`)
 
-- Flash / low tiers: `mimo-v2.6-flash`, `deepseek-v4-flash`, `mimo-v2.5`
-- Pro fallback: `deepseek-v4-pro`
-
-**Catalog gap:** `deepseek-v4.1-flash` is not listed in `HTTP_PROVIDER_MODELS` yet; **light** tier uses `deepseek-v4-flash` as the closest match.
+Text models: `qwen3.8-max`, `qwen3.8-flash`, `qwen3.7-max`, `qwen3.7-plus`, `qwen3.6-flash`, `glm-5.2`, `glm-5.3`, `deepseek-v4-pro`, `deepseek-v4-flash-0731`, `deepseek-v4.1-flash`. The endpoint and key come from `BAILIAN_BASE` / `BAILIAN_KEY` (never committed). Check your plan terms before routing backend traffic through it.
 
 ### Z.AI (`zai`)
 
-- Flash: `glm-4.7-flash` (and `glm-4.5-air`)
-- Standard: `glm-5`, `glm-5.1`
-
-**Catalog gap:** `glm-5.3-flash` is not in the committed catalog; **moderate** act uses `glm-5` with plan `glm-4.7-flash`.
+`glm-4.5`, `glm-4.5-air`, `glm-4.6`, `glm-4.7`, `glm-5`, `glm-5-turbo`, `glm-5.1`, `glm-5.2`, `glm-5.3`, `glm-5.3-flash`, `glm-5.3-flashx`. `glm-4.7-flash` is no longer listed by the API and was dropped.
 
 ### Claude Code (`claude-cli`)
 
-| GateSwarm ID | Codex/Claude CLI name |
-|--------------|------------------------|
-| `cc/claude-sonnet-5` | `sonnet-5` |
+| GateSwarm ID | Claude CLI name |
+|--------------|-----------------|
+| `cc/claude-sonnet-5-5` | `claude-sonnet-5-5` |
 | `cc/claude-opus-5-5` | `opus` |
-| `cc/claude-fable-5-1` | `fable` (Max / plan-gated; optional catalog alias — **not** used in default routing) |
-
-Legacy IDs (`cc/claude-sonnet-4-6`, `cc/claude-opus-4-8`, …) remain in the catalog for backward compatibility but are **not** default primaries.
+| `cc/claude-haiku-4-5` | `claude-haiku-4-5` |
 
 ### Codex CLI (`codex-cli`)
 
@@ -49,23 +45,17 @@ Legacy IDs (`cc/claude-sonnet-4-6`, `cc/claude-opus-4-8`, …) remain in the cat
 | `cx/gpt-6-luna` | `gpt-6-luna` |
 | `cx/gpt-6-astra` | `gpt-6-astra` |
 
-Legacy `cx/gpt-5.*` entries remain mapped for existing configs.
+## Retirements
 
-## Retirements (do not use as new primaries)
-
-| Model | Notes |
-|-------|--------|
-| `cx/gpt-5.4-codex` / `gpt-5.4` | Removed from ChatGPT/Codex recommendations |
-| `cc/claude-sonnet-4-6`, `cc/claude-opus-4-8` | Superseded by sonnet-5 / opus-5-5 family |
-| ollama-cloud on trivial/light/heavy | Optional fallback only; OpenCode Go + Z.AI preferred for low tiers |
-
-`gpt-5.5` may still exist in the Codex CLI until 2026-10-14; kept as a legacy catalog alias, not a default route.
-
-## Ollama Cloud & Bailian
-
-- **Ollama Cloud:** available in catalog; used in quota-stress bands and emergency fallbacks, never as the default primary for green/yellow matrices.
-- **Bailian:** unchanged this round; inventory only.
+| Model / provider | Notes |
+|------------------|-------|
+| `opencodego` (all models) | Subscription cancelled; provider removed from the registry and defaults |
+| `ollama-cloud` | Removed (no key, unused) |
+| `glm-4.7-flash` | Not in Z.AI `/models`; replaced by `glm-5.3-flash` |
+| `cx/gpt-5.*`, `cx/gpt-4.1` | Legacy Codex IDs removed from the catalog |
+| `cc/claude-*-4-*` (sonnet-4-6, opus-4-7, opus-4-8), `cc/claude-fable-5-1` | Removed (superseded / plan-gated) |
+| `qwen3.5-plus`, `qwen3.6-plus`, `qwen3-coder-plus` | Not in the Token Plan; agent defaults and heuristic weights updated |
 
 ## AnyModel / native delegation
 
-Use the same model strings without `cc/` or `cx/` when the engine is native Claude or Codex. OpenCode Go still requires the session header patch documented in the integration guides.
+Use the same model strings without `cc/` or `cx/` when the engine is native Claude or Codex.

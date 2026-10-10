@@ -309,7 +309,7 @@ describe('📋 Agent Registry — CLI Providers', () => {
     const claudeCfg = agentRegistry.getCliProviderConfig('claude-cli');
     expect(claudeCfg).not.toBeNull();
     expect(claudeCfg!.command).toBe('claude');
-    expect(claudeCfg!.modelAlias!['cc/claude-sonnet-4-6']).toBe('claude-sonnet-4-6');
+    expect(claudeCfg!.modelAlias!['cc/claude-sonnet-5-5']).toBe('claude-sonnet-5-5');
 
     const codexCfg = agentRegistry.getCliProviderConfig('codex-cli');
     expect(codexCfg).not.toBeNull();
@@ -346,8 +346,9 @@ describe('🏷️ CLI Prefix Notation', () => {
   it('recognizes cc/ prefix for Claude Code', () => {
     const cfg = agentRegistry.getCliProviderConfig('claude-cli');
     expect(cfg).not.toBeNull();
-    expect(cfg!.modelAlias!['cc/claude-sonnet-4-6']).toBe('claude-sonnet-4-6');
-    expect(cfg!.modelAlias!['cc/claude-opus-4-7']).toBe('claude-opus-4-7');
+    expect(cfg!.modelAlias!['cc/claude-sonnet-5-5']).toBe('claude-sonnet-5-5');
+    expect(cfg!.modelAlias!['cc/claude-opus-5-5']).toBe('claude-opus-5-5');
+    expect(cfg!.modelAlias!['cc/claude-opus-4-7']).toBeUndefined();
   });
 
   it('recognizes cx/ prefix for Codex', () => {
@@ -356,30 +357,28 @@ describe('🏷️ CLI Prefix Notation', () => {
     expect(cfg!.modelAlias!['cx/gpt-6-sol']).toBe('gpt-6-sol');
     expect(cfg!.modelAlias!['cx/gpt-6-luna']).toBe('gpt-6-luna');
     expect(cfg!.modelAlias!['cx/gpt-6-astra']).toBe('gpt-6-astra');
-    expect(cfg!.modelAlias!['cx/gpt-5.5-codex']).toBe('gpt-5.5');
-    expect(cfg!.modelAlias!['cx/gpt-5.3-codex']).toBe('gpt-5.3');
-    expect(cfg!.modelAlias!['cx/gpt-4.1']).toBe('gpt-4.1');
+    expect(cfg!.modelAlias!['cx/gpt-5.5-codex']).toBeUndefined();
   });
 
   it('recognizes pi/ prefix for Pi Agent', () => {
     const cfg = agentRegistry.getCliProviderConfig('pi-agent');
     expect(cfg).not.toBeNull();
-    expect(cfg!.modelAlias!['pi/qwen3.5-plus']).toBe('qwen3.5-plus');
-    expect(cfg!.modelAlias!['pi/glm-4.7-flash']).toBe('glm-4.7-flash');
+    expect(cfg!.modelAlias!['pi/qwen3.8-flash']).toBe('qwen3.8-flash');
+    expect(cfg!.modelAlias!['pi/glm-5.3-flash']).toBe('glm-5.3-flash');
   });
 
   it('recognizes hm/ prefix for Hermes', () => {
     const cfg = agentRegistry.getCliProviderConfig('hermes-agent');
     expect(cfg).not.toBeNull();
-    expect(cfg!.modelAlias!['hm/glm-4.7']).toBe('glm-4.7');
-    expect(cfg!.modelAlias!['hm/glm-4.7-flash']).toBe('glm-4.7-flash');
+    expect(cfg!.modelAlias!['hm/glm-5.3']).toBe('glm-5.3');
+    expect(cfg!.modelAlias!['hm/glm-5.3-flash']).toBe('glm-5.3-flash');
   });
 
   it('recognizes oc/ prefix for OpenClaw', () => {
     const cfg = agentRegistry.getCliProviderConfig('openclaw-agent');
     expect(cfg).not.toBeNull();
-    expect(cfg!.modelAlias!['oc/bailian/qwen3.5-plus']).toBe('bailian/qwen3.5-plus');
-    expect(cfg!.modelAlias!['oc/zai/glm-4.7-flash']).toBe('zai/glm-4.7-flash');
+    expect(cfg!.modelAlias!['oc/bailian/qwen3.8-flash']).toBe('bailian/qwen3.8-flash');
+    expect(cfg!.modelAlias!['oc/zai/glm-5.3-flash']).toBe('zai/glm-5.3-flash');
   });
 
   it('all registered models use correct prefixes', () => {

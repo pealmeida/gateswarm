@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+### Changed
+- Model catalog review (Oct 2026): Z.AI catalog adds `glm-5.2`, `glm-5.3`, `glm-5.3-flash`, `glm-5.3-flashx`; tiers/fallbacks now use Z.AI + Bailian Token Plan + Claude/Codex CLIs (see `docs/RECOMMENDED_MODELS.md`). Trivial `max_tokens` raised to 1024 (reasoning models).
+- Quota-band matrices and heuristic weights realigned; Pi/Hermes/OpenClaw defaults moved off retired models.
+
+### Removed
+- `opencodego` and `ollama-cloud` providers, `glm-4.7-flash`, legacy `cx/gpt-5.*`, `cc/claude-*-4-*`, `cc/claude-fable-5-1`, `qwen3.5-plus` references.
+
 ## [0.7.0] - 2026-09-21
 
 ### Added

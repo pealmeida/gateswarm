@@ -62,94 +62,82 @@
   },
   "tier_models": {
     "trivial": {
-      "model": "mimo-v2.6-flash",
-      "provider": "opencodego",
-      "max_tokens": 256,
+      "model": "deepseek-v4.1-flash",
+      "provider": "bailian",
+      "max_tokens": 1024,
       "enable_thinking": false,
       "fallback_models": [
         {
-          "model": "deepseek-v4-flash",
-          "provider": "opencodego"
+          "model": "qwen3.8-flash",
+          "provider": "bailian"
         },
         {
-          "model": "glm-4.7-flash",
+          "model": "glm-5.3-flash",
           "provider": "zai"
         },
         {
-          "model": "glm-4.5-air",
-          "provider": "zai"
-        },
-        {
-          "model": "mimo-v2.5",
-          "provider": "opencodego"
+          "model": "qwen2.5:1.5b",
+          "provider": "ollama"
         }
       ]
     },
     "light": {
-      "model": "deepseek-v4-flash",
-      "provider": "opencodego",
-      "max_tokens": 512,
+      "model": "deepseek-v4-flash-0731",
+      "provider": "bailian",
+      "max_tokens": 1024,
       "enable_thinking": false,
       "fallback_models": [
         {
-          "model": "mimo-v2.5",
-          "provider": "opencodego"
-        },
-        {
-          "model": "glm-4.7-flash",
+          "model": "glm-5.3-flash",
           "provider": "zai"
         },
         {
-          "model": "glm-4.5-air",
-          "provider": "zai"
+          "model": "qwen3.8-flash",
+          "provider": "bailian"
         }
       ]
     },
     "moderate": {
-      "model": "glm-5",
-      "provider": "zai",
+      "model": "glm-5.3",
+      "provider": "bailian",
       "max_tokens": 2048,
       "enable_thinking": false,
-      "plan_model": "glm-4.7-flash",
-      "plan_provider": "zai",
+      "plan_model": "deepseek-v4.1-flash",
+      "plan_provider": "bailian",
       "plan_max_tokens": 1024,
       "plan_enable_thinking": false,
       "fallback_models": [
         {
-          "model": "glm-5.1",
+          "model": "qwen3.8-flash",
+          "provider": "bailian"
+        },
+        {
+          "model": "glm-5.3",
           "provider": "zai"
         },
         {
-          "model": "glm-4.7",
-          "provider": "zai"
-        },
-        {
-          "model": "glm-4.7-flash",
-          "provider": "zai"
-        },
-        {
-          "model": "deepseek-v4-flash",
-          "provider": "opencodego"
+          "model": "qwen3.7-plus",
+          "provider": "bailian"
         }
       ]
     },
     "heavy": {
-      "model": "cc/claude-sonnet-5",
+      "model": "cc/claude-sonnet-5-5",
       "provider": "claude-cli",
       "max_tokens": 4096,
       "enable_thinking": true,
-      "plan_model": "glm-5",
-      "plan_provider": "zai",
+      "plan_model": "qwen3.8-max",
+      "plan_provider": "bailian",
       "plan_max_tokens": 2048,
       "plan_enable_thinking": false,
       "fallback_models": [
         {
-          "model": "glm-5.1",
-          "provider": "zai"
+          "model": "qwen3.8-max",
+          "provider": "bailian"
         },
         {
-          "model": "glm-5",
-          "provider": "zai"
+          "model": "deepseek-v4-pro",
+          "provider": "bailian"
         },
         {
           "model": "cx/gpt-6-luna",
@@ -162,22 +150,22 @@
       "provider": "codex-cli",
       "max_tokens": 4096,
       "enable_thinking": true,
-      "plan_model": "cc/claude-sonnet-5",
+      "plan_model": "cc/claude-sonnet-5-5",
       "plan_provider": "claude-cli",
       "plan_max_tokens": 2048,
       "plan_enable_thinking": true,
       "fallback_models": [
         {
+          "model": "cc/claude-sonnet-5-5",
+          "provider": "claude-cli"
+        },
+        {
+          "model": "qwen3.8-max",
+          "provider": "bailian"
+        },
+        {
           "model": "cx/gpt-6-luna",
           "provider": "codex-cli"
-        },
-        {
-          "model": "glm-5",
-          "provider": "zai"
-        },
-        {
-          "model": "glm-5.1",
-          "provider": "zai"
         }
       ]
     },
@@ -192,15 +180,15 @@
       "plan_enable_thinking": true,
       "fallback_models": [
         {
-          "model": "cx/gpt-6-astra",
+          "model": "cx/gpt-6-sol",
           "provider": "codex-cli"
         },
         {
-          "model": "glm-5",
-          "provider": "zai"
+          "model": "qwen3.8-max",
+          "provider": "bailian"
         },
         {
-          "model": "cx/gpt-6-sol",
+          "model": "cx/gpt-6-astra",
           "provider": "codex-cli"
         }
       ]
@@ -210,7 +198,7 @@
     "retrainAfterInteractions": 500,
     "minSamplesPerTier": 50,
     "maxWeightChangePct": 0.2,
-    "llmJudgeModel": "zai/glm-4.7",
+    "llmJudgeModel": "bailian/qwen3.8-flash",
     "llmJudgeSamplingRate": 0.1,
     "cascadeRetraining": false,
     "cascadeRetrainingSource": "real_feedback_labels",
