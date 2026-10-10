@@ -102,3 +102,9 @@ packages/*/src/**/*.js.map
 packages/*/src/**/*.d.ts
 packages/*/src/**/*.d.ts.map
 data/jev-shadow/
+
+# Quota manager runtime state (no secrets, but machine-specific)
+data/quota-manager-*.json
+data/quota-manager/
+data/quota-manager.*
+data/quota-calibration.jsonl
