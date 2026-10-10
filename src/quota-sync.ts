@@ -112,7 +112,11 @@ class QuotaSyncManager {
   }> {
     const result: Record<string, any> = {};
 
+    // Data older than GATESWARM_QUOTA_MAX_AGE_MIN (default 15) is "unknown" (null), never 0 / never trusted.
+    const maxAgeMs = (Number(process.env.GATESWARM_QUOTA_MAX_AGE_MIN) > 0 ? Number(process.env.GATESWARM_QUOTA_MAX_AGE_MIN) : 15) * 60_000;
     for (const snapshot of Object.values(this.state.snapshots)) {
+      const t = Date.parse(String(snapshot.syncedAt ?? '').replace('+00:00Z', 'Z'));
+      if (Number.isNaN(t) || Date.now() - t > maxAgeMs) continue;
       const w = snapshot.windows;
       result[snapshot.provider] = {
         fiveHourUsedPct: w['5h']?.usedPct ?? w['session']?.usedPct ?? null,

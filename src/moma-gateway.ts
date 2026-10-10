@@ -97,6 +97,7 @@ import { providerConcurrency } from './provider-concurrency.js';
 import type { LoadBalanceDecision } from './provider-quota.js';
 import { consumptionTracker } from './consumption-tracker.js';
 import { quotaSync } from './quota-sync.js';
+import { getManagerView, paths as quotaManagerPaths } from './quota-manager/index.js';
 import { getCliProvidersEnabled } from './v04-config.js';
 import { getUnusableProviderBodyReason, providerFailureKindForHttp, providerHealth } from './adapters/provider-health.js';
 import { turboQuantCompress, MODEL_CONTEXT_WINDOWS } from './turboquant-compressor.js';
@@ -3167,6 +3168,14 @@ async function init() {
           }
         } catch {}
         return jsonResponse(res, 200, { version: '0.1.0', updatedAt: '', snapshots: {} });
+      }
+
+      // Quota manager: per-provider state (band, reset, headroom, method/confidence), active battery, last survey + Jev analysis summary.
+      // Read-only, never triggers a collection (the supervisor does). Includes the quota circuit-breaker flag per provider.
+      if (url.pathname === '/v1/quota-manager' && method === 'GET') {
+        const view = await getManagerView(quotaManagerPaths(process.env.GATESWARM_ROOT));
+        const breakers = providerQuota.getAllQuotas().filter((q) => q.throttled).map((q) => q.provider);
+        return jsonResponse(res, 200, { ...view, circuitBreakerOpen: breakers });
       }
 
       // Quota analysis (report + proposed tier_models diff; NEVER applied). Cached 120s so it cannot spam Jev.
