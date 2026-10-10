@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import { jevShadowObserve } from './jev/shadow.js';
+import { analyzeQuota, loadAnalysisInput, type QuotaAnalysisReport } from './jev/quota-analysis.js';
+import { quotaAdvisorObserveRequest, quotaAdvisorObserveFailure } from './jev/quota-advisor-hooks.js';
 import { preDelegationObserve } from './jev/pre-delegation.js';
 import * as dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
@@ -684,6 +686,7 @@ async function handleDirectRoute(
       const errorBody = await response.text().catch(() => '');
       // Circuit breaker: quota exhausted (Z.AI 1308 / insufficient_quota) => provider out until reset
       providerQuota.noteUpstreamFailure(providerId, response.status, errorBody);
+      quotaAdvisorObserveFailure(providerId, response.status, errorBody);
       // v0.5.5: Record rate-limit errors so provider health degrades
       if (response.status === 429 || response.status === 1305 || response.status === 1308) {
         providerQuota.record429(providerId);
@@ -1664,6 +1667,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
           const errorText = await resp.text().catch(() => '');
           logUpstreamFailure(trivialCfg.provider, resp.status, errorText);
           providerQuota.noteUpstreamFailure(trivialCfg.provider, resp.status, errorText);
+          quotaAdvisorObserveFailure(trivialCfg.provider, resp.status, errorText);
           const healthDetail = upstreamFailureHealthDetail(trivialCfg.provider, resp.status, errorText);
           if (resp.status === 429 || resp.status === 1305 || resp.status === 1308) {
             providerQuota.record429(trivialCfg.provider);
@@ -1796,6 +1800,8 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
 
   console.log(`🧠 [${agent.name}] Score: ${score.toFixed(3)} → ${effort} (${activeMode}) → ${providerId}/${model} [${decision.reason}, conf=${decision.confidence.toFixed(2)}]`);
   const interactionId = `${agent.id}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  // Jev quota advisor (advise only, GATESWARM_JEV_DECISIONS): logs local-vs-Jev downgrade opinion; never alters routing.
+  quotaAdvisorObserveRequest({ tier: effort, providerId: routedTierModel?.provider ?? providerId, model: routedTierModel?.model ?? model, promptText, requestId: interactionId });
 
   // ─── v0.5.6: Trivial Fast-Path ──────────────────────
   // For TRIVIAL-tier requests targeting a TINY local model (qwen2.5:0.5b,
@@ -2316,6 +2322,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
         if (!resp.ok) {
           logUpstreamFailure(target.providerId, resp.status, errorText);
           providerQuota.noteUpstreamFailure(target.providerId, resp.status, errorText);
+          quotaAdvisorObserveFailure(target.providerId, resp.status, errorText, interactionId);
         }
         const healthDetail = !resp.ok
           ? upstreamFailureHealthDetail(target.providerId, resp.status, errorText)
@@ -2844,6 +2851,7 @@ async function init() {
     }
   }
 
+  const quotaAnalysisCache = new Map<string, { at: number; report: QuotaAnalysisReport }>();
   const server = createServer(async (req, res) => {
     const url = new URL(req.url || '/', `http://localhost:${PORT}`);
     const method = req.method || 'GET';
@@ -3159,6 +3167,19 @@ async function init() {
           }
         } catch {}
         return jsonResponse(res, 200, { version: '0.1.0', updatedAt: '', snapshots: {} });
+      }
+
+      // Quota analysis (report + proposed tier_models diff; NEVER applied). Cached 120s so it cannot spam Jev.
+      // Jev is consulted only when GATESWARM_JEV_DECISIONS=advise|enforce (+ GATESWARM_JEV_MODE=shadow); ?jev=0 forces local-only.
+      if (url.pathname === '/v1/quota-analysis' && method === 'GET') {
+        const wantJev = url.searchParams.get('jev') !== '0';
+        const cached = quotaAnalysisCache.get(wantJev ? 'jev' : 'local');
+        if (cached && Date.now() - cached.at < 120_000) return jsonResponse(res, 200, { ...cached.report, cached: true });
+        const input = await loadAnalysisInput({ now: Date.now() });
+        if (!input) return jsonResponse(res, 503, { error: 'quota analysis unavailable: tier config not readable' });
+        const report = await analyzeQuota(input, wantJev ? {} : { env: { ...process.env, GATESWARM_JEV_DECISIONS: 'off' } });
+        quotaAnalysisCache.set(wantJev ? 'jev' : 'local', { at: Date.now(), report });
+        return jsonResponse(res, 200, { ...report, cached: false });
       }
 
       if (url.pathname === '/v05/intel/quota' && method === 'GET') {
