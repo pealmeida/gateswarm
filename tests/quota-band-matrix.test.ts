@@ -356,7 +356,7 @@ describe('DoD Gap B: Flag OFF Observability', () => {
       // Should use the baseline matrix from v04_config.json
       const moderate = result.effectiveTierModels.moderate;
       expect(moderate).toBeDefined();
-      expect(moderate.model).toBe('glm-5');
+      expect(moderate.model).toBe('glm-5.3');
       expect(moderate.provider).toBe('zai');
       
       // Verify bit-identical to v04_config.json baseline
@@ -396,8 +396,8 @@ describe('DoD Gap B: Flag OFF Observability', () => {
       expect(result.matrixVariant).toBe('current');
       expect(result.reason).toBe('flag_off');
       
-      // And routing should use baseline (glm-5 for moderate)
-      expect(result.effectiveTierModels.moderate.model).toBe('glm-5');
+      // And routing should use baseline (glm-5.3 for moderate)
+      expect(result.effectiveTierModels.moderate.model).toBe('glm-5.3');
     }
   });
 });

@@ -62,74 +62,62 @@
   },
   "tier_models": {
     "trivial": {
-      "model": "mimo-v2.6-flash",
-      "provider": "opencodego",
-      "max_tokens": 256,
+      "model": "deepseek-v4.1-flash",
+      "provider": "bailian",
+      "max_tokens": 1024,
       "enable_thinking": false,
       "fallback_models": [
         {
-          "model": "deepseek-v4-flash",
-          "provider": "opencodego"
-        },
-        {
-          "model": "glm-4.7-flash",
+          "model": "glm-5.3-flash",
           "provider": "zai"
         },
         {
-          "model": "glm-4.5-air",
-          "provider": "zai"
+          "model": "qwen3.8-flash",
+          "provider": "bailian"
         },
         {
-          "model": "mimo-v2.5",
-          "provider": "opencodego"
+          "model": "qwen2.5:1.5b",
+          "provider": "ollama"
         }
       ]
     },
     "light": {
-      "model": "deepseek-v4-flash",
-      "provider": "opencodego",
+      "model": "glm-5.3-flash",
+      "provider": "zai",
       "max_tokens": 512,
       "enable_thinking": false,
       "fallback_models": [
         {
-          "model": "mimo-v2.5",
-          "provider": "opencodego"
+          "model": "deepseek-v4-flash-0731",
+          "provider": "bailian"
         },
         {
-          "model": "glm-4.7-flash",
-          "provider": "zai"
-        },
-        {
-          "model": "glm-4.5-air",
-          "provider": "zai"
+          "model": "qwen3.8-flash",
+          "provider": "bailian"
         }
       ]
     },
     "moderate": {
-      "model": "glm-5",
+      "model": "glm-5.3",
       "provider": "zai",
       "max_tokens": 2048,
       "enable_thinking": false,
-      "plan_model": "glm-4.7-flash",
-      "plan_provider": "zai",
+      "plan_model": "deepseek-v4.1-flash",
+      "plan_provider": "bailian",
       "plan_max_tokens": 1024,
       "plan_enable_thinking": false,
       "fallback_models": [
         {
+          "model": "qwen3.8-flash",
+          "provider": "bailian"
+        },
+        {
+          "model": "glm-5.3",
+          "provider": "bailian"
+        },
+        {
           "model": "glm-5.1",
           "provider": "zai"
-        },
-        {
-          "model": "glm-4.7",
-          "provider": "zai"
-        },
-        {
-          "model": "glm-4.7-flash",
-          "provider": "zai"
-        },
-        {
-          "model": "deepseek-v4-flash",
-          "provider": "opencodego"
         }
       ]
     },
@@ -138,18 +126,18 @@
       "provider": "claude-cli",
       "max_tokens": 4096,
       "enable_thinking": true,
-      "plan_model": "glm-5",
+      "plan_model": "glm-5.3",
       "plan_provider": "zai",
       "plan_max_tokens": 2048,
       "plan_enable_thinking": false,
       "fallback_models": [
         {
-          "model": "glm-5.1",
-          "provider": "zai"
+          "model": "qwen3.8-max",
+          "provider": "bailian"
         },
         {
-          "model": "glm-5",
-          "provider": "zai"
+          "model": "deepseek-v4-pro",
+          "provider": "bailian"
         },
         {
           "model": "cx/gpt-6-luna",
@@ -168,16 +156,16 @@
       "plan_enable_thinking": true,
       "fallback_models": [
         {
+          "model": "cc/claude-sonnet-5",
+          "provider": "claude-cli"
+        },
+        {
+          "model": "qwen3.8-max",
+          "provider": "bailian"
+        },
+        {
           "model": "cx/gpt-6-luna",
           "provider": "codex-cli"
-        },
-        {
-          "model": "glm-5",
-          "provider": "zai"
-        },
-        {
-          "model": "glm-5.1",
-          "provider": "zai"
         }
       ]
     },
@@ -196,12 +184,12 @@
           "provider": "codex-cli"
         },
         {
-          "model": "glm-5",
-          "provider": "zai"
-        },
-        {
           "model": "cx/gpt-6-sol",
           "provider": "codex-cli"
+        },
+        {
+          "model": "qwen3.8-max",
+          "provider": "bailian"
         }
       ]
     }
