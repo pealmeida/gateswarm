@@ -309,7 +309,7 @@ describe('📋 Agent Registry — CLI Providers', () => {
     const claudeCfg = agentRegistry.getCliProviderConfig('claude-cli');
     expect(claudeCfg).not.toBeNull();
     expect(claudeCfg!.command).toBe('claude');
-    expect(claudeCfg!.modelAlias!['cc/claude-sonnet-5']).toBe('sonnet-5');
+    expect(claudeCfg!.modelAlias!['cc/claude-sonnet-5']).toBe('claude-sonnet-5');
 
     const codexCfg = agentRegistry.getCliProviderConfig('codex-cli');
     expect(codexCfg).not.toBeNull();
@@ -346,8 +346,8 @@ describe('🏷️ CLI Prefix Notation', () => {
   it('recognizes cc/ prefix for Claude Code', () => {
     const cfg = agentRegistry.getCliProviderConfig('claude-cli');
     expect(cfg).not.toBeNull();
-    expect(cfg!.modelAlias!['cc/claude-sonnet-5']).toBe('sonnet-5');
-    expect(cfg!.modelAlias!['cc/claude-opus-5-5']).toBe('opus');
+    expect(cfg!.modelAlias!['cc/claude-sonnet-5']).toBe('claude-sonnet-5');
+    expect(cfg!.modelAlias!['cc/claude-opus-5-5']).toBe('claude-opus-5-5');
     expect(cfg!.modelAlias!['cc/claude-opus-4-7']).toBeUndefined();
   });
 

@@ -176,8 +176,8 @@ export const DEFAULT_CLI_PROVIDERS: Record<string, CliProviderEntry> = {
       maxTokens: 64_000,
       maxConcurrent: 1,
       modelAlias: {
-        'cc/claude-sonnet-5': 'sonnet-5',
-        'cc/claude-opus-5-5': 'opus',
+        'cc/claude-sonnet-5': 'claude-sonnet-5',
+        'cc/claude-opus-5-5': 'claude-opus-5-5',
         'cc/claude-haiku-4-5': 'claude-haiku-4-5',
       },
       healthCheck: { command: '"${GATESWARM_ROOT:-.}"/bin/cli-health-probe.sh claude-cli', expectedExitCode: 0 },
