@@ -29,11 +29,14 @@ GateSwarm routes every request to the optimal model based on prompt complexity. 
 | Tier | Model | Provider | Max Tokens | Thinking | Context |
 |---|---|---|---|---|---|
 | trivial | glm-4.5-air | zai | 256 | OFF | 200K |
-| light | glm-4.7-flash | zai | 512 | OFF | 200K |
-| moderate | MiniMax-M2.5 | bailian | 2048 | OFF | 131K |
+| light | qwen3.8-flash | bailian | 512 | OFF | 1M |
+| moderate | qwen3.8-flash | bailian | 1024 | OFF | 1M |
 | heavy | qwen3.5-plus | bailian | 4096 | ON | 1M |
-| intensive | qwen3.5-plus | bailian | 4096 | ON | 1M |
-| extreme | qwen3.6-plus | bailian | 8192 | ON | 1M |
+| intensive | qwen3.8-max | bailian | 4096 | ON | 1M |
+| extreme | qwen3.8-max | bailian | 8192 | ON | 1M |
+
+> **Bailian endpoints are plan-isolated.** The default `BAILIAN_BASE` is the public Alibaba Model Studio **Token Plan**
+> endpoint (`https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1`); **Coding Plan** users must override it with `https://coding-intl.dashscope.aliyuncs.com/v1` — key and base URL must come from the same plan.
 
 ### 2.3 Cost Efficiency
 

@@ -46,12 +46,12 @@ FEATURE_NAMES = [
 TIERS = ["trivial", "light", "moderate", "heavy", "intensive", "extreme"]
 
 TIER_MODELS = {
-    "trivial":   {"model": "glm-4.5-air",       "provider": "zai",      "max_tokens": 256},
-    "light":     {"model": "glm-4.7-flash",      "provider": "zai",      "max_tokens": 512},
-    "moderate":  {"model": "glm-4.7",            "provider": "zai",      "max_tokens": 1024},
+    "trivial":   {"model": "glm-4.5-air",        "provider": "zai",      "max_tokens": 256},
+    "light":     {"model": "qwen3.8-flash",      "provider": "bailian",  "max_tokens": 512},
+    "moderate":  {"model": "qwen3.8-flash",      "provider": "bailian",  "max_tokens": 1024},
     "heavy":     {"model": "glm-5.1",            "provider": "zai",      "max_tokens": 2048},
-    "intensive": {"model": "qwen3.6-plus",       "provider": "bailian",  "max_tokens": 4096},
-    "extreme":   {"model": "qwen3.6-plus",       "provider": "bailian",  "max_tokens": 8192},
+    "intensive": {"model": "qwen3.8-max",        "provider": "bailian",  "max_tokens": 4096},
+    "extreme":   {"model": "qwen3.8-max",        "provider": "bailian",  "max_tokens": 8192},
 }
 
 TIER_BOUNDARIES = [
