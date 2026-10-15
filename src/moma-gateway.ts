@@ -2429,7 +2429,10 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
         error: false,
       });
 
-      const responseText = data.choices?.[0]?.message?.content || '';
+      const responseText =
+        data.choices?.[0]?.message?.content ||
+        data.choices?.[0]?.message?.reasoning_content ||
+        '';
       const feedbackId = `${agent.id}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
       recordFeedback({
