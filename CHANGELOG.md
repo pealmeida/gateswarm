@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
+### Fixed
+- Made Codex CLI sandbox and working-directory execution configurable, and made fallback timeout budgets configurable for long-running provider attempts.
+
+### Added
+- Added R1 unified-diff chunking helpers for bounded review requests.
+
 ## [0.7.0] - 2026-09-21
 
 ### Added

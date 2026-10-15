@@ -244,13 +244,38 @@ export function isGreetingFastPathEligible(messages: any[], body: Record<string,
 export const FALLBACK_GLOBAL_BUDGET_MS = 60_000;
 export const FALLBACK_ATTEMPT_TIMEOUT_MS = 120_000;
 
+function positiveSafeInteger(value: string | undefined, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+/** Return the per-attempt timeout, optionally overridden by the environment. */
+export function attemptTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+  return positiveSafeInteger(env.MOMA_ATTEMPT_TIMEOUT_MS, FALLBACK_ATTEMPT_TIMEOUT_MS);
+}
+
+/**
+ * Return the request-wide fallback budget. With only an attempt override, keep
+ * enough budget for that complete attempt instead of aborting it early.
+ */
+export function fallbackBudgetMs(env: NodeJS.ProcessEnv = process.env): number {
+  const configuredBudget = positiveSafeInteger(env.MOMA_FALLBACK_BUDGET_MS, FALLBACK_GLOBAL_BUDGET_MS);
+  const hasBudgetOverride = Number.isSafeInteger(Number(env.MOMA_FALLBACK_BUDGET_MS))
+    && Number(env.MOMA_FALLBACK_BUDGET_MS) > 0;
+  const hasAttemptOverride = Number.isSafeInteger(Number(env.MOMA_ATTEMPT_TIMEOUT_MS))
+    && Number(env.MOMA_ATTEMPT_TIMEOUT_MS) > 0;
+  return hasBudgetOverride || !hasAttemptOverride
+    ? configuredBudget
+    : Math.max(configuredBudget, attemptTimeoutMs(env));
+}
+
 /** Limit an individual attempt to the remaining request-wide fallback budget. */
 export function fallbackAttemptTimeoutMs(
   retryDeadline: number,
   now = Date.now(),
-  attemptTimeoutMs = FALLBACK_ATTEMPT_TIMEOUT_MS,
+  timeoutMs = attemptTimeoutMs(),
 ): number {
-  return Math.max(0, Math.min(attemptTimeoutMs, retryDeadline - now));
+  return Math.max(0, Math.min(timeoutMs, retryDeadline - now));
 }
 
 /** Construct an override score without invoking the asynchronous intent scorer. */
@@ -1248,7 +1273,7 @@ async function forwardStreamingWithFallback(options: {
     if (target) targets.push(target);
   }
 
-  const deadline = Date.now() + FALLBACK_GLOBAL_BUDGET_MS;
+  const deadline = Date.now() + fallbackBudgetMs();
   const attempted: string[] = [];
   for (const target of targets) {
     if (fallbackAttemptTimeoutMs(deadline) <= 0) break;
@@ -1363,9 +1388,11 @@ async function forwardToProvider(
 
   console.log(`🔀 Routing to ${providerId}/${model}`);
 
-  // v0.4.3: Add 120s timeout to prevent indefinite hangs on upstream providers
+  // Keep the standalone path bounded just like the fallback attempt path.
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 120000);
+  const providerTimeoutMs = attemptTimeoutMs();
+  const providerTimeoutLabel = `${providerTimeoutMs / 1_000}s`;
+  const timeoutId = setTimeout(() => controller.abort(), providerTimeoutMs);
 
   try {
     const response = await fetch(url, {
@@ -1464,8 +1491,8 @@ async function forwardToProvider(
   } catch (err: any) {
     clearTimeout(timeoutId);
     if (err.name === 'AbortError') {
-      console.error(`⏱️  Provider ${providerId}/${model} timed out after 120s`);
-      jsonResponse(res, 504, { error: { message: `Provider ${providerId}/${model} timed out after 120s`, type: 'timeout' } });
+      console.error(`⏱️  Provider ${providerId}/${model} timed out after ${providerTimeoutLabel}`);
+      jsonResponse(res, 504, { error: { message: `Provider ${providerId}/${model} timed out after ${providerTimeoutLabel}`, type: 'timeout' } });
     } else {
       console.error(`❌ Forward error: ${err.message}`);
       jsonResponse(res, 502, { error: { message: `Gateway error: ${err.message}`, type: 'gateway_error' } });
@@ -2162,10 +2189,10 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
     let latency = 0;
     let actualTarget = initial;
 
-    // v0.5.5: Global retry budget — don't spend more than 60s on fallbacks.
+    // v0.5.5: Global retry budget prevents an unbounded fallback cascade.
     // If all providers are rate-limited, failing fast is better than a
     // 5-minute cascade of guaranteed 429s.
-    const retryDeadline = Date.now() + FALLBACK_GLOBAL_BUDGET_MS;
+    const retryDeadline = Date.now() + fallbackBudgetMs();
     const attemptedTargets: string[] = [];
     const skippedTargets: string[] = [];
 
@@ -2174,7 +2201,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
       const target = retryTargets[targetIndex];
       // ─── v0.5.5: Global budget check ───
       if (fallbackAttemptTimeoutMs(retryDeadline) <= 0) {
-        console.log(`⏱️  [${agent.name}] Retry budget exhausted (60s) — giving up`);
+        console.log(`⏱️  [${agent.name}] Retry budget exhausted (${fallbackBudgetMs() / 1_000}s) — giving up`);
         skippedTargets.push(...retryTargets.slice(targetIndex).map((remaining) => `${remaining.label} (global budget exhausted)`));
         break;
       }

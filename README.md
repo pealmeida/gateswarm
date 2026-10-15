@@ -509,8 +509,15 @@ cp .env.example .env
 | `OLLAMA_BASE` | Ollama base URL (default: `http://127.0.0.1:11434/v1`) |
 | `MOMA_ADMIN_TOKEN` | Token required for agent-management and `/v04/retrain`; required when exposing beyond localhost unless `MOMA_ALLOW_UNAUTHENTICATED_ADMIN=true` is explicitly set |
 | `MOMA_MAX_BODY_BYTES` | Maximum request-body size in bytes (default: `1048576`); set an explicit cap when exposing beyond localhost; larger bodies receive HTTP 413 |
+| `MOMA_FALLBACK_BUDGET_MS` | Fallback-chain request budget |
+| `MOMA_ATTEMPT_TIMEOUT_MS` | Per-provider attempt timeout |
+| `MOMA_R1_MAX_DIFF_CHARS` | Maximum unified-diff characters per R1 review chunk |
 | `PORT` | Gateway port (default: 8900) |
 | `GATESWARM_ROOT` | Path to the router root (set by systemd; used by CLI health probes) |
+| `GATESWARM_CODEX_SANDBOX` | Codex CLI sandbox mode |
+| `GATESWARM_EXTERNAL_SANDBOX` | Explicitly permits Codex danger-full-access mode |
+| `GATESWARM_CODEX_WORKDIR` | Codex CLI working directory |
+| `GATESWARM_CODEX_ADD_DIRS` | Colon-separated Codex CLI additional directories |
 
 `GET /health` also reports `configReload` (last reload status/error and timestamp) and `scorerHealth` (including ordinal scorer state), alongside provider and agent status.
 
