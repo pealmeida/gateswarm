@@ -159,6 +159,40 @@ export const HTTP_PROVIDER_MODELS: Record<string, string[]> = {
 
 // ─── CLI Provider Defaults ─────────────────────────────
 
+/**
+ * Build the Codex executor arguments. The executor edits only; `.git` stays
+ * protected, and the harness commits after gates.
+ */
+export function buildCodexExecArgs(env: NodeJS.ProcessEnv = process.env): string[] {
+  const configuredSandbox = env.GATESWARM_CODEX_SANDBOX;
+  const allowedSandboxes = new Set(['read-only', 'workspace-write', 'danger-full-access']);
+  let sandbox = configuredSandbox ?? 'workspace-write';
+
+  if (!allowedSandboxes.has(sandbox)) {
+    console.warn(`Invalid GATESWARM_CODEX_SANDBOX value ${JSON.stringify(sandbox)}; using workspace-write`);
+    sandbox = 'workspace-write';
+  }
+  if (sandbox === 'danger-full-access' && env.GATESWARM_EXTERNAL_SANDBOX !== '1') {
+    console.warn('GATESWARM_CODEX_SANDBOX=danger-full-access requires GATESWARM_EXTERNAL_SANDBOX=1; using workspace-write');
+    sandbox = 'workspace-write';
+  }
+
+  const addDirs = (env.GATESWARM_CODEX_ADD_DIRS ?? '')
+    .split(':')
+    .filter(Boolean)
+    .flatMap((directory) => ['--add-dir', directory]);
+  const workingDir = env.GATESWARM_CODEX_WORKDIR;
+  return [
+    'exec',
+    '--sandbox', sandbox,
+    ...(workingDir !== undefined ? ['--cd', workingDir] : []),
+    ...addDirs,
+    '-',
+  ];
+}
+
+const CODEX_WORKDIR = process.env.GATESWARM_CODEX_WORKDIR;
+
 export const DEFAULT_CLI_PROVIDERS: Record<string, CliProviderEntry> = {
   'claude-cli': {
     id: 'claude-cli',
@@ -216,13 +250,14 @@ export const DEFAULT_CLI_PROVIDERS: Record<string, CliProviderEntry> = {
     ],
     cliConfig: {
       command: 'codex',
-      argsTemplate: ['exec', '-'],
+      argsTemplate: buildCodexExecArgs(),
       modelFlag: '--config',
       inputFormat: 'stdin',
       outputFormat: 'stdout-text',
       timeoutMs: 300_000,
       maxTokens: 64_000,
       maxConcurrent: 1,
+      ...(CODEX_WORKDIR !== undefined ? { workingDir: CODEX_WORKDIR } : {}),
       modelAlias: {
         'cx/gpt-6-sol': 'gpt-6-sol',
         'cx/gpt-6-luna': 'gpt-6-luna',
