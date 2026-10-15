@@ -3,9 +3,9 @@
  *
  * Post-response adequacy scoring:
  *   1. Quick heuristic: response length, token usage, error patterns
- *   2. Periodic LLM judge: bailian/qwen3.6-plus evaluates adequacy
+ *   2. Periodic LLM judge: bailian/qwen3.8-max evaluates adequacy
  *
- * v0.4.4: LLM judge uses qwen3.6-plus (extreme tier) instead of qwen3.5-plus
+ * v0.4.4: LLM judge uses qwen3.8-max (extreme tier) instead of qwen3.5-plus
  * to avoid circularity — the judge should be more capable than the model it's judging.
  *
  * Results feed the self-optimizing retraining loop.
@@ -103,7 +103,7 @@ export async function llmJudge(
   const judgeModel = llmJudgeModel.split('/').slice(1).join('/');
 
   const baseUrl = judgeProvider === 'bailian'
-    ? 'https://coding-intl.dashscope.aliyuncs.com/v1'
+    ? 'https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1'
     : judgeProvider === 'zai'
       ? 'https://api.z.ai/api/coding/paas/v4'
       : judgeProvider === 'ollama-cloud'

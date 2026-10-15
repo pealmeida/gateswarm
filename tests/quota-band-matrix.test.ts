@@ -356,13 +356,13 @@ describe('DoD Gap B: Flag OFF Observability', () => {
       // Should use the baseline matrix from v04_config.json
       const moderate = result.effectiveTierModels.moderate;
       expect(moderate).toBeDefined();
-      expect(moderate.model).toBe('glm-5');
-      expect(moderate.provider).toBe('zai');
+      expect(moderate.model).toBe('qwen3.8-flash');
+      expect(moderate.provider).toBe('bailian');
       
       // Verify bit-identical to v04_config.json baseline
       const heavy = result.effectiveTierModels.heavy;
-      expect(heavy.model).toBe('cc/claude-sonnet-5');
-      expect(heavy.provider).toBe('claude-cli');
+      expect(heavy.model).toBe('qwen3.8-max');
+      expect(heavy.provider).toBe('bailian');
     }
   });
 
@@ -396,8 +396,8 @@ describe('DoD Gap B: Flag OFF Observability', () => {
       expect(result.matrixVariant).toBe('current');
       expect(result.reason).toBe('flag_off');
       
-      // And routing should use baseline (glm-5 for moderate)
-      expect(result.effectiveTierModels.moderate.model).toBe('glm-5');
+      // And routing should use baseline (qwen3.8-flash for moderate)
+      expect(result.effectiveTierModels.moderate.model).toBe('qwen3.8-flash');
     }
   });
 });
