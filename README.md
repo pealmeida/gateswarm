@@ -509,7 +509,8 @@ cp .env.example .env
 | `OLLAMA_BASE` | Ollama base URL (default: `http://127.0.0.1:11434/v1`) |
 | `MOMA_ADMIN_TOKEN` | Token required for agent-management and `/v04/retrain`; required when exposing beyond localhost unless `MOMA_ALLOW_UNAUTHENTICATED_ADMIN=true` is explicitly set |
 | `MOMA_MAX_BODY_BYTES` | Maximum request-body size in bytes (default: `1048576`); set an explicit cap when exposing beyond localhost; larger bodies receive HTTP 413 |
-| `MOMA_FALLBACK_BUDGET_MS` | Fallback-chain request budget |
+| `GATESWARM_FALLBACK_BUDGET_MS` | Fallback-chain request budget in ms (default: `180000`, min: `5000`, max: `900000`); invalid values are ignored with a warning and the default is used |
+| `MOMA_FALLBACK_BUDGET_MS` | Legacy alias for `GATESWARM_FALLBACK_BUDGET_MS` (only used when `GATESWARM_FALLBACK_BUDGET_MS` is unset/invalid) |
 | `MOMA_ATTEMPT_TIMEOUT_MS` | Per-provider attempt timeout |
 | `MOMA_R1_MAX_DIFF_CHARS` | Maximum unified-diff characters per R1 review chunk |
 | `PORT` | Gateway port (default: 8900) |
