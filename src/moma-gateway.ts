@@ -241,8 +241,41 @@ export function isGreetingFastPathEligible(messages: any[], body: Record<string,
     && !hasTools;
 }
 
-export const FALLBACK_GLOBAL_BUDGET_MS = 60_000;
+export const FALLBACK_GLOBAL_BUDGET_MS = 180_000;
 export const FALLBACK_ATTEMPT_TIMEOUT_MS = 120_000;
+export const FALLBACK_BUDGET_MIN_MS = 5_000;
+export const FALLBACK_BUDGET_MAX_MS = 900_000;
+
+const FALLBACK_BUDGET_VARIABLES = ['GATESWARM_FALLBACK_BUDGET_MS', 'MOMA_FALLBACK_BUDGET_MS'] as const;
+
+const invalidBudgetWarnings = new Set<string>();
+
+/**
+ * Resolve the budget override: GATESWARM_FALLBACK_BUDGET_MS first, then the
+ * legacy MOMA_FALLBACK_BUDGET_MS. A set-but-invalid value warns once per
+ * distinct (variable, value) and is treated as absent.
+ */
+function budgetOverrideMs(
+  env: NodeJS.ProcessEnv,
+  warn: (message: string) => void,
+): number | null {
+  for (const variable of FALLBACK_BUDGET_VARIABLES) {
+    const raw = env[variable];
+    if (raw === undefined || raw === '') continue;
+    const parsed = Number(raw);
+    if (Number.isSafeInteger(parsed)
+      && parsed >= FALLBACK_BUDGET_MIN_MS
+      && parsed <= FALLBACK_BUDGET_MAX_MS) {
+      return parsed;
+    }
+    const warningKey = `${variable}=${raw}`;
+    if (!invalidBudgetWarnings.has(warningKey)) {
+      invalidBudgetWarnings.add(warningKey);
+      warn(`Invalid ${variable}="${raw}": expected a safe integer between ${FALLBACK_BUDGET_MIN_MS} and ${FALLBACK_BUDGET_MAX_MS} ms; ignoring it (default ${FALLBACK_GLOBAL_BUDGET_MS} ms, legacy alias or attempt timeout may still apply).`);
+    }
+  }
+  return null;
+}
 
 function positiveSafeInteger(value: string | undefined, fallback: number): number {
   const parsed = Number(value);
@@ -258,15 +291,17 @@ export function attemptTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
  * Return the request-wide fallback budget. With only an attempt override, keep
  * enough budget for that complete attempt instead of aborting it early.
  */
-export function fallbackBudgetMs(env: NodeJS.ProcessEnv = process.env): number {
-  const configuredBudget = positiveSafeInteger(env.MOMA_FALLBACK_BUDGET_MS, FALLBACK_GLOBAL_BUDGET_MS);
-  const hasBudgetOverride = Number.isSafeInteger(Number(env.MOMA_FALLBACK_BUDGET_MS))
-    && Number(env.MOMA_FALLBACK_BUDGET_MS) > 0;
+export function fallbackBudgetMs(
+  env: NodeJS.ProcessEnv = process.env,
+  warn: (message: string) => void = console.warn,
+): number {
+  const override = budgetOverrideMs(env, warn);
+  if (override !== null) return override;
   const hasAttemptOverride = Number.isSafeInteger(Number(env.MOMA_ATTEMPT_TIMEOUT_MS))
     && Number(env.MOMA_ATTEMPT_TIMEOUT_MS) > 0;
-  return hasBudgetOverride || !hasAttemptOverride
-    ? configuredBudget
-    : Math.max(configuredBudget, attemptTimeoutMs(env));
+  return hasAttemptOverride
+    ? Math.max(FALLBACK_GLOBAL_BUDGET_MS, attemptTimeoutMs(env))
+    : FALLBACK_GLOBAL_BUDGET_MS;
 }
 
 /** Limit an individual attempt to the remaining request-wide fallback budget. */
