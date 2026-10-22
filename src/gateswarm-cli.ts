@@ -30,6 +30,7 @@ import type { IntentMode, EffortLevel } from './types.js';
 import { getInteractionCount, getFeedbackEntries, getTierAccuracy, shouldRetrain } from './feedback-store.js';
 import { getRagStats } from './rag-index.js';
 import { retrainIfNeeded } from './retraining.js';
+import { formatProviderModels, parseModelsListArgs } from './cli-models.js';
 
 // Training mode — queries gateway HTTP API (in-memory state lives there)
 const GATEWAY_URL = process.env.GATESWARM_URL || 'http://localhost:8900';
@@ -59,7 +60,10 @@ async function gatewayFetch(path: string, method = 'GET', body?: object): Promis
   const url = `${GATEWAY_URL}${path}`;
   const opts: RequestInit = {
     method,
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      ...(process.env.MOMA_ADMIN_TOKEN ? { 'x-admin-token': process.env.MOMA_ADMIN_TOKEN } : {}),
+    },
   };
   if (body) opts.body = JSON.stringify(body);
   const res = await fetch(url, opts);
@@ -139,6 +143,7 @@ Operations Commands:
 Core Commands:
   status                                    Show v0.4 system status
   models                                    List tier models
+  models list [provider] [--refresh] [--json] List live models from providers
   model <tier> <model> <provider>           Set model for tier
   reasoning                                 Show reasoning (enable_thinking) status
   reasoning <tier> on|off                   Toggle reasoning for tier
@@ -260,6 +265,27 @@ async function cmdModels() {
     const thinking = tm.enable_thinking ? 'ON' : 'OFF';
     console.log(`${tier.padEnd(13)}${tm.model.padEnd(22)}${tm.provider.padEnd(15)}${thinking}`);
   }
+}
+
+async function cmdProviderModels(args: string[]) {
+  const options = parseModelsListArgs(args);
+  if (!options) return cmdModels();
+  const suffix = options.refresh ? '?refresh=1' : '';
+  let ids: string[];
+  if (options.provider) ids = [options.provider];
+  else {
+    const providers = await gatewayFetch('/v1/providers');
+    ids = (providers.data || []).map((provider: { id: string }) => provider.id);
+  }
+  const listings = await Promise.all(ids.map(async id => {
+    const listing = await gatewayFetch(`/v1/providers/${encodeURIComponent(id)}/models${suffix}`);
+    return listing;
+  }));
+  if (options.json) console.log(JSON.stringify(options.provider ? listings[0] : listings, null, 2));
+  else console.log(formatProviderModels(listings.map((listing, index) => listing.provider ? listing : ({
+    provider: ids[index], supported: false, cached: false, data: [],
+    error: listing.error?.message || 'Model listing request failed',
+  }))));
 }
 
 async function cmdModel(tier: string, model: string, provider: string) {
@@ -743,7 +769,8 @@ async function main() {
       await cmdStatus();
       break;
     case 'models':
-      await cmdModels();
+      if (args[1] === 'list') await cmdProviderModels(args.slice(1));
+      else await cmdModels();
       break;
     case 'model':
       if (args.length < 4) {
