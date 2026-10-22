@@ -1152,6 +1152,11 @@ function requireAdminAccess(req: IncomingMessage, res: ServerResponse): boolean 
   return false;
 }
 
+/** Shared by the provider-model route and its focused HTTP authorization tests. */
+export function authorizeProviderModelsRequest(req: IncomingMessage, res: ServerResponse): boolean {
+  return requireAdminAccess(req, res);
+}
+
 export function redactAgentForResponse(agent: AgentConfig): AgentConfig {
   return {
     ...agent,
@@ -3293,9 +3298,9 @@ async function init() {
       if (method === 'GET') {
         const parsed = parseProviderModelPath(url.pathname);
         if (parsed) {
-          if ('error' in parsed) return jsonResponse(res, 400, { error: { message: parsed.error, type: 'invalid_request_error' } });
           // Listing spends provider credentials / spawns CLIs: gate like other admin routes.
-          if (!requireAdminAccess(req, res)) return;
+          if (!authorizeProviderModelsRequest(req, res)) return;
+          if ('error' in parsed) return jsonResponse(res, 400, { error: { message: parsed.error, type: 'invalid_request_error' } });
           const result = await providerModelsResponse(parsed.id, url.searchParams.get('refresh') === '1');
           return jsonResponse(res, result.status, result.body);
         }

@@ -30,7 +30,7 @@ import type { IntentMode, EffortLevel } from './types.js';
 import { getInteractionCount, getFeedbackEntries, getTierAccuracy, shouldRetrain } from './feedback-store.js';
 import { getRagStats } from './rag-index.js';
 import { retrainIfNeeded } from './retraining.js';
-import { formatProviderModels, parseModelsListArgs } from './cli-models.js';
+import { formatProviderModels, listProviderModelsResilient, parseGatewayResponse, parseModelsListArgs, sanitizeGatewayErrorMessage } from './cli-models.js';
 
 // Training mode — queries gateway HTTP API (in-memory state lives there)
 const GATEWAY_URL = process.env.GATESWARM_URL || 'http://localhost:8900';
@@ -67,7 +67,7 @@ async function gatewayFetch(path: string, method = 'GET', body?: object): Promis
   };
   if (body) opts.body = JSON.stringify(body);
   const res = await fetch(url, opts);
-  return res.json();
+  return parseGatewayResponse(res);
 }
 
 async function cmdTraining(agentId?: string, action?: string) {
@@ -274,18 +274,31 @@ async function cmdProviderModels(args: string[]) {
   let ids: string[];
   if (options.provider) ids = [options.provider];
   else {
-    const providers = await gatewayFetch('/v1/providers');
-    ids = (providers.data || []).map((provider: { id: string }) => provider.id);
+    let providers: any;
+    try {
+      providers = await gatewayFetch('/v1/providers');
+    } catch (error) {
+      console.error(sanitizeGatewayErrorMessage(error instanceof Error ? error.message : error));
+      process.exitCode = 1;
+      return;
+    }
+    if (providers?.error) {
+      console.error(sanitizeGatewayErrorMessage(providers.error.message));
+      process.exitCode = 1;
+      return;
+    }
+    ids = (providers?.data || []).map((provider: { id: string }) => provider.id);
   }
-  const listings = await Promise.all(ids.map(async id => {
-    const listing = await gatewayFetch(`/v1/providers/${encodeURIComponent(id)}/models${suffix}`);
-    return listing;
-  }));
+  const listings = await listProviderModelsResilient(ids, id => gatewayFetch(`/v1/providers/${encodeURIComponent(id)}/models${suffix}`));
+  if (listings.some(listing => listing.error)) process.exitCode = 1;
+  for (const listing of listings) if (listing.error) {
+    const message = typeof listing.error === 'string' ? listing.error : listing.error.message;
+    if (message) listing.error = { ...listing.error, message: sanitizeGatewayErrorMessage(message) };
+  }
   if (options.json) console.log(JSON.stringify(options.provider ? listings[0] : listings, null, 2));
-  else console.log(formatProviderModels(listings.map((listing, index) => listing.provider ? listing : ({
-    provider: ids[index], supported: false, cached: false, data: [],
-    error: listing.error?.message || 'Model listing request failed',
-  }))));
+  else console.log(formatProviderModels(listings.map(listing => listing.error ? ({
+    provider: listing.provider, supported: false, cached: false, data: [], error: listing.error,
+  }) : listing)));
 }
 
 async function cmdModel(tier: string, model: string, provider: string) {

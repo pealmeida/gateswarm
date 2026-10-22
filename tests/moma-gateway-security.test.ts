@@ -8,6 +8,7 @@ import {
   parseBody,
   redactAgentForResponse,
   upstreamFailureMetadata,
+  authorizeProviderModelsRequest,
 } from '../src/moma-gateway.js';
 import type { AgentConfig } from '../src/agent-registry.js';
 
@@ -51,6 +52,21 @@ const agent: AgentConfig = {
 };
 
 describe('MoMA gateway security helpers', () => {
+  it('gates provider model listings when an admin token is configured', async () => {
+    process.env.MOMA_ADMIN_TOKEN = 'admin-token';
+    const invoke = (headers: IncomingMessage['headers']) => {
+      const response = { status: 0, body: '', writeHead(status: number) { this.status = status; return this; }, end(body: string) { this.body = body; } };
+      const allowed = authorizeProviderModelsRequest({ headers } as IncomingMessage, response as any);
+      return { allowed, ...response };
+    };
+    expect(invoke({}).status).toBe(401);
+    expect(invoke({ 'x-admin-token': 'admin-token' }).allowed).toBe(true);
+    const { providerModelsResponse } = await import('../src/moma-gateway.js');
+    const result = await providerModelsResponse('mock', false, async () => ({
+      provider: 'mock', supported: true, cached: false, fetchedAt: 1, models: [],
+    }));
+    expect(result.status).toBe(200);
+  });
   it('requires the configured admin token and accepts either supported header', () => {
     process.env.MOMA_ADMIN_TOKEN = 'admin-token';
 
