@@ -65,6 +65,8 @@ export type JevTierResult = {
 
 export interface JevTierClientOptions {
   apiKey?: string;
+  /** Permit compatible self-hosted servers that do not require authentication. */
+  allowNoKey?: boolean;
   endpoint?: string;
   timeoutMs?: number;
   fetchImpl?: typeof fetch;
@@ -166,9 +168,12 @@ export function createJevTierClient(opts: JevTierClientOptions): JevTierClient {
         return fail('secret_scan_blocked');
       }
 
-      if (typeof apiKey !== 'string' || apiKey.length === 0) {
+      if ((!apiKey || apiKey.length === 0) && !opts.allowNoKey) {
         return fail('no_key');
       }
+
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
 
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -176,10 +181,7 @@ export function createJevTierClient(opts: JevTierClientOptions): JevTierClient {
       try {
         response = await doFetch(endpoint + TIER_PATH, {
           method: 'POST',
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-            'Content-Type': 'application/json',
-          },
+          headers,
           body: JSON.stringify(payload),
           signal: controller.signal,
         });
