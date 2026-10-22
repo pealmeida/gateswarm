@@ -6,7 +6,7 @@
 
 **Evidence-gated LLM routing gateway.** Scores every prompt, picks the cheapest *capable* model, and collects feedback for safer improvements.
 
-> **Latest stable:** [v0.6.0](https://github.com/pealmeida/gateswarm-router/releases/tag/v0.6.0) — Trustable Precision: adversarial-review hardening + honest evals
+> **Latest stable:** v0.8.0 — deterministic providers and automatic model discovery
 > **Releases:** v0.4.4 · v0.5.2 · v0.5.3 · v0.5.4 · v0.5.5 · v0.5.6 (see [Releases](#releases) below)
 
 ## Two new packages: score + route (lite 0.1.0 · router 0.1.0) — and your own golden dataset
@@ -507,18 +507,26 @@ cp .env.example .env
 | `OPENCODEGO_KEY` | OpenCodeGo API key (optional) |
 | `OLLAMA_CLOUD_KEY` | Ollama Cloud API key (optional) |
 | `OLLAMA_BASE` | Ollama base URL (default: `http://127.0.0.1:11434/v1`) |
-| `MOMA_ADMIN_TOKEN` | Token required for agent-management and `/v04/retrain`; required when exposing beyond localhost unless `MOMA_ALLOW_UNAUTHENTICATED_ADMIN=true` is explicitly set |
+| `MOMA_ADMIN_TOKEN` | Token required for agent management, `/v04/retrain`, and `GET /v1/providers/:id/models`; the CLI sends it as `x-admin-token` |
+| `TYPESAFE_API_KEY` / `JEV_API_KEY` | Optional credential for the Jev deterministic provider |
 | `MOMA_MAX_BODY_BYTES` | Maximum request-body size in bytes (default: `1048576`); set an explicit cap when exposing beyond localhost; larger bodies receive HTTP 413 |
 | `GATESWARM_FALLBACK_BUDGET_MS` | Fallback-chain request budget in ms (default: `180000`, min: `5000`, max: `900000`); invalid values are ignored with a warning and the default is used |
 | `MOMA_FALLBACK_BUDGET_MS` | Legacy alias for `GATESWARM_FALLBACK_BUDGET_MS` (only used when `GATESWARM_FALLBACK_BUDGET_MS` is unset/invalid) |
 | `MOMA_ATTEMPT_TIMEOUT_MS` | Per-provider attempt timeout |
 | `MOMA_R1_MAX_DIFF_CHARS` | Maximum unified-diff characters per R1 review chunk |
 | `PORT` | Gateway port (default: 8900) |
+| `GATESWARM_DETERMINISTIC_MODE` | Set to `on` to enable deterministic classification providers (default: off) |
+| `GATESWARM_LAYA_ENDPOINT` | Optional Laya-compatible endpoint used in deterministic mode |
+| `GATESWARM_DISCOVERY_TTL_MS` | Model-discovery cache lifetime in milliseconds (default: 900000; 15 minutes) |
 | `GATESWARM_ROOT` | Path to the router root (set by systemd; used by CLI health probes) |
 | `GATESWARM_CODEX_SANDBOX` | Codex CLI sandbox mode |
 | `GATESWARM_EXTERNAL_SANDBOX` | Explicitly permits Codex danger-full-access mode |
 | `GATESWARM_CODEX_WORKDIR` | Codex CLI working directory |
 | `GATESWARM_CODEX_ADD_DIRS` | Colon-separated Codex CLI additional directories |
+
+List automatically discovered provider models with `gateswarm models list [provider] [--refresh] [--json]`. Discovery merges live `/models` and Ollama results with the static catalog. `GET /v1/providers/:id/models?refresh=1` forces a refresh and requires `MOMA_ADMIN_TOKEN` when configured.
+
+Deterministic routing is disabled by default. Set `GATESWARM_DETERMINISTIC_MODE=on` to use configured Jev and Laya (`GATESWARM_LAYA_ENDPOINT`) providers, with the local heuristic as fallback.
 
 `GET /health` also reports `configReload` (last reload status/error and timestamp) and `scorerHealth` (including ordinal scorer state), alongside provider and agent status.
 

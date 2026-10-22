@@ -26,6 +26,10 @@ BAILIAN_BASE=https://coding-intl.dashscope.aliyuncs.com/v1
 ZAI_BASE=https://api.z.ai/api/coding/paas/v4
 ```
 
+Set `MOMA_ADMIN_TOKEN` when exposing admin routes; `GET /v1/providers/:id/models` requires it when configured. The CLI sends it as `x-admin-token`. Optional model discovery uses `GATESWARM_DISCOVERY_TTL_MS` (default 900000 ms); list models with `npx gateswarm models list [provider] [--refresh] [--json]`.
+
+Deterministic providers are off by default. Enable them with `GATESWARM_DETERMINISTIC_MODE=on`; configure Laya with `GATESWARM_LAYA_ENDPOINT`. Jev is enabled when its API key is configured, and the local heuristic is the fallback.
+
 ### 2.2 Install Dependencies
 
 ```bash

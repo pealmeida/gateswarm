@@ -6,11 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
-### Fixed
-- Made Codex CLI sandbox and working-directory execution configurable, and made fallback timeout budgets configurable for long-running provider attempts.
+## [0.8.0] - 2026-10-22
 
 ### Added
-- Added R1 unified-diff chunking helpers for bounded review requests.
+- Deterministic providers: Jev and Laya (`GATESWARM_LAYA_ENDPOINT`) with local heuristic fallback. Enable with `GATESWARM_DETERMINISTIC_MODE=on`; off by default.
+- Automatic model discovery for `/models` APIs and Ollama, merged with the static catalog and cached for 15 minutes by default (`GATESWARM_DISCOVERY_TTL_MS`).
+- `gateswarm models list [provider] [--refresh] [--json]` and admin-gated `GET /v1/providers/:id/models?refresh=1`.
+- R1 unified-diff chunking helpers for bounded review requests.
+
+### Security
+- Admin-gate provider model listings; the CLI sends `MOMA_ADMIN_TOKEN` and errors do not expose provider keys.
+
+### Fixed
+- Made Codex CLI sandbox and working-directory execution configurable, and made fallback timeout budgets configurable for long-running provider attempts.
 
 ## [0.7.0] - 2026-09-21
 
