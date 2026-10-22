@@ -81,7 +81,8 @@ import type { ComplexityScore, EffortLevel, IntentMode } from './types.js';
 import { agentRegistry, AgentConfig } from './agent-registry.js';
 import { estimateTokens } from './token-estimator.js';
 import { modelMatrix } from './model-matrix.js';
-import { modelDiscovery } from './model-discovery.js';
+import { modelDiscovery, listProviderModels } from './model-discovery.js';
+import type { ProviderModelListing } from './model-discovery.js';
 import { consumptionIntelligence, ConsumptionDecision } from './consumption-intelligence.js';
 import {
   fallbackModelsForTier,
@@ -139,6 +140,32 @@ export function shouldRefuseUnauthenticatedAdmin(
   allowUnauthenticatedAdmin = process.env.MOMA_ALLOW_UNAUTHENTICATED_ADMIN,
 ): boolean {
   return !isLoopbackHost(host) && !adminToken && !isEnabled(allowUnauthenticatedAdmin);
+}
+
+export function parseProviderModelPath(pathname: string): { id: string } | { error: 'invalid provider id' } | null {
+  const match = /^\/v1\/providers\/([^/]+)\/models$/.exec(pathname);
+  if (!match) return null;
+  let id: string;
+  try { id = decodeURIComponent(match[1]); } catch { return { error: 'invalid provider id' }; }
+  return /^[A-Za-z0-9._-]{1,64}$/.test(id) ? { id } : { error: 'invalid provider id' };
+}
+
+export async function providerModelsResponse(
+  id: string,
+  refresh: boolean,
+  lister: (providerId: string, opts: { refresh?: boolean }) => Promise<ProviderModelListing> = listProviderModels,
+): Promise<{ status: number; body: Record<string, unknown> }> {
+  const listing = await lister(id, { refresh });
+  if (listing.error === 'unknown provider') {
+    return { status: 404, body: { error: { message: `Unknown provider: ${id}`, type: 'not_found' } } };
+  }
+  const body: Record<string, unknown> = {
+    object: 'list', provider: listing.provider, supported: listing.supported,
+    cached: listing.cached, fetched_at: listing.fetchedAt,
+    data: listing.models.map(({ id: modelId, source }) => ({ id: modelId, source })),
+  };
+  if (listing.error) body.error = listing.error;
+  return { status: 200, body };
 }
 
 // ─── State ─────────────────────────────────────────────
@@ -1123,6 +1150,11 @@ function requireAdminAccess(req: IncomingMessage, res: ServerResponse): boolean 
   if (hasAdminAccess(req.headers)) return true;
   jsonResponse(res, 401, { error: { message: 'Admin token required', type: 'authentication_error' } });
   return false;
+}
+
+/** Shared by the provider-model route and its focused HTTP authorization tests. */
+export function authorizeProviderModelsRequest(req: IncomingMessage, res: ServerResponse): boolean {
+  return requireAdminAccess(req, res);
 }
 
 export function redactAgentForResponse(agent: AgentConfig): AgentConfig {
@@ -3263,6 +3295,16 @@ async function init() {
       }
 
       // ─── v0.5.1: List Providers (with types, health, quota) ───
+      if (method === 'GET') {
+        const parsed = parseProviderModelPath(url.pathname);
+        if (parsed) {
+          // Listing spends provider credentials / spawns CLIs: gate like other admin routes.
+          if (!authorizeProviderModelsRequest(req, res)) return;
+          if ('error' in parsed) return jsonResponse(res, 400, { error: { message: parsed.error, type: 'invalid_request_error' } });
+          const result = await providerModelsResponse(parsed.id, url.searchParams.get('refresh') === '1');
+          return jsonResponse(res, result.status, result.body);
+        }
+      }
       if (url.pathname === '/v1/providers' && method === 'GET') {
         const providers = agentRegistry.getProviders();
         const result = providers.map(p => {

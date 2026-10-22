@@ -340,3 +340,221 @@ class ModelDiscoveryService {
 }
 
 export const modelDiscovery = new ModelDiscoveryService();
+
+// ─── Pluggable per-provider model listing (v0.8.0 slice 2) ───────────
+
+export type ModelSource = 'static' | 'discovered' | 'both';
+
+export interface ListedModel { id: string; source: ModelSource }
+
+export interface ProviderModelListing {
+  provider: string;
+  supported: boolean;
+  cached: boolean;
+  fetchedAt: number;
+  models: ListedModel[];
+  error?: string;
+}
+
+/** Minimal description of a provider needed for listing (decoupled from the registry for testability). */
+export interface ListerProvider {
+  id: string;
+  type: 'http-api' | 'cli-agent';
+  baseUrl?: string;
+  apiKey?: string;
+  models?: string[];
+}
+
+export interface ListerFs {
+  readFile(path: string): Promise<string>;
+  homedir(): string;
+}
+
+export interface ListerDeps {
+  fetch?: typeof fetch;
+  exec?: (cmd: string, args: string[], timeoutMs: number) => Promise<string>;
+  fs?: ListerFs;
+  now?: () => number;
+  provider?: ListerProvider;
+  timeoutMs?: number;
+}
+
+const DEFAULT_LISTER_TTL_MS = 15 * 60 * 1000;
+const LISTER_TIMEOUT_MS = 10000;
+const MAX_LISTER_BYTES = 1024 * 1024;
+const MAX_LISTED_MODELS = 5000;
+const MAX_MODEL_ID_LENGTH = 512;
+
+function listerTtlMs(): number {
+  const raw = process.env.GATESWARM_DISCOVERY_TTL_MS;
+  const n = Number(raw);
+  return raw && Number.isFinite(n) && n >= 0 ? n : DEFAULT_LISTER_TTL_MS;
+}
+
+const listerCache = new Map<string, { at: number; ids: string[]; identity: string }>();
+
+export function clearModelListingCache(): void {
+  listerCache.clear();
+}
+
+async function defaultExec(cmd: string, args: string[], timeoutMs: number): Promise<string> {
+  const { execFile } = await import('node:child_process');
+  return new Promise((resolve, reject) => {
+    execFile(cmd, args, { timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024 }, (err, stdout) =>
+      err ? reject(err) : resolve(String(stdout)));
+  });
+}
+
+async function defaultFs(): Promise<ListerFs> {
+  const [{ readFile }, { homedir }] = await Promise.all([import('node:fs/promises'), import('node:os')]);
+  return { readFile: p => readFile(p, 'utf8'), homedir };
+}
+
+function cleanIds(ids: unknown[]): string[] {
+  return [...new Set(ids.filter((x): x is string => typeof x === 'string')
+    .map(s => s.trim()).filter(s => s.length > 0 && s.length <= MAX_MODEL_ID_LENGTH))]
+    .slice(0, MAX_LISTED_MODELS);
+}
+
+async function getJson(f: typeof fetch, url: string, headers: Record<string, string>, timeoutMs: number): Promise<any> {
+  const res = await f(url, { headers, signal: AbortSignal.timeout(timeoutMs) });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const body = await res.text();
+  if (body.length > MAX_LISTER_BYTES) throw new Error('Response too large');
+  return JSON.parse(body);
+}
+
+function isAnthropic(p: ListerProvider): boolean {
+  return p.id === 'anthropic' || /(^|\/\/|\.)anthropic\.com/.test(p.baseUrl || '');
+}
+
+function isLocalOllama(p: ListerProvider): boolean {
+  return p.id === 'ollama' || /:11434\b/.test(p.baseUrl || '');
+}
+
+async function listViaApi(p: ListerProvider, f: typeof fetch, timeoutMs: number): Promise<string[]> {
+  const base = (p.baseUrl || '').replace(/\/+$/, '');
+  if (isAnthropic(p)) {
+    const root = base.replace(/\/v1$/, '');
+    const data = await getJson(f, `${root}/v1/models`, {
+      'x-api-key': p.apiKey || '', 'anthropic-version': '2023-06-01',
+    }, timeoutMs);
+    return cleanIds((data?.data ?? []).map((m: any) => m?.id));
+  }
+  if (isLocalOllama(p)) {
+    const root = base.replace(/\/v1$/, '');
+    const data = await getJson(f, `${root}/api/tags`, {}, timeoutMs);
+    return cleanIds((data?.models ?? []).map((m: any) => m?.name ?? m?.model ?? m?.id));
+  }
+  const data = await getJson(f, `${base}/models`, p.apiKey ? { Authorization: `Bearer ${p.apiKey}` } : {}, timeoutMs);
+  if (Array.isArray(data?.data)) return cleanIds(data.data.map((m: any) => m?.id));
+  if (Array.isArray(data?.models)) return cleanIds(data.models.map((m: any) => m?.id ?? m?.name));
+  return [];
+}
+
+const CLI_LIST_COMMANDS: Record<string, { executable: string; args: string[] }> = {
+  opencode: { executable: 'opencode', args: ['models'] },
+};
+const CLI_CONFIG_FILES: Record<string, string[]> = {
+  codex: ['.codex/config.toml'],
+  claude: ['.claude/settings.json'],
+  opencode: ['.config/opencode/opencode.json'],
+};
+
+function collectJsonModels(node: any, out: string[], depth = 0): void {
+  if (!node || typeof node !== 'object' || depth > 6) return;
+  for (const [k, v] of Object.entries(node)) {
+    if (k === 'model' && typeof v === 'string') out.push(v);
+    else if (k === 'models' && Array.isArray(v)) out.push(...v.filter(x => typeof x === 'string'));
+    else if (k === 'models' && v && typeof v === 'object') out.push(...Object.keys(v));
+    else collectJsonModels(v, out, depth + 1);
+  }
+}
+
+export function parseCliConfigModels(text: string): string[] {
+  if (text.length > MAX_LISTER_BYTES) return [];
+  const out: string[] = [];
+  try {
+    collectJsonModels(JSON.parse(text), out);
+  } catch {
+    for (const m of text.matchAll(/^\s*model\s*=\s*["']([^"']+)["']/gm)) out.push(m[1]);
+  }
+  return cleanIds(out);
+}
+
+async function listViaCli(p: ListerProvider, deps: ListerDeps, timeoutMs: number): Promise<string[]> {
+  const cmd = CLI_LIST_COMMANDS[p.id];
+  if (cmd) {
+    try {
+      const out = await (deps.exec ?? defaultExec)(cmd.executable, cmd.args, timeoutMs);
+      if (out.length > MAX_LISTER_BYTES) throw new Error('CLI output too large');
+      const ids = cleanIds(out.split(/\r?\n/).map(l => l.trim()).filter(l => l && !/\s/.test(l)));
+      if (ids.length) return ids;
+    } catch { /* fall through to config files */ }
+  }
+  const ids: string[] = [];
+  try {
+    const fs = deps.fs ?? await defaultFs();
+    for (const rel of CLI_CONFIG_FILES[p.id] ?? []) {
+      try {
+        const text = await fs.readFile(`${fs.homedir()}/${rel}`);
+        if (text.length <= MAX_LISTER_BYTES) ids.push(...parseCliConfigModels(text));
+      } catch { /* missing file */ }
+    }
+  } catch { /* no fs */ }
+  return cleanIds(ids);
+}
+
+function mergeModels(staticIds: string[], discovered: string[]): ListedModel[] {
+  const map = new Map<string, ModelSource>();
+  for (const id of staticIds) map.set(id, 'static');
+  for (const id of discovered) map.set(id, map.get(id) === 'static' ? 'both' : 'discovered');
+  return [...map].map(([id, source]) => ({ id, source }));
+}
+
+function resolveProvider(providerId: string): ListerProvider | undefined {
+  const p = agentRegistry.getProvider(providerId);
+  if (!p) return undefined;
+  return {
+    id: p.id,
+    type: p.type === 'cli-agent' ? 'cli-agent' : 'http-api',
+    baseUrl: agentRegistry.getProviderBaseUrl(providerId),
+    apiKey: agentRegistry.getProviderApiKey(providerId),
+    models: agentRegistry.getProviderModels(providerId),
+  };
+}
+
+export async function listProviderModels(
+  providerId: string,
+  opts: { refresh?: boolean } & ListerDeps = {},
+): Promise<ProviderModelListing> {
+  const now = opts.now ?? Date.now;
+  const p = opts.provider ?? resolveProvider(providerId);
+  if (!p) return { provider: providerId, supported: false, cached: false, fetchedAt: now(), models: [], error: 'unknown provider' };
+
+  const staticIds = p.models ?? [];
+  const isCli = p.type === 'cli-agent';
+  if (!isCli && !p.baseUrl) {
+    return { provider: providerId, supported: false, cached: false, fetchedAt: now(), models: mergeModels(staticIds, []) };
+  }
+
+  const identity = `${p.type}\0${p.baseUrl ?? ''}`;
+  const hit = listerCache.get(providerId);
+  if (!opts.refresh && hit && hit.identity === identity && now() >= hit.at && now() - hit.at < listerTtlMs()) {
+    return { provider: providerId, supported: true, cached: true, fetchedAt: hit.at, models: mergeModels(staticIds, hit.ids) };
+  }
+
+  const timeoutMs = opts.timeoutMs ?? LISTER_TIMEOUT_MS;
+  try {
+    const ids = isCli
+      ? await listViaCli(p, opts, timeoutMs)
+      : await listViaApi(p, opts.fetch ?? fetch, timeoutMs);
+    const at = now();
+    listerCache.set(providerId, { at, ids, identity });
+    return { provider: providerId, supported: true, cached: false, fetchedAt: at, models: mergeModels(staticIds, ids) };
+  } catch (err) {
+    // Do not surface arbitrary fetch/exec errors: they may contain URLs, headers, or credentials.
+    const message = err instanceof Error && /^HTTP \d{3}$/.test(err.message) ? err.message : 'Model listing failed';
+    return { provider: providerId, supported: true, cached: false, fetchedAt: now(), models: mergeModels(staticIds, []), error: message };
+  }
+}
