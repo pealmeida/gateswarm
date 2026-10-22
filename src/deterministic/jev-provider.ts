@@ -9,8 +9,8 @@ export function createJevDeterministicProvider(
     id,
     kind: 'deterministic',
     costUsd: 0,
-    async classify({ prompt }) {
-      const result = await client.askTier(prompt);
+    async classify({ prompt, signal }) {
+      const result = await client.askTier(prompt, signal);
       return {
         ok: result.ok,
         tier: result.tier,

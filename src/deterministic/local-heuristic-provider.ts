@@ -9,7 +9,7 @@ export function createLocalHeuristicProvider(): DeterministicProvider {
     costUsd: 0,
     async classify({ prompt }) {
       const score = v33Score(prompt);
-      return { ok: true, tier: score.tier, confidence: 0.99, provider: 'local-heuristic' };
+      return { ok: true, tier: score.tier, confidence: 0.65, provider: 'local-heuristic' };
     },
   };
 }

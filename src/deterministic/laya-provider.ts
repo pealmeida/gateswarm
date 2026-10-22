@@ -13,8 +13,8 @@ export function createLayaDeterministicProvider(
     id,
     kind: 'deterministic',
     costUsd: 0,
-    async classify({ prompt }) {
-      const result = await tierClient.askTier(prompt);
+    async classify({ prompt, signal }) {
+      const result = await tierClient.askTier(prompt, signal);
       return { ok: result.ok, tier: result.tier, confidence: result.confidence, error: result.error, provider: id };
     },
   };

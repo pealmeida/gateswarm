@@ -75,7 +75,7 @@ export interface JevTierClientOptions {
 }
 
 export interface JevTierClient {
-  askTier(prompt: string): Promise<JevTierResult>;
+  askTier(prompt: string, signal?: AbortSignal): Promise<JevTierResult>;
 }
 
 const TIER_SET: ReadonlySet<string> = new Set<string>(JEV_TIERS);
@@ -108,6 +108,13 @@ export function createJevTierClient(opts: JevTierClientOptions): JevTierClient {
       ? opts.endpoint
       : DEFAULT_ENDPOINT
   ).replace(/\/+$/, '');
+  if (opts.allowNoKey) {
+    const parsedEndpoint = new URL(endpoint);
+    const loopback = ['localhost', '127.0.0.1', '::1', '[::1]'].includes(parsedEndpoint.hostname);
+    if (parsedEndpoint.protocol !== 'https:' && !(parsedEndpoint.protocol === 'http:' && loopback)) {
+      throw new TypeError('Keyless Jev endpoints must use HTTPS or loopback HTTP');
+    }
+  }
   const timeoutMs = isNumber(opts.timeoutMs) && opts.timeoutMs > 0 ? opts.timeoutMs : DEFAULT_TIMEOUT_MS;
   const cacheMax =
     isNumber(opts.cacheMax) && Number.isInteger(opts.cacheMax) && opts.cacheMax > 0
@@ -138,7 +145,7 @@ export function createJevTierClient(opts: JevTierClientOptions): JevTierClient {
     }
   };
 
-  async function askTier(prompt: string): Promise<JevTierResult> {
+  async function askTier(prompt: string, externalSignal?: AbortSignal): Promise<JevTierResult> {
     const clock = typeof opts.now === 'function' ? opts.now : () => performance.now();
     const startedAt = clock();
     try {
@@ -176,6 +183,8 @@ export function createJevTierClient(opts: JevTierClientOptions): JevTierClient {
       if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
 
       const controller = new AbortController();
+      const abortFromCaller = () => controller.abort();
+      externalSignal?.addEventListener('abort', abortFromCaller, { once: true });
       const timer = setTimeout(() => controller.abort(), timeoutMs);
       let response: Response;
       try {
@@ -187,12 +196,14 @@ export function createJevTierClient(opts: JevTierClientOptions): JevTierClient {
         });
       } catch (err: unknown) {
         clearTimeout(timer);
+        externalSignal?.removeEventListener('abort', abortFromCaller);
         const name = err instanceof Error ? err.name : '';
         return fail(name === 'AbortError' || name === 'TimeoutError' ? 'timeout' : 'network');
       }
 
       if (!response.ok) {
         clearTimeout(timer);
+        externalSignal?.removeEventListener('abort', abortFromCaller);
         return fail('http_error');
       }
 
@@ -204,6 +215,7 @@ export function createJevTierClient(opts: JevTierClientOptions): JevTierClient {
         return fail(name === 'AbortError' || name === 'TimeoutError' ? 'timeout' : 'unparseable');
       } finally {
         clearTimeout(timer);
+        externalSignal?.removeEventListener('abort', abortFromCaller);
       }
 
       if (parsed === null || typeof parsed !== 'object') {
