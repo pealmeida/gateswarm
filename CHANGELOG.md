@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Deterministic providers: Jev and Laya (`GATESWARM_LAYA_ENDPOINT`) with local heuristic fallback. Enable with `GATESWARM_DETERMINISTIC_MODE=on`; off by default.
-- Automatic model discovery for `/models` APIs and Ollama, merged with the static catalog and cached for 15 minutes by default (`GATESWARM_DISCOVERY_TTL_MS`).
+- Automatic model discovery for `/models` APIs (OpenAI/Anthropic-compatible), Ollama, and CLI agents (listing command or config parse), merged with the static catalog and cached for 15 minutes by default (`GATESWARM_DISCOVERY_TTL_MS`).
 - `gateswarm models list [provider] [--refresh] [--json]` and admin-gated `GET /v1/providers/:id/models?refresh=1`.
 - R1 unified-diff chunking helpers for bounded review requests.
 
