@@ -66,7 +66,7 @@ import { loadVaultEnv } from './secrets/vault-env.js';
  *   GET  /v05/cli              — CLI provider status (v0.5)
  */
 
-import { createServer, IncomingMessage, ServerResponse } from 'http';
+import { createServer, IncomingMessage, ServerResponse, type Server } from 'http';
 import { BenchmarkLogger } from './benchmark-logger.js';
 import { heuristicScore, scoreToEffort, tierMidpoints } from './intent-engine.js';
 import { getScorerHealth, scoreIntent as scoreIntentV04 } from './intent-engine-v04.js';
@@ -720,7 +720,20 @@ async function handleDirectRoute(
   // stop sequences, etc.) while removing router-only controls below.
   const body = req && (req as any)._body ? (req as any)._body : { messages };
 
-  const sanitizedMessages = sanitizeMessages(messages);
+  const cleanModel = model.includes('/') ? model.split('/').slice(1).join('/') : model;
+  const hasTools = requestHasTools(body);
+  if (hasTools && agentRegistry.isHttpProvider(providerId)
+    && !consumptionIntelligence.modelSupportsTools(providerId, cleanModel)) {
+    return jsonResponse(res, 400, {
+      error: {
+        message: `Model ${providerId}/${cleanModel} does not support tool calling`,
+        type: 'tools_not_supported',
+      },
+    });
+  }
+  const sanitizedMessages = hasTools
+    ? sanitizeMessagesForToolCalling(messages)
+    : sanitizeMessages(messages);
 
   // CLI provider dispatch
   if (agentRegistry.isCliProvider(providerId)) {
@@ -735,10 +748,6 @@ async function handleDirectRoute(
       error: { message: `Provider ${providerId} not configured (missing baseUrl or apiKey)`, type: 'provider_unavailable' },
     });
   }
-
-  // Strip provider prefix from model name for HTTP providers
-  // e.g. "bailian/qwen3.5-plus" → "qwen3.5-plus"
-  const cleanModel = model.includes('/') ? model.split('/').slice(1).join('/') : model;
 
   const startTime = Date.now();
   // v0.5.6: Respect the client's stream flag — don't force stream:false.
@@ -958,6 +967,122 @@ async function handleCliProviderDirect(
   }
 }
 
+/** Sanitize messages for tool-calling HTTP providers (preserve matched tool_call / tool pairs). */
+export function sanitizeMessagesForToolCalling(msgs: any[]): any[] {
+  if (msgs.length <= 1) return [...msgs];
+
+  const systemMsgs = msgs.filter(m => m.role === 'system');
+  const nonSystemMsgs = msgs.filter(m => m.role !== 'system');
+
+  const merged: any[] = [];
+  for (const msg of nonSystemMsgs) {
+    const prevMsg = merged.length > 0 ? merged[merged.length - 1] : null;
+    if (
+      prevMsg &&
+      prevMsg.role === msg.role &&
+      msg.role !== 'tool' &&
+      !messageHasMediaParts(prevMsg) && !messageHasMediaParts(msg)
+    ) {
+      const prevContent = typeof prevMsg.content === 'string' ? prevMsg.content : JSON.stringify(prevMsg.content);
+      const currContent = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
+      prevMsg.content = prevContent + '\n---\n' + currContent;
+    } else {
+      merged.push({ ...msg });
+    }
+  }
+
+  const result = [...systemMsgs];
+  if (merged.length > 0 && merged[0].role !== 'user') {
+    const firstUserIdx = merged.findIndex(m => m.role === 'user');
+    if (firstUserIdx > 0) {
+      result.push(merged[firstUserIdx], ...merged.slice(firstUserIdx + 1));
+    } else {
+      result.push(...merged);
+    }
+  } else {
+    result.push(...merged);
+  }
+
+  const valid: any[] = [];
+  const hasToolCallParent = new Set<string>();
+  for (const msg of result) {
+    if (msg.role === 'assistant' && msg.tool_calls) {
+      for (const tc of msg.tool_calls) {
+        if (tc.id) hasToolCallParent.add(tc.id);
+      }
+    }
+  }
+  for (const msg of result) {
+    if (!msg.content && !(msg.role === 'assistant' && msg.tool_calls)) continue;
+    if (typeof msg.content === 'string' && msg.content.trim() === '' && !(msg.role === 'assistant' && msg.tool_calls)) continue;
+    if (msg.role === 'assistant' && msg.content === null && !msg.tool_calls) continue;
+    if (msg.role === 'tool') {
+      if (msg.tool_call_id && !hasToolCallParent.has(msg.tool_call_id)) continue;
+      const prevRole = valid.length > 0 ? valid[valid.length - 1].role : null;
+      if (prevRole !== 'assistant' && prevRole !== 'tool') continue;
+    }
+    valid.push(msg);
+  }
+
+  while (valid.length > 0 && valid[0].role !== 'system' && valid[0].role !== 'user') {
+    valid.shift();
+  }
+
+  if (!valid.some(m => m.role === 'user')) {
+    const sysEnd = valid.findIndex(m => m.role !== 'system');
+    const insertIdx = sysEnd < 0 ? valid.length : sysEnd;
+    valid.splice(insertIdx, 0, { role: 'user', content: '[Continuing conversation — please respond]' });
+  }
+
+  const validToolIds = new Set<string>();
+  for (const msg of valid) {
+    if (msg.role === 'tool' && msg.tool_call_id) validToolIds.add(msg.tool_call_id);
+  }
+  for (const msg of valid) {
+    if (msg.role === 'assistant' && msg.tool_calls?.length > 0) {
+      const covered = msg.tool_calls.every((tc: any) => validToolIds.has(tc.id));
+      if (!covered) {
+        delete msg.tool_calls;
+        if (msg.content === null || msg.content === undefined || (typeof msg.content === 'string' && msg.content.trim() === '')) {
+          msg.content = '[tool use]';
+        }
+      }
+    }
+  }
+
+  return valid;
+}
+
+export function requestHasTools(body: Record<string, unknown>): boolean {
+  const tools = body.tools;
+  return Array.isArray(tools) && tools.length > 0;
+}
+
+/** Build sanitized messages + upstream payload for a direct HTTP provider route (test hook). */
+export function buildDirectHttpProviderRequest(
+  body: Record<string, unknown>,
+  messages: any[],
+  providerId: string,
+  model: string,
+): { ok: true; cleanModel: string; payload: Record<string, unknown> } | { ok: false; status: number; error: { message: string; type: string } } {
+  const cleanModel = model.includes('/') ? model.split('/').slice(1).join('/') : model;
+  if (requestHasTools(body) && !consumptionIntelligence.modelSupportsTools(providerId, cleanModel)) {
+    return {
+      ok: false,
+      status: 400,
+      error: {
+        message: `Model ${providerId}/${cleanModel} does not support tool calling`,
+        type: 'tools_not_supported',
+      },
+    };
+  }
+  const sanitizedMessages = requestHasTools(body)
+    ? sanitizeMessagesForToolCalling(messages)
+    : sanitizeMessages(messages);
+  const payload = buildHttpProviderPayload(body, sanitizedMessages, cleanModel);
+  return { ok: true, cleanModel, payload };
+}
+
 /** Sanitize messages for OpenAI-compatible providers (remove tool messages, merge same-role). */
 function sanitizeMessages(msgs: any[]): any[] {
   if (msgs.length <= 1) return [...msgs];
@@ -1077,6 +1202,14 @@ function maxBodyBytes(): number {
     : DEFAULT_MAX_BODY_BYTES;
 }
 
+export function getMaxBodyBytes(): number {
+  return maxBodyBytes();
+}
+
+function requestBodyTooLargeMessage(): string {
+  return `request body too large (limit ${getMaxBodyBytes()} bytes)`;
+}
+
 export function parseBody(req: IncomingMessage): Promise<any> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
@@ -1097,7 +1230,7 @@ export function parseBody(req: IncomingMessage): Promise<any> {
         // Stop accepting additional data immediately. The request is destroyed
         // after the route handler has flushed its 413 response.
         req.pause();
-        fail(new RequestBodyError(413, 'request body too large'));
+        fail(new RequestBodyError(413, requestBodyTooLargeMessage()));
         return;
       }
       chunks.push(buffer);
@@ -1653,7 +1786,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
   //   3. Headers: X-Direct-Provider + X-Direct-Model
   const directRoute = resolveDirectRoute(req, body, agent);
   if (directRoute) {
-    return handleDirectRoute(req, res, agent, messages, promptText, directRoute.providerId, directRoute.model);
+    return await handleDirectRoute(req, res, agent, messages, promptText, directRoute.providerId, directRoute.model);
   }
 
   // ─── v0.5.6: Greeting/Ultra-Short Fast-Path ──────────────
@@ -1990,124 +2123,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
   //   3. Tool messages appear without a parent assistant message
   // This pass fixes all three issues.
   // ──────────────────────────────────────────────────────────
-  const sanitizeMessages = (msgs: any[]): any[] => {
-    if (msgs.length <= 1) return [...msgs];
-
-    // Phase 1: Move all system messages to the front
-    const systemMsgs = msgs.filter(m => m.role === 'system');
-    const nonSystemMsgs = msgs.filter(m => m.role !== 'system');
-
-    // Phase 2: Merge consecutive same-role messages in non-system msgs
-    // BUT skip tool messages — each tool result has its own tool_call_id and
-    // may contain structured content (images, file data). Merging would
-    // destroy the tool_call_id mapping and stringify content arrays.
-    const merged: any[] = [];
-    for (const msg of nonSystemMsgs) {
-      const prevMsg = merged.length > 0 ? merged[merged.length - 1] : null;
-      if (
-        prevMsg &&
-        prevMsg.role === msg.role &&
-        msg.role !== 'tool' &&  // Never merge tool messages
-        !messageHasMediaParts(prevMsg) && !messageHasMediaParts(msg)  // MoMA: keep media arrays intact
-      ) {
-        // Merge content
-        const prevContent = typeof prevMsg.content === 'string' ? prevMsg.content : JSON.stringify(prevMsg.content);
-        const currContent = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
-        prevMsg.content = prevContent + '\n---\n' + currContent;
-      } else {
-        merged.push({ ...msg });
-      }
-    }
-
-    // Phase 3: Ensure the sequence starts with 'user' or 'system'
-    // If the first non-system message isn't 'user', prepend a placeholder
-    const result = [...systemMsgs];
-    if (merged.length > 0 && merged[0].role !== 'user') {
-      // Try to find the first user message and move it up, otherwise skip assistant messages at start
-      const firstUserIdx = merged.findIndex(m => m.role === 'user');
-      if (firstUserIdx > 0) {
-        // Pull the first user message to the front, drop preceding assistant messages
-        result.push(merged[firstUserIdx], ...merged.slice(firstUserIdx + 1));
-      }
-      // If no user message at all, just use what we have (edge case)
-      else {
-        result.push(...merged);
-      }
-    } else {
-      result.push(...merged);
-    }
-
-    // Phase 5: Remove empty content messages + ensure tool always follows assistant
-    const valid: any[] = [];
-    const hasToolCallParent = new Set<string>();
-    for (const msg of result) {
-      if (msg.role === 'assistant' && msg.tool_calls) {
-        for (const tc of msg.tool_calls) {
-          if (tc.id) hasToolCallParent.add(tc.id);
-        }
-      }
-    }
-    for (const msg of result) {
-      // Skip empty content - BUT preserve assistant messages with tool_calls (they're structural anchors)
-      if (!msg.content && !(msg.role === 'assistant' && msg.tool_calls)) continue;
-      if (typeof msg.content === 'string' && msg.content.trim() === '' && !(msg.role === 'assistant' && msg.tool_calls)) continue;
-      // Skip null content assistant messages WITHOUT tool_calls
-      if (msg.role === 'assistant' && msg.content === null && !msg.tool_calls) continue;
-      // Skip orphaned tool messages (no parent assistant)
-      if (msg.role === 'tool') {
-        if (msg.tool_call_id && !hasToolCallParent.has(msg.tool_call_id)) continue;
-        // v0.5.2 fix: Tool must follow an assistant or another tool message.
-        // Multi-tool returns (tc1, tc2, tc3) are consecutive tool messages —
-        // only the first follows an assistant directly; subsequent ones follow
-        // the previous tool message. DeepSeek and other strict providers reject
-        // tool_calls where any tool_call_id is unmatched.
-        const prevRole = valid.length > 0 ? valid[valid.length - 1].role : null;
-        if (prevRole !== 'assistant' && prevRole !== 'tool') continue;
-      }
-      valid.push(msg);
-    }
-
-    // Phase 6: Final safety — drop leading non-system/non-user messages
-    while (valid.length > 0 && valid[0].role !== 'system' && valid[0].role !== 'user') {
-      valid.shift();
-    }
-
-    // Phase 7: ZAI/Bailian require at least one user message. If missing after compression,
-    // inject a synthetic one right after the system message.
-    if (!valid.some(m => m.role === 'user')) {
-      const sysEnd = valid.findIndex(m => m.role !== 'system');
-      const insertIdx = sysEnd < 0 ? valid.length : sysEnd;
-      valid.splice(insertIdx, 0, { role: 'user', content: '[Continuing conversation — please respond]' });
-    }
-
-    // Phase 8 (v0.5.2): Safety net — strip orphaned tool_calls from assistants.
-    // TurboQuant compression and message dropping can leave assistant messages
-    // with tool_calls whose corresponding tool responses were removed. Providers
-    // like DeepSeek reject these with "insufficient tool messages following
-    // tool_calls message". Rather than fail, drop the tool_calls metadata.
-    const validToolIds = new Set<string>();
-    for (const msg of valid) {
-      if (msg.role === 'tool' && msg.tool_call_id) validToolIds.add(msg.tool_call_id);
-    }
-    for (const msg of valid) {
-      if (msg.role === 'assistant' && msg.tool_calls?.length > 0) {
-        const covered = msg.tool_calls.every((tc: any) => validToolIds.has(tc.id));
-        if (!covered) {
-          delete msg.tool_calls;
-          // After stripping tool_calls, content may be null — replace
-          // with placeholder to satisfy strict APIs (DeepSeek rejects
-          // assistant messages with null content and no tool_calls)
-          if (msg.content === null || msg.content === undefined || (typeof msg.content === 'string' && msg.content.trim() === '')) {
-            msg.content = '[tool use]';
-          }
-        }
-      }
-    }
-
-    return valid;
-  };
-
-  const sanitizedMessages = sanitizeMessages(compressedMessages);
+  const sanitizedMessages = sanitizeMessagesForToolCalling(compressedMessages);
   compressedMessages.length = 0;
   compressedMessages.push(...sanitizedMessages);
 
@@ -2806,7 +2822,94 @@ function sanitizeForCli(msgs: any[]): any[] {
   }
   return [...systemMsgs, ...merged];
 }
+
+let unhandledRejectionGuardInstalled = false;
+
+function installUnhandledRejectionGuard(): void {
+  if (unhandledRejectionGuardInstalled) return;
+  unhandledRejectionGuardInstalled = true;
+  process.on('unhandledRejection', (reason: unknown) => {
+    if (reason instanceof RequestBodyError) {
+      console.error(`⚠️  Request body rejected without response handler (${reason.status}): ${reason.message}`);
+      return;
+    }
+  });
+}
+
+/** HTTP server with the full MoMA gateway route table (for integration tests). */
+export function createGatewayHttpServer(): Server {
+  installUnhandledRejectionGuard();
+  return createServer(async (req, res) => {
+    const url = new URL(req.url || '/', `http://localhost:${PORT}`);
+    const method = req.method || 'GET';
+    const apiKey = extractApiKey(req);
+
+    // CORS preflight
+    if (method === 'OPTIONS') {
+      res.writeHead(200, {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, POST, PATCH, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Admin-Token',
+      });
+      res.end();
+      return;
+    }
+
+    try {
+      if (url.pathname === '/health' && method === 'GET') {
+        const agents = agentRegistry.getAgents();
+        return jsonResponse(res, 200, {
+          status: 'healthy',
+          router: 'GateSwarm MoMA Router v0.7.0 (Trustable Precision)',
+          timestamp: new Date().toISOString(),
+          agents: agents.map(a => ({ id: a.id, name: a.name })),
+        });
+      }
+
+      if (url.pathname === '/v1/chat/completions' && method === 'POST') {
+        let agent: AgentConfig | null = null;
+        if (apiKey) {
+          agent = await agentRegistry.authenticate(apiKey);
+        }
+        if (!agent && REQUIRE_AUTH) {
+          return jsonResponse(res, 401, {
+            error: { message: 'Invalid or missing API key', type: 'authentication_error' },
+          });
+        }
+        if (!agent) {
+          agent = agentRegistry.getAgent('default') ?? null;
+          if (!agent) {
+            return jsonResponse(res, 503, {
+              error: { message: 'No default agent configured', type: 'service_unavailable' },
+            });
+          }
+        }
+        return await handleChatCompletion(req, res, agent);
+      }
+
+      jsonResponse(res, 404, { error: { message: `Not found: ${url.pathname}`, type: 'not_found' } });
+    } catch (err: any) {
+      if (err instanceof RequestBodyError) {
+        if (!res.headersSent) {
+          if (err.status === 413) res.once('finish', () => req.destroy());
+          jsonResponse(res, err.status, { error: { message: err.message } });
+        }
+        return;
+      }
+      console.error(`❌ Server error: ${err.message}`);
+      jsonResponse(res, 500, { error: { message: err.message, type: 'internal_error' } });
+    }
+  });
+}
+
+export async function initializeGatewayForTests(): Promise<void> {
+  installUnhandledRejectionGuard();
+  await agentRegistry.initialize();
+  await modelMatrix.initialize();
+}
+
 async function init() {
+  installUnhandledRejectionGuard();
   // ─── Secrets: Sovereign Vault first, .env fallback ───────
   // Must run before agentRegistry.initialize() — that's where provider
   // API keys are read from process.env. See src/secrets/README.md.
@@ -3355,7 +3458,7 @@ async function init() {
         const messages = body.messages || [{ role: 'user', content: body.prompt || body.content || '' }];
         const lastUser = messages.filter((m: any) => m.role === 'user').pop();
         const promptText = lastUser?.content || '';
-        return handleDirectRoute(req, res, agent, messages, promptText, directRoute.provider, directRoute.model);
+        return await handleDirectRoute(req, res, agent, messages, promptText, directRoute.provider, directRoute.model);
       }
 
       // ─── List Agents ───
@@ -3456,7 +3559,7 @@ async function init() {
           console.log(`⚠️  No API key — using default agent: ${agent.name}`);
         }
 
-        return handleChatCompletion(req, res, agent);
+        return await handleChatCompletion(req, res, agent);
       }
 
       // ─── v0.4 Status ───

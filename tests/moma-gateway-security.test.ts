@@ -91,7 +91,7 @@ describe('MoMA gateway security helpers', () => {
 
     await expect(parsed).rejects.toMatchObject({
       status: 413,
-      message: 'request body too large',
+      message: 'request body too large (limit 4 bytes)',
     });
     expect(request.isPaused()).toBe(true);
   });

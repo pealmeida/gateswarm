@@ -1,0 +1,199 @@
+import { createServer, request as httpRequest } from 'node:http';
+import { afterEach, beforeAll, afterAll, describe, expect, it, vi } from 'vitest';
+import {
+  buildDirectHttpProviderRequest,
+  createGatewayHttpServer,
+  getMaxBodyBytes,
+  initializeGatewayForTests,
+  parseBody,
+  RequestBodyError,
+  sanitizeMessagesForToolCalling,
+} from '../src/moma-gateway.js';
+
+const originalMaxBody = process.env.MOMA_MAX_BODY_BYTES;
+
+function postJson(port: number, path: string, body: string): Promise<{ status: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    const req = httpRequest(
+      {
+        hostname: '127.0.0.1',
+        port,
+        path,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(body),
+        },
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (chunk) => chunks.push(chunk));
+        res.on('end', () => {
+          resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString('utf8') });
+        });
+      },
+    );
+    req.on('error', reject);
+    req.write(body);
+    req.end();
+  });
+}
+
+function getHealth(port: number): Promise<{ status: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    const req = httpRequest({ hostname: '127.0.0.1', port, path: '/health', method: 'GET' }, (res) => {
+      const chunks: Buffer[] = [];
+      res.on('data', (chunk) => chunks.push(chunk));
+      res.on('end', () => {
+        resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString('utf8') });
+      });
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+describe('MoMA gateway direct route tool calling', () => {
+  const toolConversation = [
+    { role: 'user', content: 'call echo' },
+    {
+      role: 'assistant',
+      content: null,
+      tool_calls: [{
+        id: 'call_1',
+        type: 'function',
+        function: { name: 'echo', arguments: '{"text":"hi"}' },
+      }],
+    },
+    { role: 'tool', tool_call_id: 'call_1', content: 'PONG-7731' },
+  ];
+
+  it('preserves assistant tool_calls and matching tool results', () => {
+    const sanitized = sanitizeMessagesForToolCalling(toolConversation);
+    expect(sanitized.some((m) => m.role === 'tool' && m.content === 'PONG-7731')).toBe(true);
+    expect(sanitized.some((m) => m.role === 'assistant' && m.tool_calls?.[0]?.id === 'call_1')).toBe(true);
+  });
+
+  it('includes tool results in the direct HTTP provider payload', () => {
+    const body = {
+      model: 'zai/glm-5.3',
+      tools: [{ type: 'function', function: { name: 'echo', parameters: { type: 'object', properties: {} } } }],
+    };
+    const built = buildDirectHttpProviderRequest(body, toolConversation, 'zai', 'glm-5.3');
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+    const messages = built.payload.messages as Array<{ role: string; content?: string }>;
+    expect(messages.find((m) => m.role === 'tool')?.content).toBe('PONG-7731');
+    expect(built.payload.tools).toEqual(body.tools);
+  });
+
+  it('mock upstream receives tool results on the direct-route payload', async () => {
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const upstreamBody = JSON.parse(String(init?.body));
+      const toolMsg = upstreamBody.messages.find((m: { role: string }) => m.role === 'tool');
+      expect(toolMsg?.content).toBe('PONG-7731');
+      return new Response(JSON.stringify({
+        id: 'chatcmpl-mock',
+        object: 'chat.completion',
+        choices: [{ message: { role: 'assistant', content: 'done' }, finish_reason: 'stop' }],
+        usage: { prompt_tokens: 1, completion_tokens: 1 },
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const built = buildDirectHttpProviderRequest(
+      {
+        model: 'zai/glm-5.3',
+        tools: [{ type: 'function', function: { name: 'echo', parameters: {} } }],
+      },
+      toolConversation,
+      'zai',
+      'glm-5.3',
+    );
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+
+    await fetch('https://mock-provider.example/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(built.payload),
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+    vi.unstubAllGlobals();
+  });
+});
+
+describe('MoMA gateway request body limits', () => {
+  let server: ReturnType<typeof createGatewayHttpServer>;
+  let port = 0;
+
+  beforeAll(async () => {
+    await initializeGatewayForTests();
+    server = createGatewayHttpServer();
+    await new Promise<void>((resolve) => {
+      server.listen(0, '127.0.0.1', () => {
+        const address = server.address();
+        port = typeof address === 'object' && address ? address.port : 0;
+        resolve();
+      });
+    });
+  });
+
+  afterAll(async () => {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
+
+  afterEach(() => {
+    if (originalMaxBody === undefined) delete process.env.MOMA_MAX_BODY_BYTES;
+    else process.env.MOMA_MAX_BODY_BYTES = originalMaxBody;
+  });
+
+  it('returns 413 for bodies over the limit and keeps serving subsequent requests', async () => {
+    const limit = getMaxBodyBytes();
+    const oversized = JSON.stringify({ messages: [{ role: 'user', content: 'x'.repeat(limit) }] });
+    expect(Buffer.byteLength(oversized)).toBeGreaterThan(limit);
+
+    const rejected = await postJson(port, '/v1/chat/completions', oversized);
+    expect(rejected.status).toBe(413);
+    const rejectedJson = JSON.parse(rejected.body);
+    expect(rejectedJson.error.message).toContain(`limit ${limit} bytes`);
+
+    const healthy = await getHealth(port);
+    expect(healthy.status).toBe(200);
+    expect(JSON.parse(healthy.body).status).toBe('healthy');
+  });
+});
+
+describe('MoMA gateway body parser error messages', () => {
+  afterEach(() => {
+    if (originalMaxBody === undefined) delete process.env.MOMA_MAX_BODY_BYTES;
+    else process.env.MOMA_MAX_BODY_BYTES = originalMaxBody;
+  });
+
+  it('states the configured byte limit on 413', async () => {
+    process.env.MOMA_MAX_BODY_BYTES = '1024';
+    const server = createServer(async (req, res) => {
+      try {
+        await parseBody(req);
+        res.writeHead(200);
+        res.end('ok');
+      } catch (err) {
+        if (err instanceof RequestBodyError) {
+          res.writeHead(err.status, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: { message: err.message } }));
+        }
+      }
+    });
+    const port = await new Promise<number>((resolve) => {
+      server.listen(0, '127.0.0.1', () => {
+        const address = server.address();
+        resolve(typeof address === 'object' && address ? address.port : 0);
+      });
+    });
+    const body = JSON.stringify({ hello: 'world'.repeat(300) });
+    const response = await postJson(port, '/', body);
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    expect(response.status).toBe(413);
+    expect(JSON.parse(response.body).error.message).toBe('request body too large (limit 1024 bytes)');
+  });
+});
