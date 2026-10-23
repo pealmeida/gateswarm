@@ -91,9 +91,10 @@ describe('MoMA gateway security helpers', () => {
 
     await expect(parsed).rejects.toMatchObject({
       status: 413,
-      message: 'request body too large',
+      message: 'request body too large (limit 4 bytes)',
     });
-    expect(request.isPaused()).toBe(true);
+    // Oversized bodies are drained (not left paused) so clients can read the 413 response.
+    expect(request.isPaused()).toBe(false);
   });
 
   it('rejects malformed JSON with a 400 error instead of treating it as an empty body', async () => {
