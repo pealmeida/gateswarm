@@ -722,23 +722,29 @@ async function handleDirectRoute(
 
   const cleanModel = model.includes('/') ? model.split('/').slice(1).join('/') : model;
   const hasTools = requestHasTools(body);
-  if (hasTools && agentRegistry.isHttpProvider(providerId)
-    && !consumptionIntelligence.modelSupportsTools(providerId, cleanModel)) {
-    return jsonResponse(res, 400, {
-      error: {
-        message: `Model ${providerId}/${cleanModel} does not support tool calling`,
-        type: 'tools_not_supported',
-      },
-    });
-  }
-  const sanitizedMessages = hasTools
-    ? sanitizeMessagesForToolCalling(messages)
-    : sanitizeMessages(messages);
 
   // CLI provider dispatch
   if (agentRegistry.isCliProvider(providerId)) {
+    if (hasTools) {
+      const toolValidation = validateToolCallingConversation(messages);
+      if (!toolValidation.ok) {
+        return jsonResponse(res, 400, {
+          error: { message: toolValidation.message, type: 'invalid_tool_calls' },
+        });
+      }
+    }
+    const sanitizedMessages = hasTools
+      ? sanitizeMessagesForToolCalling(messages)
+      : sanitizeMessages(messages);
     return handleCliProviderDirect(providerId, model, agent, sanitizedMessages, res, req, promptText);
   }
+
+  const prepared = buildDirectHttpProviderRequest(body as Record<string, unknown>, messages, providerId, model);
+  if (!prepared.ok) {
+    return jsonResponse(res, prepared.status, { error: prepared.error });
+  }
+
+  const sanitizedMessages = prepared.payload.messages as any[];
 
   // HTTP provider dispatch
   const baseUrl = agentRegistry.getProviderBaseUrl(providerId);
@@ -765,7 +771,7 @@ async function handleDirectRoute(
         return sanitizedMessages.map(normalizeMessageContent);
       })()
     : sanitizedMessages;
-  const payload = buildHttpProviderPayload(body, directMessages, cleanModel);
+  const payload = { ...prepared.payload, messages: directMessages, model: prepared.cleanModel };
   const healthAttempt = providerHealth.beginAttempt(providerId);
 
   try {
@@ -838,9 +844,7 @@ async function handleDirectRoute(
         upstreamFailureHealthDetail(providerId, 200, data),
         healthAttempt,
       );
-      return jsonResponse(res, 502, {
-        error: { message: `Provider returned unusable response: ${bodyFailure.reason}`, type: 'provider_error' },
-      });
+      return jsonResponse(res, 502, { error: CLIENT_PROVIDER_ERROR });
     }
     if (clientWantsStream) {
       res.writeHead(200, {
@@ -882,11 +886,9 @@ async function handleDirectRoute(
     emitModeHeaders(req, res, promptText);
     return jsonResponse(res, 200, data);
   } catch (err: any) {
-    console.error(`❌ Direct route error (${providerId}): ${err.message}`);
+    logGatewayFailure(`Direct route error (${providerId})`, err);
     providerHealth.recordFailure(providerId, 'transport', `${providerId}/${cleanModel}`, err.message, healthAttempt);
-    return jsonResponse(res, 502, {
-      error: { message: `Provider error: ${err.message}`, type: 'provider_error' },
-    });
+    return jsonResponse(res, 502, { error: CLIENT_PROVIDER_ERROR });
   }
 }
 
@@ -1017,7 +1019,8 @@ export function sanitizeMessagesForToolCalling(msgs: any[]): any[] {
     if (typeof msg.content === 'string' && msg.content.trim() === '' && !(msg.role === 'assistant' && msg.tool_calls)) continue;
     if (msg.role === 'assistant' && msg.content === null && !msg.tool_calls) continue;
     if (msg.role === 'tool') {
-      if (msg.tool_call_id && !hasToolCallParent.has(msg.tool_call_id)) continue;
+      if (typeof msg.tool_call_id !== 'string' || msg.tool_call_id.trim() === '') continue;
+      if (!hasToolCallParent.has(msg.tool_call_id)) continue;
       const prevRole = valid.length > 0 ? valid[valid.length - 1].role : null;
       if (prevRole !== 'assistant' && prevRole !== 'tool') continue;
     }
@@ -1066,15 +1069,25 @@ export function buildDirectHttpProviderRequest(
   model: string,
 ): { ok: true; cleanModel: string; payload: Record<string, unknown> } | { ok: false; status: number; error: { message: string; type: string } } {
   const cleanModel = model.includes('/') ? model.split('/').slice(1).join('/') : model;
-  if (requestHasTools(body) && !consumptionIntelligence.modelSupportsTools(providerId, cleanModel)) {
-    return {
-      ok: false,
-      status: 400,
-      error: {
-        message: `Model ${providerId}/${cleanModel} does not support tool calling`,
-        type: 'tools_not_supported',
-      },
-    };
+  if (requestHasTools(body)) {
+    if (!consumptionIntelligence.modelSupportsTools(providerId, cleanModel)) {
+      return {
+        ok: false,
+        status: 400,
+        error: {
+          message: `Model ${providerId}/${cleanModel} is not registered as tool-capable in the model matrix`,
+          type: 'tools_not_supported',
+        },
+      };
+    }
+    const toolValidation = validateToolCallingConversation(messages);
+    if (!toolValidation.ok) {
+      return {
+        ok: false,
+        status: 400,
+        error: { message: toolValidation.message, type: 'invalid_tool_calls' },
+      };
+    }
   }
   const sanitizedMessages = requestHasTools(body)
     ? sanitizeMessagesForToolCalling(messages)
@@ -1183,7 +1196,91 @@ function extractKeyDecisions(text: string): string[] {
 
 // ─── Helpers ───────────────────────────────────────────
 
-const DEFAULT_MAX_BODY_BYTES = 1_048_576;
+export const DEFAULT_MAX_BODY_BYTES = 1_048_576;
+export const MAX_BODY_BYTES_UPPER_BOUND = 16 * 1024 * 1024;
+export const MAX_TOOL_CALLS_PER_ASSISTANT_MESSAGE = 64;
+
+export const CLIENT_INTERNAL_ERROR = Object.freeze({
+  message: 'An internal error occurred',
+  type: 'internal_error',
+});
+
+export const CLIENT_GATEWAY_ERROR = Object.freeze({
+  message: 'The gateway could not complete the request',
+  type: 'gateway_error',
+});
+
+export const CLIENT_PROVIDER_ERROR = Object.freeze({
+  message: 'The upstream provider could not be reached',
+  type: 'provider_error',
+});
+
+export function logGatewayFailure(context: string, err: unknown): void {
+  if (err instanceof Error) {
+    console.error(`❌ ${context}: ${err.name}: ${err.message}`);
+    if (err.stack) console.error(err.stack);
+  } else {
+    console.error(`❌ ${context}:`, err);
+  }
+}
+
+export function resolveMaxBodyBytes(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.MOMA_MAX_BODY_BYTES;
+  if (raw === undefined || raw.trim() === '') {
+    return DEFAULT_MAX_BODY_BYTES;
+  }
+  const configured = Number(raw);
+  if (!Number.isSafeInteger(configured) || configured <= 0) {
+    console.warn(`⚠️  MOMA_MAX_BODY_BYTES invalid (${JSON.stringify(raw)}); using default ${DEFAULT_MAX_BODY_BYTES}`);
+    return DEFAULT_MAX_BODY_BYTES;
+  }
+  if (configured > MAX_BODY_BYTES_UPPER_BOUND) {
+    console.warn(`⚠️  MOMA_MAX_BODY_BYTES ${configured} exceeds cap ${MAX_BODY_BYTES_UPPER_BOUND}; using cap`);
+    return MAX_BODY_BYTES_UPPER_BOUND;
+  }
+  return configured;
+}
+
+function isValidToolCallEntry(toolCall: unknown): boolean {
+  if (!toolCall || typeof toolCall !== 'object') return false;
+  const tc = toolCall as Record<string, unknown>;
+  if (typeof tc.id !== 'string' || tc.id.trim() === '') return false;
+  if (tc.type !== 'function') return false;
+  const fn = tc.function;
+  if (!fn || typeof fn !== 'object') return false;
+  const fnRecord = fn as Record<string, unknown>;
+  return typeof fnRecord.name === 'string' && fnRecord.name.trim() !== '';
+}
+
+/** Validate assistant tool_calls arrays in a tool-calling conversation. */
+export function validateToolCallingConversation(
+  messages: unknown[],
+): { ok: true } | { ok: false; message: string } {
+  if (!Array.isArray(messages)) {
+    return { ok: false, message: 'messages must be an array' };
+  }
+  for (const msg of messages) {
+    if (!msg || typeof msg !== 'object') continue;
+    const record = msg as Record<string, unknown>;
+    if (record.role !== 'assistant' || record.tool_calls === undefined) continue;
+    const toolCalls = record.tool_calls;
+    if (!Array.isArray(toolCalls)) {
+      return { ok: false, message: 'tool_calls must be an array' };
+    }
+    if (toolCalls.length > MAX_TOOL_CALLS_PER_ASSISTANT_MESSAGE) {
+      return {
+        ok: false,
+        message: `tool_calls exceed limit of ${MAX_TOOL_CALLS_PER_ASSISTANT_MESSAGE}`,
+      };
+    }
+    for (const toolCall of toolCalls) {
+      if (!isValidToolCallEntry(toolCall)) {
+        return { ok: false, message: 'invalid tool_calls entry' };
+      }
+    }
+  }
+  return { ok: true };
+}
 
 export class RequestBodyError extends Error {
   constructor(
@@ -1196,14 +1293,25 @@ export class RequestBodyError extends Error {
 }
 
 function maxBodyBytes(): number {
-  const configured = Number(process.env.MOMA_MAX_BODY_BYTES);
-  return Number.isSafeInteger(configured) && configured > 0
-    ? configured
-    : DEFAULT_MAX_BODY_BYTES;
+  return resolveMaxBodyBytes();
 }
 
 export function getMaxBodyBytes(): number {
   return maxBodyBytes();
+}
+
+export function handleUnhandledRejection(reason: unknown): void {
+  if (reason instanceof RequestBodyError) {
+    console.error(`⚠️  Request body rejected without response handler (${reason.status}): ${reason.message}`);
+    return;
+  }
+  if (reason instanceof Error) {
+    console.error(`❌ Unhandled rejection: ${reason.name}: ${reason.message}`);
+    if (reason.stack) console.error(reason.stack);
+  } else {
+    console.error('❌ Unhandled rejection:', reason);
+  }
+  process.exit(1);
 }
 
 function requestBodyTooLargeMessage(): string {
@@ -1694,8 +1802,8 @@ async function forwardToProvider(
       console.error(`⏱️  Provider ${providerId}/${model} timed out after ${providerTimeoutLabel}`);
       jsonResponse(res, 504, { error: { message: `Provider ${providerId}/${model} timed out after ${providerTimeoutLabel}`, type: 'timeout' } });
     } else {
-      console.error(`❌ Forward error: ${err.message}`);
-      jsonResponse(res, 502, { error: { message: `Gateway error: ${err.message}`, type: 'gateway_error' } });
+      logGatewayFailure(`Forward error (${providerId}/${model})`, err);
+      jsonResponse(res, 502, { error: CLIENT_GATEWAY_ERROR });
     }
   }
 }
@@ -2616,8 +2724,8 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
         : 'text');
       return jsonResponse(res, 200, data);
     } catch (err: any) {
-      console.error(`❌ Provider error: ${err.message}`);
-      return jsonResponse(res, 502, { error: { message: err.message, type: 'gateway_error' } });
+      logGatewayFailure(`Provider error (${providerId}/${model})`, err);
+      return jsonResponse(res, 502, { error: CLIENT_GATEWAY_ERROR });
     }
   } else {
     await forwardStreamingWithFallback({
@@ -2828,12 +2936,7 @@ let unhandledRejectionGuardInstalled = false;
 function installUnhandledRejectionGuard(): void {
   if (unhandledRejectionGuardInstalled) return;
   unhandledRejectionGuardInstalled = true;
-  process.on('unhandledRejection', (reason: unknown) => {
-    if (reason instanceof RequestBodyError) {
-      console.error(`⚠️  Request body rejected without response handler (${reason.status}): ${reason.message}`);
-      return;
-    }
-  });
+  process.on('unhandledRejection', handleUnhandledRejection);
 }
 
 /** HTTP server with the full MoMA gateway route table (for integration tests). */
@@ -2896,8 +2999,8 @@ export function createGatewayHttpServer(): Server {
         }
         return;
       }
-      console.error(`❌ Server error: ${err.message}`);
-      jsonResponse(res, 500, { error: { message: err.message, type: 'internal_error' } });
+      logGatewayFailure('Server error', err);
+      jsonResponse(res, 500, { error: CLIENT_INTERNAL_ERROR });
     }
   });
 }
@@ -3719,8 +3822,8 @@ async function init() {
         }
         return;
       }
-      console.error(`❌ Server error: ${err.message}`);
-      jsonResponse(res, 500, { error: { message: err.message, type: 'internal_error' } });
+      logGatewayFailure('Server error', err);
+      jsonResponse(res, 500, { error: CLIENT_INTERNAL_ERROR });
     }
   });
 

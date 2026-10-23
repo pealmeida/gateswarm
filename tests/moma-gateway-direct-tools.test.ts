@@ -1,5 +1,6 @@
 import { createServer, request as httpRequest } from 'node:http';
 import { afterEach, beforeAll, afterAll, describe, expect, it, vi } from 'vitest';
+import { modelMatrix } from '../src/model-matrix.js';
 import {
   buildDirectHttpProviderRequest,
   createGatewayHttpServer,
@@ -9,6 +10,15 @@ import {
   RequestBodyError,
   sanitizeMessagesForToolCalling,
 } from '../src/moma-gateway.js';
+
+function registerToolCapableZaiModel(): void {
+  modelMatrix.upsertModel({
+    id: 'glm-5.3',
+    provider: 'zai',
+    name: 'glm-5.3',
+    supportsTools: true,
+  });
+}
 
 const originalMaxBody = process.env.MOMA_MAX_BODY_BYTES;
 
@@ -68,6 +78,16 @@ describe('MoMA gateway direct route tool calling', () => {
     { role: 'tool', tool_call_id: 'call_1', content: 'PONG-7731' },
   ];
 
+  it('drops tool messages without tool_call_id', () => {
+    const withOrphanTool = [
+      ...toolConversation,
+      { role: 'tool', content: 'orphan' },
+    ];
+    const sanitized = sanitizeMessagesForToolCalling(withOrphanTool);
+    expect(sanitized.filter((m) => m.role === 'tool')).toHaveLength(1);
+    expect(sanitized.find((m) => m.role === 'tool')?.content).toBe('PONG-7731');
+  });
+
   it('preserves assistant tool_calls and matching tool results', () => {
     const sanitized = sanitizeMessagesForToolCalling(toolConversation);
     expect(sanitized.some((m) => m.role === 'tool' && m.content === 'PONG-7731')).toBe(true);
@@ -75,6 +95,7 @@ describe('MoMA gateway direct route tool calling', () => {
   });
 
   it('includes tool results in the direct HTTP provider payload', () => {
+    registerToolCapableZaiModel();
     const body = {
       model: 'zai/glm-5.3',
       tools: [{ type: 'function', function: { name: 'echo', parameters: { type: 'object', properties: {} } } }],
@@ -88,6 +109,7 @@ describe('MoMA gateway direct route tool calling', () => {
   });
 
   it('mock upstream receives tool results on the direct-route payload', async () => {
+    registerToolCapableZaiModel();
     const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
       const upstreamBody = JSON.parse(String(init?.body));
       const toolMsg = upstreamBody.messages.find((m: { role: string }) => m.role === 'tool');
@@ -129,6 +151,7 @@ describe('MoMA gateway request body limits', () => {
 
   beforeAll(async () => {
     await initializeGatewayForTests();
+    registerToolCapableZaiModel();
     server = createGatewayHttpServer();
     await new Promise<void>((resolve) => {
       server.listen(0, '127.0.0.1', () => {

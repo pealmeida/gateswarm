@@ -728,11 +728,13 @@ class ConsumptionIntelligence {
     return model?.supportsVision === true;
   }
 
-  /** Known matrix entries without tool support cannot run tool-calling requests. */
+  /**
+   * Tool calling requires a model-matrix entry with supportsTools.
+   * Unknown models are not assumed tool-capable (fail closed).
+   */
   modelSupportsTools(provider: string, modelId: string): boolean {
     const model = modelMatrix.getModel(provider, modelId);
-    if (!model) return true;
-    return model.supportsTools === true;
+    return model?.supportsTools === true;
   }
 
   /**
