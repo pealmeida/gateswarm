@@ -1223,16 +1223,69 @@ export const CLIENT_TIMEOUT_ERROR = Object.freeze({
 });
 
 const MAX_LOGGED_ERROR_MESSAGE_CHARS = 500;
+const MAX_LOGGED_STACK_CHARS = 2_000;
 
-function truncateForLog(value: string): string {
-  if (value.length <= MAX_LOGGED_ERROR_MESSAGE_CHARS) return value;
-  return `${value.slice(0, MAX_LOGGED_ERROR_MESSAGE_CHARS)}…[truncated]`;
+export const DRAIN_BODY_MAX_MS = 2_000;
+export const DEFAULT_SERVER_REQUEST_TIMEOUT_MS = 120_000;
+export const DEFAULT_SERVER_HEADERS_TIMEOUT_MS = 60_000;
+
+function truncateForLog(value: string, maxChars = MAX_LOGGED_ERROR_MESSAGE_CHARS): string {
+  if (value.length <= maxChars) return value;
+  return `${value.slice(0, maxChars)}…[truncated]`;
+}
+
+function truncateStackForLog(stack: string): string {
+  return truncateForLog(stack, MAX_LOGGED_STACK_CHARS);
+}
+
+export function resolveDrainBodyMaxMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.MOMA_DRAIN_BODY_MAX_MS;
+  if (raw === undefined || raw.trim() === '') return DRAIN_BODY_MAX_MS;
+  const configured = Number(raw);
+  if (!Number.isSafeInteger(configured) || configured <= 0) {
+    console.warn(`⚠️  MOMA_DRAIN_BODY_MAX_MS invalid (${JSON.stringify(raw)}); using default ${DRAIN_BODY_MAX_MS}`);
+    return DRAIN_BODY_MAX_MS;
+  }
+  return configured;
+}
+
+export function resolveDrainBodyMaxExtraBytes(env: NodeJS.ProcessEnv = process.env): number {
+  return resolveMaxBodyBytes(env);
+}
+
+export function resolveServerRequestTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.MOMA_SERVER_REQUEST_TIMEOUT_MS;
+  if (raw === undefined || raw.trim() === '') return DEFAULT_SERVER_REQUEST_TIMEOUT_MS;
+  const configured = Number(raw);
+  if (!Number.isSafeInteger(configured) || configured <= 0) {
+    console.warn(`⚠️  MOMA_SERVER_REQUEST_TIMEOUT_MS invalid (${JSON.stringify(raw)}); using default ${DEFAULT_SERVER_REQUEST_TIMEOUT_MS}`);
+    return DEFAULT_SERVER_REQUEST_TIMEOUT_MS;
+  }
+  return configured;
+}
+
+export function resolveServerHeadersTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.MOMA_SERVER_HEADERS_TIMEOUT_MS;
+  if (raw === undefined || raw.trim() === '') return DEFAULT_SERVER_HEADERS_TIMEOUT_MS;
+  const configured = Number(raw);
+  if (!Number.isSafeInteger(configured) || configured <= 0) {
+    console.warn(`⚠️  MOMA_SERVER_HEADERS_TIMEOUT_MS invalid (${JSON.stringify(raw)}); using default ${DEFAULT_SERVER_HEADERS_TIMEOUT_MS}`);
+    return DEFAULT_SERVER_HEADERS_TIMEOUT_MS;
+  }
+  return configured;
+}
+
+export function configureGatewayHttpServer(server: Server): void {
+  const requestTimeoutMs = resolveServerRequestTimeoutMs();
+  const headersTimeoutMs = Math.min(resolveServerHeadersTimeoutMs(), requestTimeoutMs);
+  server.requestTimeout = requestTimeoutMs;
+  server.headersTimeout = headersTimeoutMs;
 }
 
 export function logGatewayFailure(context: string, err: unknown): void {
   if (err instanceof Error) {
     console.error(`❌ ${context}: ${err.name}: ${truncateForLog(err.message)}`);
-    if (err.stack) console.error(err.stack);
+    if (err.stack) console.error(truncateStackForLog(err.stack));
   } else {
     console.error(`❌ ${context}: ${truncateForLog(String(err))}`);
   }
@@ -1248,7 +1301,39 @@ export function startDrainingRequestBody(req: IncomingMessage): void {
   const marked = req as IncomingMessage & { _gateswarmDraining?: boolean };
   if (marked._gateswarmDraining) return;
   marked._gateswarmDraining = true;
-  req.on('data', () => {});
+
+  const maxExtraBytes = resolveDrainBodyMaxExtraBytes();
+  const maxMs = resolveDrainBodyMaxMs();
+  let drainedExtraBytes = 0;
+  let finished = false;
+
+  const finishDrain = () => {
+    if (finished) return;
+    finished = true;
+    clearTimeout(timer);
+    if (!req.destroyed) req.destroy();
+  };
+
+  const timer = setTimeout(finishDrain, maxMs);
+
+  req.on('data', (chunk: Buffer | string) => {
+    if (finished) return;
+    const len = Buffer.isBuffer(chunk) ? chunk.length : Buffer.byteLength(chunk);
+    drainedExtraBytes += len;
+    if (drainedExtraBytes > maxExtraBytes) finishDrain();
+  });
+  req.on('end', () => {
+    if (!finished) {
+      finished = true;
+      clearTimeout(timer);
+    }
+  });
+  req.on('error', finishDrain);
+  req.on('close', () => {
+    finished = true;
+    clearTimeout(timer);
+  });
+
   if (!req.readableEnded) req.resume();
 }
 
@@ -1257,13 +1342,6 @@ export function respondRequestBodyError(req: IncomingMessage, res: ServerRespons
   startDrainingRequestBody(req);
   res.setHeader('Connection', 'close');
   jsonResponse(res, err.status, { error: { message: err.message } });
-  res.once('finish', () => {
-    const closeRequest = () => {
-      if (!req.destroyed) req.destroy();
-    };
-    if (req.readableEnded) closeRequest();
-    else req.once('end', closeRequest);
-  });
 }
 
 export function resolveMaxBodyBytes(env: NodeJS.ProcessEnv = process.env): number {
@@ -1348,8 +1426,8 @@ export function handleUnhandledRejection(reason: unknown): void {
     return;
   }
   if (reason instanceof Error) {
-    console.error(`❌ Unhandled rejection: ${reason.name}: ${reason.message}`);
-    if (reason.stack) console.error(reason.stack);
+    console.error(`❌ Unhandled rejection: ${reason.name}: ${truncateForLog(reason.message)}`);
+    if (reason.stack) console.error(truncateStackForLog(reason.stack));
   } else {
     console.error('❌ Unhandled rejection:', reason);
   }
@@ -2983,7 +3061,7 @@ function installUnhandledRejectionGuard(): void {
 /** HTTP server with the full MoMA gateway route table (for integration tests). */
 export function createGatewayHttpServer(): Server {
   installUnhandledRejectionGuard();
-  return createServer(async (req, res) => {
+  const server = createServer(async (req, res) => {
     const url = new URL(req.url || '/', `http://localhost:${PORT}`);
     const method = req.method || 'GET';
     const apiKey = extractApiKey(req);
@@ -3049,6 +3127,8 @@ export function createGatewayHttpServer(): Server {
       jsonResponse(res, 500, { error: CLIENT_INTERNAL_ERROR });
     }
   });
+  configureGatewayHttpServer(server);
+  return server;
 }
 
 export async function initializeGatewayForTests(): Promise<void> {
@@ -3870,6 +3950,8 @@ async function init() {
       jsonResponse(res, 500, { error: CLIENT_INTERNAL_ERROR });
     }
   });
+
+  configureGatewayHttpServer(server);
 
   // Bind host: default to loopback so a fresh install is not network-exposed.
   // Non-loopback bindings require MOMA_ADMIN_TOKEN unless explicitly overridden.

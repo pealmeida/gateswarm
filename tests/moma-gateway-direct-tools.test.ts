@@ -6,6 +6,7 @@ import {
   CLIENT_GATEWAY_ERROR,
   CLIENT_INTERNAL_ERROR,
   createGatewayHttpServer,
+  DRAIN_BODY_MAX_MS,
   getMaxBodyBytes,
   initializeGatewayForTests,
   parseBody,
@@ -108,6 +109,65 @@ function getPath(port: number, path: string): Promise<{ status: number; body: st
     });
     req.on('error', reject);
     req.end();
+  });
+}
+
+/**
+ * Chunked POST that exceeds the body limit, then keeps sending chunks without ending
+ * (simulates a client that never terminates the upload).
+ */
+function postNeverEndingChunkedUpload(
+  port: number,
+  path: string,
+  oversizePrefix: string,
+): Promise<{ status: number; body: string; elapsedMs: number }> {
+  return new Promise((resolve, reject) => {
+    const started = Date.now();
+    let interval: ReturnType<typeof setInterval> | undefined;
+    const writeChunk = (req: ClientRequest, data: string) => {
+      const size = Buffer.byteLength(data);
+      req.write(`${size.toString(16)}\r\n${data}\r\n`);
+    };
+
+    const req = httpRequest(
+      {
+        hostname: '127.0.0.1',
+        port,
+        path,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Transfer-Encoding': 'chunked',
+        },
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (chunk) => chunks.push(chunk));
+        res.on('end', () => {
+          if (interval) clearInterval(interval);
+          resolve({
+            status: res.statusCode ?? 0,
+            body: Buffer.concat(chunks).toString('utf8'),
+            elapsedMs: Date.now() - started,
+          });
+        });
+        res.on('error', reject);
+      },
+    );
+
+    req.on('error', (err) => {
+      if (interval) clearInterval(interval);
+      reject(err);
+    });
+
+    writeChunk(req, oversizePrefix);
+    interval = setInterval(() => {
+      if (req.destroyed) {
+        if (interval) clearInterval(interval);
+        return;
+      }
+      writeChunk(req, 'x'.repeat(512));
+    }, 40);
   });
 }
 
@@ -232,6 +292,19 @@ describe('MoMA gateway request body limits', () => {
     if (originalMaxBody === undefined) delete process.env.MOMA_MAX_BODY_BYTES;
     else process.env.MOMA_MAX_BODY_BYTES = originalMaxBody;
   });
+
+  it('cuts off a never-ending chunked upload promptly and keeps serving', async () => {
+    process.env.MOMA_MAX_BODY_BYTES = '512';
+    const limit = getMaxBodyBytes();
+    const prefix = JSON.stringify({ messages: [{ role: 'user', content: 'y'.repeat(limit) }] });
+
+    const rejected = await postNeverEndingChunkedUpload(port, '/v1/chat/completions', prefix);
+    expect(rejected.status).toBe(413);
+    expect(rejected.elapsedMs).toBeLessThan(DRAIN_BODY_MAX_MS + 2_000);
+
+    const healthy = await getHealth(port);
+    expect(healthy.status).toBe(200);
+  }, 15_000);
 
   it('returns 413 for bodies over the limit and keeps serving subsequent requests', async () => {
     process.env.MOMA_MAX_BODY_BYTES = String(64 * 1024);
