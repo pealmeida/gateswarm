@@ -8,6 +8,7 @@ import {
   createGatewayHttpServer,
   DRAIN_BODY_MAX_MS,
   getMaxBodyBytes,
+  resolveBodyReadIdleMs,
   initializeGatewayForTests,
   parseBody,
   RequestBodyError,
@@ -116,6 +117,47 @@ function getPath(port: number, path: string): Promise<{ status: number; body: st
  * Chunked POST that exceeds the body limit, then keeps sending chunks without ending
  * (simulates a client that never terminates the upload).
  */
+/** Opens a chunked upload, sends one chunk, then stalls (no end, no further chunks). */
+function postStalledChunkedUpload(
+  port: number,
+  path: string,
+  firstChunk: string,
+): Promise<{ status: number; body: string; elapsedMs: number }> {
+  return new Promise((resolve, reject) => {
+    const started = Date.now();
+    const writeChunk = (req: ClientRequest, data: string) => {
+      const size = Buffer.byteLength(data);
+      req.write(`${size.toString(16)}\r\n${data}\r\n`);
+    };
+    const req = httpRequest(
+      {
+        hostname: '127.0.0.1',
+        port,
+        path,
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Transfer-Encoding': 'chunked',
+        },
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (chunk) => chunks.push(chunk));
+        res.on('end', () => {
+          resolve({
+            status: res.statusCode ?? 0,
+            body: Buffer.concat(chunks).toString('utf8'),
+            elapsedMs: Date.now() - started,
+          });
+        });
+        res.on('error', reject);
+      },
+    );
+    req.on('error', reject);
+    writeChunk(req, firstChunk);
+  });
+}
+
 function postNeverEndingChunkedUpload(
   port: number,
   path: string,
@@ -292,6 +334,19 @@ describe('MoMA gateway request body limits', () => {
     if (originalMaxBody === undefined) delete process.env.MOMA_MAX_BODY_BYTES;
     else process.env.MOMA_MAX_BODY_BYTES = originalMaxBody;
   });
+
+  it('times out stalled chunked uploads on body read idle and keeps serving', async () => {
+    process.env.MOMA_BODY_READ_IDLE_MS = '600';
+    const idleMs = resolveBodyReadIdleMs();
+    const first = JSON.stringify({ messages: [{ role: 'user', content: 'hi' }] });
+
+    const stalled = await postStalledChunkedUpload(port, '/v1/chat/completions', first);
+    expect(stalled.status).toBe(408);
+    expect(stalled.elapsedMs).toBeLessThan(idleMs + 2_500);
+
+    const healthy = await getHealth(port);
+    expect(healthy.status).toBe(200);
+  }, 15_000);
 
   it('cuts off a never-ending chunked upload promptly and keeps serving', async () => {
     process.env.MOMA_MAX_BODY_BYTES = '512';

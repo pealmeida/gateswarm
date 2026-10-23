@@ -790,7 +790,6 @@ async function handleDirectRoute(
         console.log(`⚠️  [${agent.name}] Direct route ${providerId}/${cleanModel} rate-limited (${response.status})`);
       }
       const errorBody = await response.text().catch(() => '');
-      logUpstreamFailure(providerId, response.status, errorBody);
       const failureKind = providerFailureKindForHttp(response.status, errorBody);
       providerHealth.recordFailure(
         providerId,
@@ -799,11 +798,8 @@ async function handleDirectRoute(
         upstreamFailureHealthDetail(providerId, response.status, errorBody),
         healthAttempt,
       );
-      let data: any = {};
-      try { data = JSON.parse(errorBody); } catch {}
-      return jsonResponse(res, response.status, {
-        error: data.error || { message: `Provider error: ${response.status}`, type: 'provider_error' },
-      });
+      respondWithSanitizedUpstreamFailure(res, response.status, providerId, errorBody);
+      return;
     }
 
     // v0.5.6: Forward the upstream stream as-is when client wants streaming.
@@ -1222,10 +1218,44 @@ export const CLIENT_TIMEOUT_ERROR = Object.freeze({
   type: 'timeout',
 });
 
+export const CLIENT_PROVIDER_CHAIN_EXHAUSTED = Object.freeze({
+  message: 'All configured providers for this request are unavailable',
+  type: 'provider_chain_exhausted',
+});
+
+/** Client-safe HTTP status + body for a failed upstream provider response. */
+export function clientHttpResponseForUpstreamFailure(upstreamStatus: number): {
+  httpStatus: number;
+  error: typeof CLIENT_PROVIDER_ERROR | typeof CLIENT_TIMEOUT_ERROR;
+} {
+  if (upstreamStatus === 504) {
+    return { httpStatus: 504, error: CLIENT_TIMEOUT_ERROR };
+  }
+  return { httpStatus: 502, error: CLIENT_PROVIDER_ERROR };
+}
+
+export function respondWithSanitizedUpstreamFailure(
+  res: ServerResponse,
+  upstreamStatus: number,
+  providerId: string,
+  errorBody: unknown,
+): void {
+  logUpstreamFailure(providerId, upstreamStatus, errorBody);
+  const { httpStatus, error } = clientHttpResponseForUpstreamFailure(upstreamStatus);
+  jsonResponse(res, httpStatus, { error });
+}
+
+function logProviderChainExhausted(context: string, attempted: string[], skipped: string[] = []): void {
+  const attemptedText = attempted.length > 0 ? attempted.join(' → ') : 'none';
+  const skippedText = skipped.length > 0 ? skipped.join(' → ') : 'none';
+  console.error(`❌ ${context}: attempted=${truncateForLog(attemptedText)} skipped=${truncateForLog(skippedText)}`);
+}
+
 const MAX_LOGGED_ERROR_MESSAGE_CHARS = 500;
 const MAX_LOGGED_STACK_CHARS = 2_000;
 
 export const DRAIN_BODY_MAX_MS = 2_000;
+export const DEFAULT_BODY_READ_IDLE_MS = DRAIN_BODY_MAX_MS;
 export const DEFAULT_SERVER_REQUEST_TIMEOUT_MS = 120_000;
 export const DEFAULT_SERVER_HEADERS_TIMEOUT_MS = 60_000;
 
@@ -1236,6 +1266,17 @@ function truncateForLog(value: string, maxChars = MAX_LOGGED_ERROR_MESSAGE_CHARS
 
 function truncateStackForLog(stack: string): string {
   return truncateForLog(stack, MAX_LOGGED_STACK_CHARS);
+}
+
+export function resolveBodyReadIdleMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.MOMA_BODY_READ_IDLE_MS;
+  if (raw === undefined || raw.trim() === '') return DEFAULT_BODY_READ_IDLE_MS;
+  const configured = Number(raw);
+  if (!Number.isSafeInteger(configured) || configured <= 0) {
+    console.warn(`⚠️  MOMA_BODY_READ_IDLE_MS invalid (${JSON.stringify(raw)}); using default ${DEFAULT_BODY_READ_IDLE_MS}`);
+    return DEFAULT_BODY_READ_IDLE_MS;
+  }
+  return configured;
 }
 
 export function resolveDrainBodyMaxMs(env: NodeJS.ProcessEnv = process.env): number {
@@ -1404,7 +1445,7 @@ export function validateToolCallingConversation(
 
 export class RequestBodyError extends Error {
   constructor(
-    public readonly status: 400 | 413,
+    public readonly status: 400 | 408 | 413,
     message: string,
   ) {
     super(message);
@@ -1438,20 +1479,37 @@ function requestBodyTooLargeMessage(): string {
   return `request body too large (limit ${getMaxBodyBytes()} bytes)`;
 }
 
+function requestBodyIdleMessage(): string {
+  return `request body read idle timeout (limit ${resolveBodyReadIdleMs()} ms)`;
+}
+
 export function parseBody(req: IncomingMessage): Promise<any> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let bodyBytes = 0;
     let settled = false;
+    let idleTimer: ReturnType<typeof setTimeout> | undefined;
 
     const fail = (error: Error) => {
       if (settled) return;
       settled = true;
+      if (idleTimer) clearTimeout(idleTimer);
       reject(error);
     };
 
+    const armIdleTimer = () => {
+      if (idleTimer) clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => {
+        fail(new RequestBodyError(408, requestBodyIdleMessage()));
+        startDrainingRequestBody(req);
+      }, resolveBodyReadIdleMs());
+    };
+
+    armIdleTimer();
+
     req.on('data', (chunk: Buffer | string) => {
       if (settled) return;
+      armIdleTimer();
       const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
       bodyBytes += buffer.length;
       if (bodyBytes > maxBodyBytes()) {
@@ -1464,6 +1522,7 @@ export function parseBody(req: IncomingMessage): Promise<any> {
     req.on('end', () => {
       if (settled) return;
       settled = true;
+      if (idleTimer) clearTimeout(idleTimer);
       const body = Buffer.concat(chunks).toString('utf8');
       if (!body) {
         resolve({});
@@ -1475,8 +1534,14 @@ export function parseBody(req: IncomingMessage): Promise<any> {
         reject(new RequestBodyError(400, 'invalid JSON body'));
       }
     });
-    req.on('error', error => fail(error));
-    req.on('aborted', () => fail(new Error('request aborted')));
+    req.on('error', (error) => {
+      if (idleTimer) clearTimeout(idleTimer);
+      fail(error);
+    });
+    req.on('aborted', () => {
+      if (idleTimer) clearTimeout(idleTimer);
+      fail(new Error('request aborted'));
+    });
   });
 }
 
@@ -1790,7 +1855,8 @@ async function forwardStreamingWithFallback(options: {
       console.error(`❌ Streaming attempt ${target.label} failed: ${error?.message ?? kind}`);
     }
   }
-  jsonResponse(res, 502, { error: { message: `Provider stream chain exhausted (attempted: ${attempted.join(' → ') || 'none'})`, type: 'provider_chain_exhausted' } });
+  logProviderChainExhausted('Provider stream chain exhausted', attempted);
+  jsonResponse(res, 502, { error: CLIENT_PROVIDER_CHAIN_EXHAUSTED });
 }
 
 async function forwardToProvider(
@@ -1834,8 +1900,7 @@ async function forwardToProvider(
 
     if (!response.ok) {
       const error = await response.text();
-      logUpstreamFailure(providerId, response.status, error);
-      jsonResponse(res, response.status, { error: { message: error, type: 'provider_error' } });
+      respondWithSanitizedUpstreamFailure(res, response.status, providerId, error);
       return;
     }
 
@@ -2699,12 +2764,8 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
     }
 
     if (!data) {
-      const attempted = attemptedTargets.length > 0 ? attemptedTargets.join(' → ') : 'none';
-      const skipped = skippedTargets.length > 0 ? skippedTargets.join(' → ') : 'none';
-      jsonResponse(res, 502, { error: {
-        message: `Provider chain exhausted (attempted: ${attempted}; skipped: ${skipped})`,
-        type: 'provider_chain_exhausted',
-      } });
+      logProviderChainExhausted('Provider chain exhausted', attemptedTargets, skippedTargets);
+      jsonResponse(res, 502, { error: CLIENT_PROVIDER_CHAIN_EXHAUSTED });
       return;
     }
     if (actualTarget.providerId !== providerId) {
