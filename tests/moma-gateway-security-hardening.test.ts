@@ -108,6 +108,28 @@ describe('direct route tool policy', () => {
     expect(result.error.type).toBe('tools_not_supported');
   });
 
+  it('rejects more than 64 tool_calls on an assistant message', () => {
+    modelMatrix.upsertModel({
+      id: 'with-tools',
+      provider: 'mockprov',
+      name: 'with-tools',
+      supportsTools: true,
+    });
+    const tooMany = Array.from({ length: 65 }, (_, index) => ({
+      id: `call_${index}`,
+      type: 'function',
+      function: { name: 'echo', arguments: '{}' },
+    }));
+    const messages = [
+      { role: 'user', content: 'go' },
+      { role: 'assistant', content: null, tool_calls: tooMany },
+    ];
+    const result = buildDirectHttpProviderRequest(toolBody, messages, 'mockprov', 'with-tools');
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.type).toBe('invalid_tool_calls');
+  });
+
   it('returns 400 invalid_tool_calls for malformed tool_calls', () => {
     modelMatrix.upsertModel({
       id: 'with-tools',

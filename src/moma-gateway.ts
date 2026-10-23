@@ -97,6 +97,7 @@ import { consumptionTracker } from './consumption-tracker.js';
 import { quotaSync } from './quota-sync.js';
 import { getCliProvidersEnabled } from './v04-config.js';
 import { getUnusableProviderBodyReason, providerFailureKindForHttp, providerHealth } from './adapters/provider-health.js';
+import { evaluateToolCallingCapability, normalizeUpstreamModelId } from './tool-calling-capability.js';
 import { turboQuantCompress, MODEL_CONTEXT_WINDOWS } from './turboquant-compressor.js';
 import { ragIndex, queryRag } from './rag-index.js';
 import {
@@ -720,7 +721,7 @@ async function handleDirectRoute(
   // stop sequences, etc.) while removing router-only controls below.
   const body = req && (req as any)._body ? (req as any)._body : { messages };
 
-  const cleanModel = model.includes('/') ? model.split('/').slice(1).join('/') : model;
+  const cleanModel = normalizeUpstreamModelId(providerId, model);
   const hasTools = requestHasTools(body);
 
   // CLI provider dispatch
@@ -1068,14 +1069,15 @@ export function buildDirectHttpProviderRequest(
   providerId: string,
   model: string,
 ): { ok: true; cleanModel: string; payload: Record<string, unknown> } | { ok: false; status: number; error: { message: string; type: string } } {
-  const cleanModel = model.includes('/') ? model.split('/').slice(1).join('/') : model;
+  const cleanModel = normalizeUpstreamModelId(providerId, model);
   if (requestHasTools(body)) {
-    if (!consumptionIntelligence.modelSupportsTools(providerId, cleanModel)) {
+    const capability = evaluateToolCallingCapability(providerId, cleanModel);
+    if (!capability.allowed) {
       return {
         ok: false,
         status: 400,
         error: {
-          message: `Model ${providerId}/${cleanModel} is not registered as tool-capable in the model matrix`,
+          message: capability.reason,
           type: 'tools_not_supported',
         },
       };
@@ -1215,13 +1217,53 @@ export const CLIENT_PROVIDER_ERROR = Object.freeze({
   type: 'provider_error',
 });
 
+export const CLIENT_TIMEOUT_ERROR = Object.freeze({
+  message: 'The upstream provider did not respond in time',
+  type: 'timeout',
+});
+
+const MAX_LOGGED_ERROR_MESSAGE_CHARS = 500;
+
+function truncateForLog(value: string): string {
+  if (value.length <= MAX_LOGGED_ERROR_MESSAGE_CHARS) return value;
+  return `${value.slice(0, MAX_LOGGED_ERROR_MESSAGE_CHARS)}…[truncated]`;
+}
+
 export function logGatewayFailure(context: string, err: unknown): void {
   if (err instanceof Error) {
-    console.error(`❌ ${context}: ${err.name}: ${err.message}`);
+    console.error(`❌ ${context}: ${err.name}: ${truncateForLog(err.message)}`);
     if (err.stack) console.error(err.stack);
   } else {
-    console.error(`❌ ${context}:`, err);
+    console.error(`❌ ${context}: ${truncateForLog(String(err))}`);
   }
+}
+
+let gatewayTestRoutesEnabled = false;
+
+export function enableGatewayTestRoutes(): void {
+  gatewayTestRoutesEnabled = true;
+}
+
+export function startDrainingRequestBody(req: IncomingMessage): void {
+  const marked = req as IncomingMessage & { _gateswarmDraining?: boolean };
+  if (marked._gateswarmDraining) return;
+  marked._gateswarmDraining = true;
+  req.on('data', () => {});
+  if (!req.readableEnded) req.resume();
+}
+
+export function respondRequestBodyError(req: IncomingMessage, res: ServerResponse, err: RequestBodyError): void {
+  if (res.headersSent) return;
+  startDrainingRequestBody(req);
+  res.setHeader('Connection', 'close');
+  jsonResponse(res, err.status, { error: { message: err.message } });
+  res.once('finish', () => {
+    const closeRequest = () => {
+      if (!req.destroyed) req.destroy();
+    };
+    if (req.readableEnded) closeRequest();
+    else req.once('end', closeRequest);
+  });
 }
 
 export function resolveMaxBodyBytes(env: NodeJS.ProcessEnv = process.env): number {
@@ -1335,10 +1377,8 @@ export function parseBody(req: IncomingMessage): Promise<any> {
       const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
       bodyBytes += buffer.length;
       if (bodyBytes > maxBodyBytes()) {
-        // Stop accepting additional data immediately. The request is destroyed
-        // after the route handler has flushed its 413 response.
-        req.pause();
         fail(new RequestBodyError(413, requestBodyTooLargeMessage()));
+        startDrainingRequestBody(req);
         return;
       }
       chunks.push(buffer);
@@ -1800,7 +1840,8 @@ async function forwardToProvider(
     clearTimeout(timeoutId);
     if (err.name === 'AbortError') {
       console.error(`⏱️  Provider ${providerId}/${model} timed out after ${providerTimeoutLabel}`);
-      jsonResponse(res, 504, { error: { message: `Provider ${providerId}/${model} timed out after ${providerTimeoutLabel}`, type: 'timeout' } });
+      logGatewayFailure(`Provider timeout (${providerId}/${model}) after ${providerTimeoutLabel}`, err);
+      jsonResponse(res, 504, { error: CLIENT_TIMEOUT_ERROR });
     } else {
       logGatewayFailure(`Forward error (${providerId}/${model})`, err);
       jsonResponse(res, 502, { error: CLIENT_GATEWAY_ERROR });
@@ -1928,7 +1969,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
         const baseUrl = agentRegistry.getProviderBaseUrl(trivialCfg.provider);
         const apiKey = agentRegistry.getProviderApiKey(trivialCfg.provider);
         if (baseUrl && apiKey) {
-          const cleanModel = trivialCfg.model.includes('/') ? trivialCfg.model.split('/').slice(1).join('/') : trivialCfg.model;
+          const cleanModel = normalizeUpstreamModelId(trivialCfg.provider, trivialCfg.model);
           const healthAttempt = providerHealth.beginAttempt(trivialCfg.provider);
           greetingHealthAttempt = healthAttempt;
           const resp = await fetch(`${baseUrl}/chat/completions`, {
@@ -2969,6 +3010,14 @@ export function createGatewayHttpServer(): Server {
         });
       }
 
+      if (gatewayTestRoutesEnabled && url.pathname === '/__test__/internal-error' && method === 'GET') {
+        throw new Error('secret-internal-database-host');
+      }
+      if (gatewayTestRoutesEnabled && url.pathname === '/__test__/bad-gateway' && method === 'GET') {
+        logGatewayFailure('test bad gateway', new Error('secret-upstream-detail'));
+        return jsonResponse(res, 502, { error: CLIENT_GATEWAY_ERROR });
+      }
+
       if (url.pathname === '/v1/chat/completions' && method === 'POST') {
         let agent: AgentConfig | null = null;
         if (apiKey) {
@@ -2993,10 +3042,7 @@ export function createGatewayHttpServer(): Server {
       jsonResponse(res, 404, { error: { message: `Not found: ${url.pathname}`, type: 'not_found' } });
     } catch (err: any) {
       if (err instanceof RequestBodyError) {
-        if (!res.headersSent) {
-          if (err.status === 413) res.once('finish', () => req.destroy());
-          jsonResponse(res, err.status, { error: { message: err.message } });
-        }
+        respondRequestBodyError(req, res, err);
         return;
       }
       logGatewayFailure('Server error', err);
@@ -3007,6 +3053,7 @@ export function createGatewayHttpServer(): Server {
 
 export async function initializeGatewayForTests(): Promise<void> {
   installUnhandledRejectionGuard();
+  enableGatewayTestRoutes();
   await agentRegistry.initialize();
   await modelMatrix.initialize();
 }
@@ -3816,10 +3863,7 @@ async function init() {
 
     } catch (err: any) {
       if (err instanceof RequestBodyError) {
-        if (!res.headersSent) {
-          if (err.status === 413) res.once('finish', () => req.destroy());
-          jsonResponse(res, err.status, { error: { message: err.message } });
-        }
+        respondRequestBodyError(req, res, err);
         return;
       }
       logGatewayFailure('Server error', err);

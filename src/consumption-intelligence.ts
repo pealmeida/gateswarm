@@ -18,6 +18,7 @@
  */
 
 import { modelMatrix, ModelEntry, EffortLevel, ProviderSummary } from './model-matrix.js';
+import { evaluateToolCallingCapability } from './tool-calling-capability.js';
 import { agentRegistry } from './agent-registry.js';
 import { getConfig, saveConfig } from './v04-config.js';
 import { providerQuota, getMultiWindowQuota } from './provider-quota.js';
@@ -728,13 +729,9 @@ class ConsumptionIntelligence {
     return model?.supportsVision === true;
   }
 
-  /**
-   * Tool calling requires a model-matrix entry with supportsTools.
-   * Unknown models are not assumed tool-capable (fail closed).
-   */
+  /** Delegates to shared direct-route tool capability policy (matrix + allowlist). */
   modelSupportsTools(provider: string, modelId: string): boolean {
-    const model = modelMatrix.getModel(provider, modelId);
-    return model?.supportsTools === true;
+    return evaluateToolCallingCapability(provider, modelId).allowed;
   }
 
   /**
