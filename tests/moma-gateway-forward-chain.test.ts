@@ -11,7 +11,12 @@ import {
   DEFAULT_RETRY_AFTER_SECONDS,
   initializeGatewayForTests,
 } from '../src/moma-gateway.js';
-import { agentRegistry } from '../src/agent-registry.js';
+import { agentRegistry, DEFAULT_CLI_PROVIDERS } from '../src/agent-registry.js';
+
+function registerClaudeCliForTests(): void {
+  if (agentRegistry.isCliProvider('claude-cli')) return;
+  agentRegistry.registerCliProvider(DEFAULT_CLI_PROVIDERS['claude-cli']);
+}
 
 const originalBailianKey = process.env.BAILIAN_KEY;
 const originalZaiKey = process.env.ZAI_KEY;
@@ -305,6 +310,7 @@ describe('MoMA routed forward chain', () => {
   });
 
   it('falls back when CLI stdout is rate-limit text despite exit 0', async () => {
+    registerClaudeCliForTests();
     vi.spyOn(consumptionIntelligence, 'selectModel').mockResolvedValue({
       provider: 'claude-cli',
       model: 'cc/test-model',
@@ -355,6 +361,7 @@ describe('MoMA routed forward chain', () => {
   });
 
   it('returns 429 when routed forward chain exhausts on CLI rate-limit stdout', async () => {
+    registerClaudeCliForTests();
     vi.spyOn(consumptionIntelligence, 'selectModel').mockResolvedValue({
       provider: 'claude-cli',
       model: 'cc/test-model',
@@ -389,6 +396,44 @@ describe('MoMA routed forward chain', () => {
     expect(JSON.parse(response.body).error).toEqual(CLIENT_RATE_LIMIT_ERROR);
     expect(response.body).not.toContain('Rate limit exceeded');
     expect(response.headers['retry-after']).toBe(String(DEFAULT_RETRY_AFTER_SECONDS));
+  });
+
+  it('does not record model matrix errors for CLI stdout API Error: 1305 (R7-N3)', async () => {
+    registerClaudeCliForTests();
+    vi.spyOn(consumptionIntelligence, 'selectModel').mockResolvedValue({
+      provider: 'claude-cli',
+      model: 'cc/test-model',
+      tier: 'heavy',
+      reason: 'static_fallback',
+      estimatedTokens: 32,
+      estimatedCost: 0,
+      confidence: 1,
+      alternatives: [],
+      source: 'request',
+      timestamp: Date.now(),
+    });
+    vi.spyOn(consumptionIntelligence, 'getFallback').mockResolvedValue(null);
+    mockHealthyProviders();
+    vi.spyOn(providerQuota, 'shouldSwitch').mockReturnValue({ shouldSwitch: false, reason: '' });
+    const recordError = vi.spyOn(modelMatrix, 'recordError');
+    const record429 = vi.spyOn(providerQuota, 'record429');
+    vi.spyOn(agentRegistry, 'checkCliProviderAvailability').mockResolvedValue({ ok: true });
+    vi.spyOn(agentRegistry, 'getCliAdapter').mockReturnValue({
+      chatCompletion: vi.fn().mockResolvedValue({
+        content: 'API Error: 1305 system overloaded',
+        finishReason: 'stop',
+        usage: { promptTokens: 1, completionTokens: 1 },
+        model: 'cc/test-model',
+      }),
+    } as any);
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(
+      JSON.stringify({ error: { code: 1305, message: 'overload' } }),
+      { status: 429, headers: { 'Content-Type': 'application/json' } },
+    )));
+
+    await postJson(port, routedRequest({ effort_override: 'heavy' }));
+    expect(recordError).not.toHaveBeenCalled();
+    expect(record429).not.toHaveBeenCalled();
   });
 
   it('does not mark models unavailable after three consecutive 1305 overload responses', async () => {

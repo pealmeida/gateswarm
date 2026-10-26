@@ -77,6 +77,27 @@ describe('provider response usability', () => {
     })).toBeNull();
   });
 
+  it('matches anchored CLI failure signatures (R7-N1) without prose heuristics', () => {
+    expect(getCliStdoutBodyFailure('Too many requests')).toMatchObject({ kind: 'rate_limit' });
+    expect(getCliStdoutBodyFailure('Claude AI usage limit reached|1234567890')).toMatchObject({ kind: 'rate_limit' });
+    expect(getCliStdoutBodyFailure('5-hour limit reached ∙ resets 3am')).toMatchObject({ kind: 'rate_limit' });
+    expect(getCliStdoutBodyFailure('API Error: 429 quota')).toMatchObject({ kind: 'rate_limit' });
+    expect(getCliStdoutBodyFailure('API Error: 1305 system overloaded')).toMatchObject({ kind: 'rate_limit' });
+  });
+
+  it('does not flag legitimate short answers that mention errors or rate limits (R7-B1 negatives)', () => {
+    const negatives = [
+      'Error: rate limit handling is missing here. Wrap the call in a retry with backoff.',
+      'Failed requests caused by rate limits should be retried with exponential backoff.',
+      'Invalid — rate limits apply per API key, not per IP.',
+      'API error 500 usually indicates a server bug; check the logs.',
+      'Unauthorized (401) means your token is missing.',
+    ];
+    for (const text of negatives) {
+      expect(getCliStdoutBodyFailure(text)).toBeNull();
+    }
+  });
+
   it('maps Z.AI finish_reason values and treats network_error as failure (R6-F1)', () => {
     const sensitive = normalizeZaiChatCompletionBody({
       choices: [{ message: { content: 'ok' }, finish_reason: 'sensitive' }],
@@ -92,7 +113,16 @@ describe('provider response usability', () => {
     const network = prepareProviderChatCompletionBody({
       choices: [{ message: { content: 'partial' }, finish_reason: 'network_error' }],
     }, 'zai');
-    expect(network.bodyFailure).toMatchObject({ kind: 'transport', reason: 'zai_network_error_finish' });
+    expect(network.bodyFailure).toMatchObject({ kind: 'server_error', reason: 'zai_network_error_finish' });
+  });
+
+  it('does not put Z.AI in hard cooldown after two network_error finish_reason failures (R7-N5)', () => {
+    const health = new ProviderHealthTracker(() => Date.now(), () => {});
+    for (let i = 0; i < 2; i += 1) {
+      const attempt = health.beginAttempt('zai');
+      health.recordFailure('zai', 'server_error', 'zai/glm-test', 'network_error finish', attempt);
+    }
+    expect(health.getSkipReason('zai')).toBeNull();
   });
 
   it('treats top-level error fields as failure even with terminal empty choices', () => {

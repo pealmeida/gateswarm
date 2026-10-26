@@ -1,6 +1,11 @@
 import { request as httpRequest } from 'node:http';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { agentRegistry } from '../src/agent-registry.js';
+import { agentRegistry, DEFAULT_CLI_PROVIDERS } from '../src/agent-registry.js';
+
+function registerClaudeCliForTests(): void {
+  if (agentRegistry.isCliProvider('claude-cli')) return;
+  agentRegistry.registerCliProvider(DEFAULT_CLI_PROVIDERS['claude-cli']);
+}
 import { modelMatrix } from '../src/model-matrix.js';
 import { providerQuota } from '../src/provider-quota.js';
 import {
@@ -514,6 +519,7 @@ describe('direct route upstream error sanitization', () => {
   });
 
   it('returns 429 without echoing CLI rate-limit stdout on direct CLI route', async () => {
+    registerClaudeCliForTests();
     vi.spyOn(agentRegistry, 'checkCliProviderAvailability').mockResolvedValue({ ok: true });
     vi.spyOn(agentRegistry, 'getCliAdapter').mockReturnValue({
       chatCompletion: vi.fn().mockResolvedValue({

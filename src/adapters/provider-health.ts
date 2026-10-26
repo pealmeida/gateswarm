@@ -206,9 +206,49 @@ export function getUnusableProviderBodyReason(data: any): ProviderBodyFailure | 
   return getUnusableContentReason(extractProviderResponseText(data));
 }
 
-/** CLI may exit 0 while printing provider error or rate-limit text on stdout. */
-export function getCliStdoutBodyFailure(content: string): ProviderBodyFailure | null {
-  return getUnusableContentReason(content);
+const CLI_STDOUT_FAILURE_MAX_LENGTH = 500;
+
+function cliStdoutFailureFromApiErrorCode(code: string, message: string): ProviderBodyFailure {
+  if (code === '401' || code === '403') {
+    return { reason: 'cli_api_error_stdout', kind: 'auth', message };
+  }
+  if (code === '429' || code === '1305' || code === '1308') {
+    return { reason: 'cli_api_error_stdout', kind: 'rate_limit', message };
+  }
+  if (/^5\d\d$/.test(code)) {
+    return { reason: 'cli_api_error_stdout', kind: 'server_error', message };
+  }
+  return { reason: 'cli_api_error_stdout', kind: 'provider_error', message };
+}
+
+/**
+ * CLI subprocesses may exit 0 while printing a short, known failure line on stdout.
+ * Only anchored signatures match — never infer auth/rate-limit from explanatory prose.
+ */
+export function getCliStdoutBodyFailure(content: any): ProviderBodyFailure | null {
+  const text = contentToText(content).trim();
+  if (!text || text.length > CLI_STDOUT_FAILURE_MAX_LENGTH) return null;
+
+  const apiError = text.match(/^API Error:\s*(\d{3,4})\b.*$/i);
+  if (apiError) return cliStdoutFailureFromApiErrorCode(apiError[1], text);
+
+  if (/^Rate limit exceeded\b.*$/i.test(text)) {
+    return { reason: 'cli_rate_limit_stdout', kind: 'rate_limit', message: text };
+  }
+  if (/^Rate limit reached\b.*$/i.test(text)) {
+    return { reason: 'cli_rate_limit_stdout', kind: 'rate_limit', message: text };
+  }
+  if (/^Too many requests\b.*$/i.test(text)) {
+    return { reason: 'cli_rate_limit_stdout', kind: 'rate_limit', message: text };
+  }
+  if (/^Claude AI usage limit reached\b.*$/i.test(text)) {
+    return { reason: 'cli_rate_limit_stdout', kind: 'rate_limit', message: text };
+  }
+  if (/^\d+-hour limit reached\b.*$/i.test(text)) {
+    return { reason: 'cli_rate_limit_stdout', kind: 'rate_limit', message: text };
+  }
+
+  return null;
 }
 
 /** Map Z.AI finish_reason values to OpenAI-compatible reasons (R6-F1). */
@@ -223,7 +263,7 @@ export function normalizeZaiChatCompletionBody(data: any): { data: any; failure:
         data,
         failure: {
           reason: 'zai_network_error_finish',
-          kind: 'transport',
+          kind: 'server_error',
           message: 'upstream finish_reason network_error',
         },
       };

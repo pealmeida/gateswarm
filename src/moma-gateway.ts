@@ -1945,7 +1945,12 @@ export function extractUpstreamErrorFields(body: unknown): { code: string | numb
 export function isOverloadOnlyRateLimit(status: number, errorBody: unknown): boolean {
   if (status === 1305) return true;
   const { code } = extractUpstreamErrorFields(errorBody);
-  return code === 1305 || code === '1305';
+  if (code === 1305 || code === '1305') return true;
+  if (errorBody && typeof errorBody === 'object' && Array.isArray((errorBody as { choices?: unknown[] }).choices)) {
+    const content = (errorBody as { choices: Array<{ message?: { content?: unknown } }> }).choices[0]?.message?.content;
+    if (typeof content === 'string' && /^API Error:\s*1305\b/i.test(content.trim())) return true;
+  }
+  return false;
 }
 
 export function shouldRecordProviderQuotaThrottle(
