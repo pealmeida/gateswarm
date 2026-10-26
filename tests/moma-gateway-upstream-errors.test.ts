@@ -8,7 +8,10 @@ import {
   CLIENT_TIMEOUT_ERROR,
   clientHttpResponseForUpstreamFailure,
   createGatewayHttpServer,
+  DEFAULT_RETRY_AFTER_SECONDS,
   initializeGatewayForTests,
+  MAX_RETRY_AFTER_SECONDS,
+  resolveRetryAfterSeconds,
   shouldRecordProviderQuotaThrottle,
 } from '../src/moma-gateway.js';
 
@@ -80,12 +83,51 @@ describe('clientHttpResponseForUpstreamFailure', () => {
   });
 });
 
+describe('resolveRetryAfterSeconds', () => {
+  const headers = (retryAfter: string) => ({ get: (name: string) => (name.toLowerCase() === 'retry-after' ? retryAfter : null) });
+  const now = Date.UTC(2026, 9, 26, 12, 0, 0);
+
+  it('rejects scientific notation, hex, and other non-decimal delay values', () => {
+    expect(resolveRetryAfterSeconds(headers('1e20'), DEFAULT_RETRY_AFTER_SECONDS, now)).toBe(String(DEFAULT_RETRY_AFTER_SECONDS));
+    expect(resolveRetryAfterSeconds(headers('0x10'), DEFAULT_RETRY_AFTER_SECONDS, now)).toBe(String(DEFAULT_RETRY_AFTER_SECONDS));
+    expect(resolveRetryAfterSeconds(headers('not-a-date'), DEFAULT_RETRY_AFTER_SECONDS, now)).toBe(String(DEFAULT_RETRY_AFTER_SECONDS));
+  });
+
+  it('caps plain decimal delay-seconds at 300', () => {
+    expect(resolveRetryAfterSeconds(headers('42'), DEFAULT_RETRY_AFTER_SECONDS, now)).toBe('42');
+    expect(resolveRetryAfterSeconds(headers('9999'), DEFAULT_RETRY_AFTER_SECONDS, now)).toBe(String(MAX_RETRY_AFTER_SECONDS));
+  });
+
+  it('parses HTTP-date Retry-After as seconds until that time (clamped)', () => {
+    const future = new Date(now + 90_000).toUTCString();
+    expect(resolveRetryAfterSeconds(headers(future), DEFAULT_RETRY_AFTER_SECONDS, now)).toBe('90');
+  });
+
+  it('clamps past HTTP-date values to zero', () => {
+    const past = new Date(now - 60_000).toUTCString();
+    expect(resolveRetryAfterSeconds(headers(past), DEFAULT_RETRY_AFTER_SECONDS, now)).toBe('0');
+  });
+});
+
 describe('provider quota throttle recording', () => {
   it('does not record quota throttle for overload-only 1305 responses', () => {
     const body = JSON.stringify({ error: { code: 1305, message: 'system overloaded' } });
     expect(shouldRecordProviderQuotaThrottle(1305, body)).toBe(false);
     expect(shouldRecordProviderQuotaThrottle(429, body)).toBe(false);
     expect(shouldRecordProviderQuotaThrottle(429, JSON.stringify({ error: { code: 'rate_limit_exceeded' } }))).toBe(true);
+  });
+
+  it('records throttle for classified rate_limit on non-429 HTTP statuses', () => {
+    const rateLimitBody = JSON.stringify({ error: { code: 'rate_limit_exceeded', message: 'slow down' } });
+    expect(shouldRecordProviderQuotaThrottle(400, rateLimitBody, { rateLimitClassified: true })).toBe(true);
+    expect(shouldRecordProviderQuotaThrottle(400, JSON.stringify({ error: { code: 1305 } }), { rateLimitClassified: true })).toBe(false);
+  });
+
+  it('records throttle for rate_limit failures in HTTP 200 bodies', () => {
+    const rateLimitBody = { error: { code: 1308, message: 'quota' } };
+    expect(shouldRecordProviderQuotaThrottle(200, rateLimitBody, { rateLimitClassified: true })).toBe(true);
+    expect(shouldRecordProviderQuotaThrottle(200, { error: { code: 1305 } }, { rateLimitClassified: true })).toBe(false);
+    expect(shouldRecordProviderQuotaThrottle(200, rateLimitBody)).toBe(false);
   });
 });
 
@@ -118,6 +160,27 @@ describe('direct route upstream error sanitization', () => {
   });
 
   const leakMarkers = ['UPSTREAM_SECRET_DETAIL', 'evil-provider', 'evil-model-id'];
+
+  it('caps abusive Retry-After delay-seconds on the direct route', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(
+      JSON.stringify({ error: { message: 'UPSTREAM_SECRET_DETAIL 429' } }),
+      {
+        status: 429,
+        headers: {
+          'Content-Type': 'application/json',
+          'Retry-After': '1e20',
+        },
+      },
+    )));
+
+    const payload = JSON.stringify({
+      model: 'zai/glm-5.3',
+      messages: [{ role: 'user', content: 'hello' }],
+    });
+    const response = await postJson(port, payload);
+    expect(response.status).toBe(429);
+    expect(response.headers['retry-after']).toBe(String(DEFAULT_RETRY_AFTER_SECONDS));
+  });
 
   it('returns 429 with Retry-After for upstream rate limits without leaking body', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(

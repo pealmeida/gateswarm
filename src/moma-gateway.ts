@@ -1253,6 +1253,7 @@ export const CLIENT_RATE_LIMIT_ERROR = Object.freeze({
 });
 
 export const DEFAULT_RETRY_AFTER_SECONDS = 60;
+export const MAX_RETRY_AFTER_SECONDS = 300;
 
 /** Client-safe HTTP status + body for a failed upstream provider response. */
 export function clientHttpResponseForUpstreamFailure(upstreamStatus: number): {
@@ -1271,11 +1272,23 @@ export function clientHttpResponseForUpstreamFailure(upstreamStatus: number): {
 export function resolveRetryAfterSeconds(
   upstreamHeaders: Headers | { get(name: string): string | null } | null | undefined,
   fallbackSeconds = DEFAULT_RETRY_AFTER_SECONDS,
+  nowMs: number = Date.now(),
 ): string {
   const raw = upstreamHeaders?.get('retry-after')?.trim();
   if (!raw) return String(fallbackSeconds);
-  const seconds = Number(raw);
-  if (Number.isFinite(seconds) && seconds > 0) return String(Math.ceil(seconds));
+
+  if (/^\d+$/.test(raw)) {
+    const seconds = Number.parseInt(raw, 10);
+    if (seconds > 0) return String(Math.min(seconds, MAX_RETRY_AFTER_SECONDS));
+    return String(fallbackSeconds);
+  }
+
+  const dateMs = Date.parse(raw);
+  if (!Number.isNaN(dateMs)) {
+    const deltaSeconds = Math.floor((dateMs - nowMs) / 1000);
+    return String(Math.min(MAX_RETRY_AFTER_SECONDS, Math.max(0, deltaSeconds)));
+  }
+
   return String(fallbackSeconds);
 }
 
@@ -1681,8 +1694,13 @@ export function isOverloadOnlyRateLimit(status: number, errorBody: unknown): boo
   return code === 1305 || code === '1305';
 }
 
-export function shouldRecordProviderQuotaThrottle(status: number, errorBody: unknown): boolean {
+export function shouldRecordProviderQuotaThrottle(
+  status: number,
+  errorBody: unknown,
+  options?: { rateLimitClassified?: boolean },
+): boolean {
   if (isOverloadOnlyRateLimit(status, errorBody)) return false;
+  if (options?.rateLimitClassified) return true;
   return status === 429 || status === 1308;
 }
 
@@ -2800,7 +2818,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
           const failureKind = providerFailureKindForHttp(resp.status, errorText);
           console.log(`⚠️  [${agent.name}] ${target.label} provider error (${resp.status}), trying fallback...`);
           modelMatrix.recordError(target.providerId, target.model, `provider error (${resp.status})`);
-          if (shouldRecordProviderQuotaThrottle(resp.status, errorText)) {
+          if (shouldRecordProviderQuotaThrottle(resp.status, errorText, { rateLimitClassified: failureKind === 'rate_limit' })) {
             providerQuota.record429(target.providerId);
           }
           consumptionTracker.recordUsage(target.providerId, { tokensIn: 0, tokensOut: 0, latencyMs: 0, error: true });
@@ -2814,7 +2832,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
         if (bodyFailure) {
           console.log(`⚠️  [${agent.name}] ${target.label} returned unusable body (${bodyFailure.reason}), trying fallback...`);
           modelMatrix.recordError(target.providerId, target.model, bodyFailure.reason);
-          if (shouldRecordProviderQuotaThrottle(200, data)) {
+          if (shouldRecordProviderQuotaThrottle(200, data, { rateLimitClassified: bodyFailure.kind === 'rate_limit' })) {
             providerQuota.record429(target.providerId);
           }
           consumptionTracker.recordUsage(target.providerId, { tokensIn: 0, tokensOut: 0, latencyMs: 0, error: true });
