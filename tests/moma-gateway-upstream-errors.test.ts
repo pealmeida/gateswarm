@@ -12,9 +12,13 @@ import {
   initializeGatewayForTests,
   MAX_RETRY_AFTER_SECONDS,
   resolveRetryAfterSeconds,
+  gatewayVoteRequestForClient,
   sanitizeClientChatCompletionPayload,
+  sanitizeClientLogprobs,
+  sanitizeClientVoteRequestField,
   shouldRecordProviderQuotaThrottle,
 } from '../src/moma-gateway.js';
+import type { VoteRequest } from '../src/training-mode.js';
 
 const originalZaiKey = process.env.ZAI_KEY;
 
@@ -145,7 +149,7 @@ describe('sanitizeClientChatCompletionPayload', () => {
     expect(choice.message.refusal).toBe('none');
     expect(choice.message.content).toBe('');
     expect(choice.finish_reason).toBe('length');
-    expect(choice.logprobs).toEqual({ content: [{ token: 'a', logprob: -0.1 }] });
+    expect(choice.logprobs).toEqual({ content: [{ token: 'a', logprob: -0.1, top_logprobs: [] }] });
     expect(sanitized.usage).toEqual({
       prompt_tokens: 10,
       completion_tokens: 20,
@@ -156,7 +160,7 @@ describe('sanitizeClientChatCompletionPayload', () => {
     expect(sanitized.usage).not.toHaveProperty('evil_field');
   });
 
-  it('preserves documented _voteRequest metadata on the client payload', () => {
+  it('drops upstream _voteRequest metadata from sanitized payloads', () => {
     const sanitized = sanitizeClientChatCompletionPayload({
       id: 'chatcmpl-vote',
       object: 'chat.completion',
@@ -165,18 +169,101 @@ describe('sanitizeClientChatCompletionPayload', () => {
       choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
       usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
       _voteRequest: {
-        id: 'vote-1',
-        prompt: 'vote prompt',
+        id: 'v000000000001',
+        prompt: 'evil upstream vote',
         predictedTier: 'light',
         confidence: 0.8,
       },
     });
-    expect(sanitized._voteRequest).toEqual({
-      id: 'vote-1',
-      prompt: 'vote prompt',
-      predictedTier: 'light',
-      confidence: 0.8,
+    expect(sanitized).not.toHaveProperty('_voteRequest');
+  });
+
+  it('sanitizes logprobs and rejects probe fields', () => {
+    expect(sanitizeClientLogprobs({
+      error: { message: 'UPSTREAM_SECRET_DETAIL' },
+      content: [{
+        token: 'ok',
+        logprob: -0.2,
+        bytes: [111, 107],
+        top_logprobs: [{ token: 'ok', logprob: -0.2, bytes: null }],
+      }],
+    })).toEqual({
+      content: [{
+        token: 'ok',
+        logprob: -0.2,
+        bytes: [111, 107],
+        top_logprobs: [{ token: 'ok', logprob: -0.2, bytes: null }],
+      }],
     });
+    expect(sanitizeClientLogprobs({ error: { message: 'UPSTREAM_SECRET_DETAIL' } })).toBeUndefined();
+  });
+
+  it('validates gateway vote metadata and rejects invalid fields', () => {
+    const vote: VoteRequest = {
+      id: 'vabcdefabcdef',
+      agentId: 'default',
+      prompt: 'hello',
+      predictedTier: 'light',
+      confidence: 0.75,
+      timestamp: Date.now(),
+      voted: false,
+      userAgreed: null,
+      userCorrectTier: null,
+    };
+    const gatewayVote = gatewayVoteRequestForClient(vote);
+    expect(gatewayVote).toMatchObject({
+      id: 'vabcdefabcdef',
+      predictedTier: 'light',
+      confidence: 0.75,
+    });
+    expect(sanitizeClientVoteRequestField({
+      id: 'not-a-vote-id',
+      prompt: 'x',
+      predictedTier: 'light',
+      confidence: 0.5,
+    })).toBeUndefined();
+    expect(sanitizeClientVoteRequestField({
+      id: 'vabcdefabcdef',
+      prompt: 'x',
+      predictedTier: 'not-a-tier',
+      confidence: 0.5,
+    })).toBeUndefined();
+    expect(sanitizeClientVoteRequestField({
+      id: 'vabcdefabcdef',
+      prompt: 'x',
+      predictedTier: 'light',
+      confidence: 1.5,
+    })).toBeUndefined();
+  });
+
+  it('sanitizes message content parts and filters unknown usage detail keys', () => {
+    const sanitized = sanitizeClientChatCompletionPayload({
+      id: 'parts',
+      object: 'chat.completion',
+      created: 1,
+      model: 'm',
+      choices: [{
+        index: 0,
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'hello' }, { type: 'image_url', image_url: { url: 'https://example.com/x.png' } }],
+        },
+        finish_reason: 'stop',
+      }],
+      usage: {
+        prompt_tokens: 1,
+        completion_tokens: 2,
+        total_tokens: 3,
+        completion_tokens_details: { reasoning_tokens: 1, evil_tokens: 99 },
+      },
+    });
+    const message = (sanitized.choices as any[])[0].message;
+    expect(message.content).toEqual([
+      { type: 'text', text: 'hello' },
+      { type: 'image_url', image_url: { url: 'https://example.com/x.png' } },
+    ]);
+    expect((sanitized.usage as any).completion_tokens_details).toEqual({ reasoning_tokens: 1 });
+    expect((sanitized.usage as any).completion_tokens_details).not.toHaveProperty('evil_tokens');
   });
 });
 

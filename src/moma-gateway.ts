@@ -104,7 +104,8 @@ import {
   setTrainingMode, isTrainingMode, createVoteRequest,
   detectVoteReply, inferRagConsensus, shouldRetrain as shouldRetrainTraining,
   getTrainingStats, appendVotePromptToCompletion, appendVotePromptToStream, recordDetectedVoteReply,
-  isVoteClarification, processVoteReplyDetailed,
+  isVoteClarification, processVoteReplyDetailed, formatVotePrompt,
+  type VoteRequest,
 } from './training-mode.js';
 import { getCalibrationStats, calibrateBronze, calibrateSilver } from './label-combiner.js';
 import { join, dirname } from 'path';
@@ -1269,6 +1270,21 @@ export function clientHttpResponseForUpstreamFailure(upstreamStatus: number): {
   return { httpStatus: 502, error: CLIENT_PROVIDER_ERROR };
 }
 
+const CLIENT_USAGE_DETAIL_KEYS = new Set([
+  'cached_tokens',
+  'reasoning_tokens',
+  'audio_tokens',
+  'accepted_prediction_tokens',
+  'rejected_prediction_tokens',
+]);
+
+const CLIENT_EFFORT_LEVELS = new Set<EffortLevel>([
+  'trivial', 'light', 'moderate', 'heavy', 'intensive', 'extreme',
+]);
+
+export const CLIENT_VOTE_REQUEST_ID_PATTERN = /^v[0-9a-f]{12}$/;
+export const CLIENT_VOTE_REQUEST_PROMPT_MAX_LENGTH = 2048;
+
 function sanitizeClientUsage(usage: unknown): Record<string, number | Record<string, number>> {
   const out: Record<string, number | Record<string, number>> = {
     prompt_tokens: 0,
@@ -1291,6 +1307,7 @@ function sanitizeClientUsage(usage: unknown): Record<string, number | Record<str
     if (!key.endsWith('_details') || !value || typeof value !== 'object' || Array.isArray(value)) continue;
     const details: Record<string, number> = {};
     for (const [detailKey, detailValue] of Object.entries(value as Record<string, unknown>)) {
+      if (!CLIENT_USAGE_DETAIL_KEYS.has(detailKey)) continue;
       if (typeof detailValue === 'number' && Number.isFinite(detailValue)) {
         details[detailKey] = detailValue;
       }
@@ -1300,10 +1317,74 @@ function sanitizeClientUsage(usage: unknown): Record<string, number | Record<str
   return out;
 }
 
+function sanitizeClientMessageContent(content: unknown): string | null | Array<Record<string, unknown>> {
+  if (content === null || content === undefined) return null;
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return null;
+  const parts: Array<Record<string, unknown>> = [];
+  for (const part of content) {
+    if (!part || typeof part !== 'object') return null;
+    const record = part as Record<string, unknown>;
+    if (record.type === 'text' && typeof record.text === 'string') {
+      parts.push({ type: 'text', text: record.text });
+      continue;
+    }
+    if (record.type === 'image_url' && record.image_url && typeof record.image_url === 'object') {
+      const url = (record.image_url as Record<string, unknown>).url;
+      if (typeof url === 'string') parts.push({ type: 'image_url', image_url: { url } });
+      continue;
+    }
+    return null;
+  }
+  return parts.length > 0 ? parts : null;
+}
+
+function sanitizeLogprobScalarEntry(entry: unknown): Record<string, unknown> | undefined {
+  if (!entry || typeof entry !== 'object') return undefined;
+  const record = entry as Record<string, unknown>;
+  if (typeof record.token !== 'string') return undefined;
+  if (typeof record.logprob !== 'number' || !Number.isFinite(record.logprob)) return undefined;
+  const out: Record<string, unknown> = { token: record.token, logprob: record.logprob };
+  if (record.bytes === null) {
+    out.bytes = null;
+  } else if (Array.isArray(record.bytes) && record.bytes.every((b) => typeof b === 'number' && Number.isFinite(b))) {
+    out.bytes = record.bytes;
+  }
+  return out;
+}
+
+function sanitizeLogprobTokenEntry(entry: unknown): Record<string, unknown> | undefined {
+  const base = sanitizeLogprobScalarEntry(entry);
+  if (!base) return undefined;
+  const record = entry as Record<string, unknown>;
+  if (!Array.isArray(record.top_logprobs)) {
+    base.top_logprobs = [];
+    return base;
+  }
+  base.top_logprobs = record.top_logprobs
+    .map((item) => sanitizeLogprobScalarEntry(item))
+    .filter((item): item is Record<string, unknown> => item !== undefined);
+  return base;
+}
+
+export function sanitizeClientLogprobs(logprobs: unknown): Record<string, unknown> | undefined {
+  if (!logprobs || typeof logprobs !== 'object' || Array.isArray(logprobs)) return undefined;
+  const src = logprobs as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const key of ['content', 'refusal'] as const) {
+    if (!Array.isArray(src[key])) continue;
+    const entries = src[key]
+      .map((item) => sanitizeLogprobTokenEntry(item))
+      .filter((item): item is Record<string, unknown> => item !== undefined);
+    if (entries.length > 0) out[key] = entries;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
 function sanitizeClientChatMessage(message: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {
     role: typeof message.role === 'string' ? message.role : 'assistant',
-    content: message.content ?? null,
+    content: sanitizeClientMessageContent(message.content),
   };
   if (typeof message.reasoning_content === 'string') out.reasoning_content = message.reasoning_content;
   if (typeof message.refusal === 'string') out.refusal = message.refusal;
@@ -1317,14 +1398,31 @@ function sanitizeClientChatMessage(message: Record<string, unknown>): Record<str
 export function sanitizeClientVoteRequestField(value: unknown): Record<string, unknown> | undefined {
   if (!value || typeof value !== 'object') return undefined;
   const vote = value as Record<string, unknown>;
-  if (typeof vote.id !== 'string' || typeof vote.prompt !== 'string') return undefined;
-  if (typeof vote.predictedTier !== 'string' || typeof vote.confidence !== 'number') return undefined;
+  if (typeof vote.id !== 'string' || !CLIENT_VOTE_REQUEST_ID_PATTERN.test(vote.id)) return undefined;
+  if (typeof vote.prompt !== 'string' || vote.prompt.length === 0 || vote.prompt.length > CLIENT_VOTE_REQUEST_PROMPT_MAX_LENGTH) {
+    return undefined;
+  }
+  if (typeof vote.predictedTier !== 'string' || !CLIENT_EFFORT_LEVELS.has(vote.predictedTier as EffortLevel)) {
+    return undefined;
+  }
+  if (typeof vote.confidence !== 'number' || !Number.isFinite(vote.confidence) || vote.confidence < 0 || vote.confidence > 1) {
+    return undefined;
+  }
   return {
     id: vote.id,
     prompt: vote.prompt,
     predictedTier: vote.predictedTier,
     confidence: vote.confidence,
   };
+}
+
+export function gatewayVoteRequestForClient(vote: VoteRequest): Record<string, unknown> | undefined {
+  return sanitizeClientVoteRequestField({
+    id: vote.id,
+    prompt: formatVotePrompt(vote).trimStart(),
+    predictedTier: vote.predictedTier,
+    confidence: vote.confidence,
+  });
 }
 
 /** Strip provider-specific fields from upstream chat completion JSON before returning to clients. */
@@ -1340,9 +1438,8 @@ export function sanitizeClientChatCompletionPayload(upstream: unknown, routedMod
           message,
           finish_reason: choice?.finish_reason ?? null,
         };
-        if (choice?.logprobs && typeof choice.logprobs === 'object' && !Array.isArray(choice.logprobs)) {
-          sanitizedChoice.logprobs = choice.logprobs;
-        }
+        const logprobs = sanitizeClientLogprobs(choice?.logprobs);
+        if (logprobs) sanitizedChoice.logprobs = logprobs;
         return sanitizedChoice;
       })
     : [];
@@ -1356,8 +1453,6 @@ export function sanitizeClientChatCompletionPayload(upstream: unknown, routedMod
     usage: sanitizeClientUsage(body.usage),
   };
   if (typeof body.system_fingerprint === 'string') payload.system_fingerprint = body.system_fingerprint;
-  const voteRequest = sanitizeClientVoteRequestField(body._voteRequest);
-  if (voteRequest) payload._voteRequest = voteRequest;
   return payload;
 }
 
@@ -3140,8 +3235,10 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
         data,
         `${actualTarget.providerId}/${actualTarget.model}`,
       );
-      const voteRequestField = sanitizeClientVoteRequestField((data as Record<string, unknown>)?._voteRequest);
-      if (voteRequestField) clientPayload._voteRequest = voteRequestField;
+      if (voteRequest) {
+        const gatewayVote = gatewayVoteRequestForClient(voteRequest);
+        if (gatewayVote) clientPayload._voteRequest = gatewayVote;
+      }
       return jsonResponse(res, 200, clientPayload);
     } catch (err: any) {
       logGatewayFailure(`Provider error (${providerId}/${model})`, err);
