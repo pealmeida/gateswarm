@@ -198,10 +198,10 @@ export function getUnusableContentReason(content: any): ProviderBodyFailure | nu
 }
 
 export function getUnusableProviderBodyReason(data: any): ProviderBodyFailure | null {
-  if (hasUsableCompletion(data)) return null;
-
   const structuredError = failureForStructuredError(data?.error);
   if (structuredError) return structuredError;
+
+  if (hasUsableCompletion(data)) return null;
 
   return getUnusableContentReason(extractProviderResponseText(data));
 }

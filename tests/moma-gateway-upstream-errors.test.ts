@@ -12,6 +12,7 @@ import {
   initializeGatewayForTests,
   MAX_RETRY_AFTER_SECONDS,
   resolveRetryAfterSeconds,
+  sanitizeClientChatCompletionPayload,
   shouldRecordProviderQuotaThrottle,
 } from '../src/moma-gateway.js';
 
@@ -80,6 +81,33 @@ describe('clientHttpResponseForUpstreamFailure', () => {
         error: CLIENT_PROVIDER_ERROR,
       });
     }
+  });
+});
+
+describe('sanitizeClientChatCompletionPayload', () => {
+  it('returns only allowlisted chat completion fields and drops upstream error metadata', () => {
+    const sanitized = sanitizeClientChatCompletionPayload({
+      id: 'chatcmpl-upstream',
+      object: 'chat.completion',
+      created: 123,
+      model: 'evil-model',
+      choices: [{ index: 0, message: { role: 'assistant', content: 'hello' }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 1, completion_tokens: 2, total_tokens: 3 },
+      error: { message: 'UPSTREAM_SECRET_DETAIL' },
+      provider: 'evil-provider',
+    }, 'zai/glm-5.3');
+
+    expect(sanitized).toEqual({
+      id: 'chatcmpl-upstream',
+      object: 'chat.completion',
+      created: 123,
+      model: 'evil-model',
+      choices: [{ index: 0, message: { role: 'assistant', content: 'hello' }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 1, completion_tokens: 2, total_tokens: 3 },
+    });
+    expect(JSON.stringify(sanitized)).not.toContain('UPSTREAM_SECRET_DETAIL');
+    expect(sanitized).not.toHaveProperty('error');
+    expect(sanitized).not.toHaveProperty('provider');
   });
 });
 

@@ -141,8 +141,13 @@ export class BenchmarkLogger {
       error_message: entry.error_message,
     };
 
-    // Append to JSONL file
-    await fs.appendFile(this.logFile, JSON.stringify(fullEntry) + '\n');
+    try {
+      await fs.mkdir(dirname(this.logFile), { recursive: true });
+      await fs.appendFile(this.logFile, JSON.stringify(fullEntry) + '\n');
+    } catch (err: unknown) {
+      const detail = err instanceof Error ? err.message : String(err);
+      console.error(`Benchmark log write failed (non-fatal): ${detail}`);
+    }
 
     return fullEntry;
   }

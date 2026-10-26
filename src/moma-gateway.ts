@@ -880,7 +880,7 @@ async function handleDirectRoute(
     providerQuota.recordSuccess(providerId);
 
     emitModeHeaders(req, res, promptText);
-    return jsonResponse(res, 200, data);
+    return jsonResponse(res, 200, sanitizeClientChatCompletionPayload(data, `${providerId}/${cleanModel}`));
   } catch (err: any) {
     logGatewayFailure(`Direct route error (${providerId})`, err);
     providerHealth.recordFailure(providerId, 'transport', `${providerId}/${cleanModel}`, err.message, healthAttempt);
@@ -1267,6 +1267,45 @@ export function clientHttpResponseForUpstreamFailure(upstreamStatus: number): {
     return { httpStatus: 429, error: CLIENT_RATE_LIMIT_ERROR };
   }
   return { httpStatus: 502, error: CLIENT_PROVIDER_ERROR };
+}
+
+/** Strip provider-specific fields from upstream chat completion JSON before returning to clients. */
+export function sanitizeClientChatCompletionPayload(upstream: unknown, routedModel?: string): Record<string, unknown> {
+  const body = upstream && typeof upstream === 'object' ? upstream as Record<string, unknown> : {};
+  const choices = Array.isArray(body.choices)
+    ? body.choices.map((choice: any, index: number) => {
+        const message = choice?.message && typeof choice.message === 'object'
+          ? {
+              role: typeof choice.message.role === 'string' ? choice.message.role : 'assistant',
+              content: choice.message.content ?? null,
+              ...(Array.isArray(choice.message.tool_calls) ? { tool_calls: choice.message.tool_calls } : {}),
+              ...(choice.message.function_call ? { function_call: choice.message.function_call } : {}),
+            }
+          : { role: 'assistant', content: choice?.text ?? null };
+        return {
+          index: typeof choice?.index === 'number' ? choice.index : index,
+          message,
+          finish_reason: choice?.finish_reason ?? null,
+        };
+      })
+    : [];
+
+  const usage = body.usage && typeof body.usage === 'object'
+    ? {
+        prompt_tokens: (body.usage as Record<string, unknown>).prompt_tokens ?? 0,
+        completion_tokens: (body.usage as Record<string, unknown>).completion_tokens ?? 0,
+        total_tokens: (body.usage as Record<string, unknown>).total_tokens ?? 0,
+      }
+    : { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
+
+  return {
+    id: typeof body.id === 'string' ? body.id : `chatcmpl-${Date.now()}`,
+    object: 'chat.completion',
+    created: typeof body.created === 'number' ? body.created : Math.floor(Date.now() / 1000),
+    model: typeof body.model === 'string' ? body.model : (routedModel ?? 'unknown'),
+    choices,
+    usage,
+  };
 }
 
 export function resolveRetryAfterSeconds(
@@ -2274,7 +2313,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
                 writeJsonCompletionAsSse(res, data, cleanModel);
                 return;
               }
-              return jsonResponse(res, 200, data);
+              return jsonResponse(res, 200, sanitizeClientChatCompletionPayload(data, cleanModel));
             }
             return;
           }
@@ -2689,6 +2728,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
       if (healthSkip) {
         console.log(`⏭️  [${agent.name}] Skipping ${target.label}: ${healthSkip}`);
         skippedTargets.push(`${target.label} (${healthSkip})`);
+        lastChainFailureRateLimit = false;
         continue;
       }
 
@@ -2701,6 +2741,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
         if (switchCheck.shouldSwitch) {
           console.log(`⏭️  [${agent.name}] Skipping ${target.label}: ${switchCheck.reason}`);
           skippedTargets.push(`${target.label} (${switchCheck.reason})`);
+          lastChainFailureRateLimit = false;
           continue;
         }
       }
@@ -2716,6 +2757,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
           if (!avail.ok) {
             console.log(`⚠️  [${agent.name}] CLI ${target.label} unavailable: ${avail.reason}`);
             providerHealth.recordFailure(target.providerId, 'transport', target.label, avail.reason ?? 'unavailable', healthAttempt);
+            lastChainFailureRateLimit = false;
             continue;
           }
           const cliResult = await (async () => {
@@ -2727,12 +2769,16 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
           });
           if (bodyFailure) {
             console.log(`⚠️  [${agent.name}] CLI ${target.label} returned unusable body (${bodyFailure.reason}), trying fallback...`);
-            modelMatrix.recordError(target.providerId, target.model, bodyFailure.reason);
-            consumptionTracker.recordUsage(target.providerId, { tokensIn: 0, tokensOut: 0, latencyMs: 0, error: true });
             const providerBody = { choices: [{ message: { role: 'assistant', content: cliResult.content } }] };
+            if (!isOverloadOnlyRateLimit(200, providerBody)) {
+              modelMatrix.recordError(target.providerId, target.model, bodyFailure.reason);
+            }
+            consumptionTracker.recordUsage(target.providerId, { tokensIn: 0, tokensOut: 0, latencyMs: 0, error: true });
             logUpstreamFailure(target.providerId, 200, providerBody);
             providerHealth.recordFailure(target.providerId, bodyFailure.kind, target.label, upstreamFailureHealthDetail(target.providerId, 200, providerBody), healthAttempt);
             consumptionIntelligence.recordFallbackOutcome(effort, target.providerId, target.model, false, bodyFailure.reason);
+            lastChainFailureRateLimit = forwardChainFailureWasRateLimit(200, providerBody, bodyFailure.kind === 'rate_limit');
+            data = null;
             continue;
           }
 
@@ -2753,6 +2799,8 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
           // v0.5.5: Feed CLI failure to intelligence layer
           consumptionIntelligence.recordFallbackOutcome(effort, target.providerId, target.model, false, 'cli_error');
           providerHealth.recordFailure(target.providerId, 'transport', target.label, err.message, healthAttempt);
+          lastChainFailureRateLimit = false;
+          data = null;
           continue;
         }
       }
@@ -2848,7 +2896,9 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
         const bodyFailure = getUnusableProviderBodyReason(data);
         if (bodyFailure) {
           console.log(`⚠️  [${agent.name}] ${target.label} returned unusable body (${bodyFailure.reason}), trying fallback...`);
-          modelMatrix.recordError(target.providerId, target.model, bodyFailure.reason);
+          if (!isOverloadOnlyRateLimit(200, data)) {
+            modelMatrix.recordError(target.providerId, target.model, bodyFailure.reason);
+          }
           if (shouldRecordProviderQuotaThrottle(200, data, { rateLimitClassified: bodyFailure.kind === 'rate_limit' })) {
             providerQuota.record429(target.providerId);
           }
@@ -2988,17 +3038,22 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
 
       // Benchmark logging (if enabled for this agent)
       if (agent.benchmarkEnabled) {
-        await benchmarkLogger.log({
-          prompt: promptText.slice(0, 500),
-          prompt_length: promptText.length,
-          tier: effort,
-          routed_model: `${actualTarget.providerId}/${actualTarget.model}`,
-          tokens_in: typeof tokensIn === 'number' ? tokensIn : 0,
-          tokens_out: typeof tokensOut === 'number' ? tokensOut : 0,
-          latency_ms: latency,
-          provider: actualTarget.providerId,
-          status: data ? 'success' : 'error',
-        });
+        try {
+          await benchmarkLogger.log({
+            prompt: promptText.slice(0, 500),
+            prompt_length: promptText.length,
+            tier: effort,
+            routed_model: `${actualTarget.providerId}/${actualTarget.model}`,
+            tokens_in: typeof tokensIn === 'number' ? tokensIn : 0,
+            tokens_out: typeof tokensOut === 'number' ? tokensOut : 0,
+            latency_ms: latency,
+            provider: actualTarget.providerId,
+            status: data ? 'success' : 'error',
+          });
+        } catch (logErr: unknown) {
+          const detail = logErr instanceof Error ? logErr.message : String(logErr);
+          console.error(`Benchmark log failed (non-fatal): ${detail}`);
+        }
       }
 
       res.setHeader('X-Mode', activeMode);
@@ -3026,7 +3081,10 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
       res.setHeader('X-Modality', requestModalities.vision || requestModalities.audio
         ? ['text', requestModalities.vision ? 'vision' : '', requestModalities.audio ? 'audio' : ''].filter(Boolean).join('+')
         : 'text');
-      return jsonResponse(res, 200, data);
+      return jsonResponse(res, 200, sanitizeClientChatCompletionPayload(
+        data,
+        `${actualTarget.providerId}/${actualTarget.model}`,
+      ));
     } catch (err: any) {
       logGatewayFailure(`Provider error (${providerId}/${model})`, err);
       return jsonResponse(res, 502, { error: CLIENT_GATEWAY_ERROR });

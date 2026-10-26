@@ -8,13 +8,18 @@ import {
   CLIENT_PROVIDER_CHAIN_EXHAUSTED,
   CLIENT_RATE_LIMIT_ERROR,
   createGatewayHttpServer,
+  DEFAULT_RETRY_AFTER_SECONDS,
   initializeGatewayForTests,
 } from '../src/moma-gateway.js';
+import { agentRegistry } from '../src/agent-registry.js';
 
 const originalBailianKey = process.env.BAILIAN_KEY;
 const originalZaiKey = process.env.ZAI_KEY;
 
-function postJson(port: number, body: Record<string, unknown>): Promise<{ status: number; body: string }> {
+function postJson(
+  port: number,
+  body: Record<string, unknown>,
+): Promise<{ status: number; body: string; headers: Record<string, string | string[] | undefined> }> {
   const payload = JSON.stringify(body);
   return new Promise((resolve, reject) => {
     const req = httpRequest(
@@ -32,7 +37,11 @@ function postJson(port: number, body: Record<string, unknown>): Promise<{ status
         const chunks: Buffer[] = [];
         res.on('data', (chunk) => chunks.push(chunk));
         res.on('end', () => {
-          resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString('utf8') });
+          resolve({
+            status: res.statusCode ?? 0,
+            body: Buffer.concat(chunks).toString('utf8'),
+            headers: res.headers,
+          });
         });
         res.on('error', reject);
       },
@@ -169,6 +178,115 @@ describe('MoMA routed forward chain', () => {
     expect(parsed.choices?.[0]?.message?.content).toBe('fallback ok');
     expect(recordSuccess).toHaveBeenCalledTimes(1);
     expect(recordSuccess).toHaveBeenCalledWith('zai');
+  });
+
+  it('returns 502 chain exhaustion when later providers are skipped after an earlier rate limit', async () => {
+    mockStaticLightRouting();
+    vi.spyOn(providerHealth, 'getSkipReason').mockImplementation((providerId) => (
+      providerId === 'bailian' ? null : 'cooldown skip'
+    ));
+    vi.spyOn(providerQuota, 'shouldSwitch').mockReturnValue({ shouldSwitch: false, reason: '' });
+    vi.spyOn(consumptionIntelligence, 'getFallback').mockResolvedValue({
+      provider: 'zai',
+      model: 'glm-4.7-flash',
+      tier: 'light',
+      reason: 'static_fallback',
+      estimatedTokens: 32,
+      estimatedCost: 0,
+      confidence: 1,
+      alternatives: [],
+      source: 'request',
+      timestamp: Date.now(),
+    });
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(
+      JSON.stringify({ error: { code: 'rate_limit_exceeded', message: 'slow down' } }),
+      { status: 429, headers: { 'Content-Type': 'application/json' } },
+    )));
+
+    const response = await postJson(port, routedRequest());
+    expect(response.status).toBe(502);
+    expect(JSON.parse(response.body).error).toEqual(CLIENT_PROVIDER_CHAIN_EXHAUSTED);
+  });
+
+  it('returns 429 with Retry-After when the chain exhausts on rate limits', async () => {
+    mockStaticLightRouting();
+    mockHealthyProviders();
+    vi.spyOn(providerQuota, 'shouldSwitch').mockReturnValue({ shouldSwitch: false, reason: '' });
+    vi.spyOn(consumptionIntelligence, 'getFallback').mockResolvedValue(null);
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(
+      JSON.stringify({ error: { code: 'rate_limit_exceeded', message: 'slow down' } }),
+      {
+        status: 429,
+        headers: { 'Content-Type': 'application/json', 'Retry-After': '15' },
+      },
+    )));
+
+    const response = await postJson(port, routedRequest());
+    expect(response.status).toBe(429);
+    expect(JSON.parse(response.body).error).toEqual(CLIENT_RATE_LIMIT_ERROR);
+    expect(response.headers['retry-after']).toBe(String(DEFAULT_RETRY_AFTER_SECONDS));
+  });
+
+  it('does not record model matrix errors for HTTP 200 bodies with overload code 1305', async () => {
+    mockStaticLightRouting();
+    mockHealthyProviders();
+    vi.spyOn(providerQuota, 'shouldSwitch').mockReturnValue({ shouldSwitch: false, reason: '' });
+    vi.spyOn(consumptionIntelligence, 'getFallback').mockResolvedValue(null);
+    const recordError = vi.spyOn(modelMatrix, 'recordError');
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(
+      JSON.stringify({
+        choices: [{ message: { role: 'assistant', content: '' }, finish_reason: 'stop' }],
+        error: { code: 1305, message: 'overload' },
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    )));
+
+    await postJson(port, routedRequest());
+    expect(recordError).not.toHaveBeenCalled();
+  });
+
+  it('succeeds when benchmark logging directory is missing (non-fatal logger)', async () => {
+    mockStaticLightRouting();
+    mockHealthyProviders();
+    vi.spyOn(consumptionIntelligence, 'getFallback').mockResolvedValue({
+      provider: 'zai',
+      model: 'glm-4.7-flash',
+      tier: 'light',
+      reason: 'static_fallback',
+      estimatedTokens: 32,
+      estimatedCost: 0,
+      confidence: 1,
+      alternatives: [],
+      source: 'request',
+      timestamp: Date.now(),
+    });
+    vi.spyOn(providerQuota, 'shouldSwitch').mockReturnValue({ shouldSwitch: false, reason: '' });
+    const defaultAgent = agentRegistry.getAgent('default');
+    if (defaultAgent) defaultAgent.benchmarkEnabled = true;
+
+    let calls = 0;
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      calls += 1;
+      if (calls === 1) {
+        return new Response(
+          JSON.stringify({ error: { message: 'UPSTREAM_SECRET_DETAIL', code: 'invalid_api_key' } }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+      return new Response(JSON.stringify({
+        id: 'chatcmpl-ok',
+        object: 'chat.completion',
+        choices: [{ message: { role: 'assistant', content: 'fallback ok' }, finish_reason: 'stop' }],
+        usage: { prompt_tokens: 1, completion_tokens: 2, total_tokens: 3 },
+        provider: 'evil-provider-should-not-appear',
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }));
+
+    const response = await postJson(port, routedRequest());
+    expect(response.status).toBe(200);
+    expect(response.body).not.toContain('UPSTREAM_SECRET_DETAIL');
+    expect(response.body).not.toContain('evil-provider-should-not-appear');
+    expect(JSON.parse(response.body).choices?.[0]?.message?.content).toBe('fallback ok');
   });
 
   it('does not mark models unavailable after three consecutive 1305 overload responses', async () => {

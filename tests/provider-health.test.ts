@@ -65,6 +65,18 @@ describe('provider response usability', () => {
       }],
     })).toBeNull();
   });
+
+  it('treats top-level error fields as failure even with terminal empty choices', () => {
+    const failure = getUnusableProviderBodyReason({
+      choices: [{ message: { role: 'assistant', content: '' }, finish_reason: 'stop' }],
+      error: { message: 'UPSTREAM_SECRET_DETAIL', code: 'invalid_api_key' },
+    });
+    expect(failure?.kind).toBe('auth');
+    expect(getUnusableProviderBodyReason({
+      choices: [{ message: { role: 'assistant', content: '' }, finish_reason: 'stop' }],
+      error: { code: 1305, message: 'overload' },
+    })).toMatchObject({ kind: 'rate_limit' });
+  });
 });
 
 describe('provider health state', () => {
