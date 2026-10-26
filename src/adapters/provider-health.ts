@@ -206,6 +206,61 @@ export function getUnusableProviderBodyReason(data: any): ProviderBodyFailure | 
   return getUnusableContentReason(extractProviderResponseText(data));
 }
 
+/** CLI may exit 0 while printing provider error or rate-limit text on stdout. */
+export function getCliStdoutBodyFailure(content: string): ProviderBodyFailure | null {
+  return getUnusableContentReason(content);
+}
+
+/** Map Z.AI finish_reason values to OpenAI-compatible reasons (R6-F1). */
+export function normalizeZaiChatCompletionBody(data: any): { data: any; failure: ProviderBodyFailure | null } {
+  if (!data || typeof data !== 'object' || !Array.isArray(data.choices)) {
+    return { data, failure: null };
+  }
+
+  for (const choice of data.choices) {
+    if (choice?.finish_reason === 'network_error') {
+      return {
+        data,
+        failure: {
+          reason: 'zai_network_error_finish',
+          kind: 'transport',
+          message: 'upstream finish_reason network_error',
+        },
+      };
+    }
+  }
+
+  let mapped = false;
+  const choices = data.choices.map((choice: any) => {
+    if (!choice || typeof choice !== 'object') return choice;
+    const raw = choice.finish_reason;
+    if (raw === 'sensitive') {
+      mapped = true;
+      return { ...choice, finish_reason: 'content_filter' };
+    }
+    if (raw === 'model_context_window_exceeded') {
+      mapped = true;
+      return { ...choice, finish_reason: 'length' };
+    }
+    return choice;
+  });
+
+  return { data: mapped ? { ...data, choices } : data, failure: null };
+}
+
+export function prepareProviderChatCompletionBody(
+  data: any,
+  providerId: string,
+): { data: any; bodyFailure: ProviderBodyFailure | null } {
+  let working = data;
+  if (providerId === 'zai') {
+    const zai = normalizeZaiChatCompletionBody(working);
+    if (zai.failure) return { data: working, bodyFailure: zai.failure };
+    working = zai.data;
+  }
+  return { data: working, bodyFailure: getUnusableProviderBodyReason(working) };
+}
+
 export function providerFailureKindForHttp(status: number, body: unknown = ''): ProviderFailureKind {
   let parsedBody = body;
   if (typeof body === 'string') {

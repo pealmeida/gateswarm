@@ -1,5 +1,6 @@
 import { request as httpRequest } from 'node:http';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { agentRegistry } from '../src/agent-registry.js';
 import { modelMatrix } from '../src/model-matrix.js';
 import { providerQuota } from '../src/provider-quota.js';
 import {
@@ -473,6 +474,64 @@ describe('direct route upstream error sanitization', () => {
     await postJson(port, payload);
     expect(recordSpy).not.toHaveBeenCalled();
     recordSpy.mockRestore();
+  });
+
+  it('maps Z.AI finish_reason values on direct HTTP success (R6-F1)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(
+      JSON.stringify({
+        id: 'chatcmpl-zai',
+        choices: [{ message: { role: 'assistant', content: 'ok' }, finish_reason: 'sensitive' }],
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    )));
+
+    const payload = JSON.stringify({
+      model: 'zai/glm-5.3',
+      messages: [{ role: 'user', content: 'hello' }],
+    });
+    const response = await postJson(port, payload);
+    expect(response.status).toBe(200);
+    expect(JSON.parse(response.body).choices[0].finish_reason).toBe('content_filter');
+  });
+
+  it('treats Z.AI network_error finish_reason as upstream failure on direct route', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(
+      JSON.stringify({
+        choices: [{ message: { role: 'assistant', content: 'UPSTREAM_PARTIAL' }, finish_reason: 'network_error' }],
+      }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    )));
+
+    const payload = JSON.stringify({
+      model: 'zai/glm-5.3',
+      messages: [{ role: 'user', content: 'hello' }],
+    });
+    const response = await postJson(port, payload);
+    expect(response.status).toBe(502);
+    expect(JSON.parse(response.body).error).toEqual(CLIENT_PROVIDER_ERROR);
+    expect(response.body).not.toContain('UPSTREAM_PARTIAL');
+  });
+
+  it('returns 429 without echoing CLI rate-limit stdout on direct CLI route', async () => {
+    vi.spyOn(agentRegistry, 'checkCliProviderAvailability').mockResolvedValue({ ok: true });
+    vi.spyOn(agentRegistry, 'getCliAdapter').mockReturnValue({
+      chatCompletion: vi.fn().mockResolvedValue({
+        content: 'Rate limit exceeded. Please try again later.',
+        finishReason: 'stop',
+        usage: { promptTokens: 1, completionTokens: 1 },
+        model: 'cc/test-model',
+      }),
+    } as any);
+
+    const payload = JSON.stringify({
+      model: 'claude-cli/cc/test-model',
+      messages: [{ role: 'user', content: 'hello' }],
+    });
+    const response = await postJson(port, payload);
+    expect(response.status).toBe(429);
+    expect(JSON.parse(response.body).error).toEqual(CLIENT_RATE_LIMIT_ERROR);
+    expect(response.body).not.toContain('Rate limit exceeded');
   });
 
   it.each([

@@ -3,8 +3,11 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  getCliStdoutBodyFailure,
   getUnusableContentReason,
   getUnusableProviderBodyReason,
+  normalizeZaiChatCompletionBody,
+  prepareProviderChatCompletionBody,
   ProviderHealthTracker,
   providerFailureKindForHttp,
   runProviderFallbackChain,
@@ -64,6 +67,32 @@ describe('provider response usability', () => {
         finish_reason: 'stop',
       }],
     })).toBeNull();
+  });
+
+  it('detects CLI stdout rate-limit text even when shaped like a completion', () => {
+    const text = 'Rate limit exceeded. Please try again later.';
+    expect(getCliStdoutBodyFailure(text)).toMatchObject({ kind: 'rate_limit' });
+    expect(getUnusableProviderBodyReason({
+      choices: [{ message: { role: 'assistant', content: text }, finish_reason: 'stop' }],
+    })).toBeNull();
+  });
+
+  it('maps Z.AI finish_reason values and treats network_error as failure (R6-F1)', () => {
+    const sensitive = normalizeZaiChatCompletionBody({
+      choices: [{ message: { content: 'ok' }, finish_reason: 'sensitive' }],
+    });
+    expect(sensitive.failure).toBeNull();
+    expect(sensitive.data.choices[0].finish_reason).toBe('content_filter');
+
+    const length = normalizeZaiChatCompletionBody({
+      choices: [{ message: { content: '' }, finish_reason: 'model_context_window_exceeded' }],
+    });
+    expect(length.data.choices[0].finish_reason).toBe('length');
+
+    const network = prepareProviderChatCompletionBody({
+      choices: [{ message: { content: 'partial' }, finish_reason: 'network_error' }],
+    }, 'zai');
+    expect(network.bodyFailure).toMatchObject({ kind: 'transport', reason: 'zai_network_error_finish' });
   });
 
   it('treats top-level error fields as failure even with terminal empty choices', () => {

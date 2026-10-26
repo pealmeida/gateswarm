@@ -304,6 +304,93 @@ describe('MoMA routed forward chain', () => {
     expect(JSON.parse(response.body).choices?.[0]?.message?.content).toBe('fallback ok');
   });
 
+  it('falls back when CLI stdout is rate-limit text despite exit 0', async () => {
+    vi.spyOn(consumptionIntelligence, 'selectModel').mockResolvedValue({
+      provider: 'claude-cli',
+      model: 'cc/test-model',
+      tier: 'heavy',
+      reason: 'static_fallback',
+      estimatedTokens: 32,
+      estimatedCost: 0,
+      confidence: 1,
+      alternatives: [],
+      source: 'request',
+      timestamp: Date.now(),
+    });
+    vi.spyOn(consumptionIntelligence, 'getFallback').mockResolvedValue({
+      provider: 'zai',
+      model: 'glm-4.7-flash',
+      tier: 'heavy',
+      reason: 'static_fallback',
+      estimatedTokens: 32,
+      estimatedCost: 0,
+      confidence: 1,
+      alternatives: [],
+      source: 'request',
+      timestamp: Date.now(),
+    });
+    mockHealthyProviders();
+    vi.spyOn(providerQuota, 'shouldSwitch').mockReturnValue({ shouldSwitch: false, reason: '' });
+    vi.spyOn(agentRegistry, 'checkCliProviderAvailability').mockResolvedValue({ ok: true });
+    vi.spyOn(agentRegistry, 'getCliAdapter').mockReturnValue({
+      chatCompletion: vi.fn().mockResolvedValue({
+        content: 'Rate limit exceeded. Please try again later.',
+        finishReason: 'stop',
+        usage: { promptTokens: 1, completionTokens: 1 },
+        model: 'cc/test-model',
+      }),
+    } as any);
+
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      id: 'chatcmpl-ok',
+      object: 'chat.completion',
+      choices: [{ message: { role: 'assistant', content: 'fallback ok' }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 1, completion_tokens: 2, total_tokens: 3 },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })));
+
+    const response = await postJson(port, routedRequest({ effort_override: 'heavy' }));
+    expect(response.status).toBe(200);
+    expect(JSON.parse(response.body).choices?.[0]?.message?.content).toBe('fallback ok');
+    expect(response.body).not.toContain('Rate limit exceeded');
+  });
+
+  it('returns 429 when routed forward chain exhausts on CLI rate-limit stdout', async () => {
+    vi.spyOn(consumptionIntelligence, 'selectModel').mockResolvedValue({
+      provider: 'claude-cli',
+      model: 'cc/test-model',
+      tier: 'heavy',
+      reason: 'static_fallback',
+      estimatedTokens: 32,
+      estimatedCost: 0,
+      confidence: 1,
+      alternatives: [],
+      source: 'request',
+      timestamp: Date.now(),
+    });
+    vi.spyOn(consumptionIntelligence, 'getFallback').mockResolvedValue(null);
+    mockHealthyProviders();
+    vi.spyOn(providerQuota, 'shouldSwitch').mockReturnValue({ shouldSwitch: false, reason: '' });
+    vi.spyOn(agentRegistry, 'checkCliProviderAvailability').mockResolvedValue({ ok: true });
+    vi.spyOn(agentRegistry, 'getCliAdapter').mockReturnValue({
+      chatCompletion: vi.fn().mockResolvedValue({
+        content: 'Rate limit exceeded. Please try again later.',
+        finishReason: 'stop',
+        usage: { promptTokens: 1, completionTokens: 1 },
+        model: 'cc/test-model',
+      }),
+    } as any);
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(
+      JSON.stringify({ error: { code: 'rate_limit_exceeded', message: 'slow down' } }),
+      { status: 429, headers: { 'Content-Type': 'application/json' } },
+    )));
+
+    const response = await postJson(port, routedRequest({ effort_override: 'heavy' }));
+    expect(response.status).toBe(429);
+    expect(JSON.parse(response.body).error).toEqual(CLIENT_RATE_LIMIT_ERROR);
+    expect(response.body).not.toContain('Rate limit exceeded');
+    expect(response.headers['retry-after']).toBe(String(DEFAULT_RETRY_AFTER_SECONDS));
+  });
+
   it('does not mark models unavailable after three consecutive 1305 overload responses', async () => {
     mockStaticLightRouting();
     mockHealthyProviders();

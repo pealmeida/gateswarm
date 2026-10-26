@@ -96,7 +96,12 @@ import type { LoadBalanceDecision } from './provider-quota.js';
 import { consumptionTracker } from './consumption-tracker.js';
 import { quotaSync } from './quota-sync.js';
 import { getCliProvidersEnabled } from './v04-config.js';
-import { getUnusableProviderBodyReason, providerFailureKindForHttp, providerHealth } from './adapters/provider-health.js';
+import {
+  getCliStdoutBodyFailure,
+  prepareProviderChatCompletionBody,
+  providerFailureKindForHttp,
+  providerHealth,
+} from './adapters/provider-health.js';
 import { evaluateToolCallingCapability, normalizeUpstreamModelId } from './tool-calling-capability.js';
 import { turboQuantCompress, MODEL_CONTEXT_WINDOWS } from './turboquant-compressor.js';
 import { ragIndex, queryRag } from './rag-index.js';
@@ -830,8 +835,10 @@ async function handleDirectRoute(
     }
 
     // Non-streaming: parse JSON and return
-    const data = await response.json();
-    const bodyFailure = getUnusableProviderBodyReason(data);
+    let data = await response.json();
+    const prepared = prepareProviderChatCompletionBody(data, providerId);
+    data = prepared.data;
+    const bodyFailure = prepared.bodyFailure;
     if (bodyFailure) {
       logUpstreamFailure(providerId, 200, data);
       providerHealth.recordFailure(
@@ -841,6 +848,10 @@ async function handleDirectRoute(
         upstreamFailureHealthDetail(providerId, 200, data),
         healthAttempt,
       );
+      if (bodyFailure.kind === 'rate_limit') {
+        res.setHeader('Retry-After', String(DEFAULT_RETRY_AFTER_SECONDS));
+        return jsonResponse(res, 429, { error: CLIENT_RATE_LIMIT_ERROR });
+      }
       return jsonResponse(res, 502, { error: CLIENT_PROVIDER_ERROR });
     }
     if (clientWantsStream) {
@@ -927,6 +938,17 @@ async function handleCliProviderDirect(
 
   try {
     const result = await adapter.chatCompletion(cliMessages, model);
+    const stdoutFailure = getCliStdoutBodyFailure(result.content);
+    if (stdoutFailure) {
+      console.log(`⚠️  Direct CLI ${providerId}/${model} returned unusable stdout (${stdoutFailure.reason})`);
+      logUpstreamFailure(providerId, 200, { choices: [{ message: { content: result.content } }] });
+      if (stdoutFailure.kind === 'rate_limit') {
+        res.setHeader('Retry-After', String(DEFAULT_RETRY_AFTER_SECONDS));
+        return jsonResponse(res, 429, { error: CLIENT_RATE_LIMIT_ERROR });
+      }
+      return jsonResponse(res, 502, { error: CLIENT_PROVIDER_ERROR });
+    }
+
     const latency = Date.now() - startTime;
 
     benchmarkLogger.log({
@@ -2111,8 +2133,7 @@ async function forwardStreamingWithFallback(options: {
         const available = await agentRegistry.checkCliProviderAvailability(target.providerId);
         if (!available.ok) throw new Error(available.reason ?? 'CLI unavailable');
         const result = await agentRegistry.getCliAdapter(target.providerId)!.chatCompletion(sanitizeForCli(messages), target.model, {});
-        const resultBody = { choices: [{ message: { role: 'assistant', content: result.content }, finish_reason: result.finishReason }] };
-        const unusable = getUnusableProviderBodyReason(resultBody);
+        const unusable = getCliStdoutBodyFailure(result.content);
         if (unusable) {
           providerHealth.recordFailure(target.providerId, unusable.kind, target.label, unusable.reason, healthAttempt);
           continue;
@@ -2170,7 +2191,11 @@ async function forwardStreamingWithFallback(options: {
       // It is usable only when it passes the same completion validation.
       let data: any;
       try { data = await response.json(); } catch { data = null; }
-      const unusable = getUnusableProviderBodyReason(data);
+      const preparedStreamJson = data
+        ? prepareProviderChatCompletionBody(data, target.providerId)
+        : { data: null, bodyFailure: { reason: 'empty_body', kind: 'unusable_body' as const, message: 'empty response body' } };
+      data = preparedStreamJson.data;
+      const unusable = preparedStreamJson.bodyFailure;
       if (unusable) {
         providerHealth.recordFailure(target.providerId, unusable.kind, target.label, unusable.reason, healthAttempt);
         continue;
@@ -2487,8 +2512,10 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
               if (completed) providerHealth.recordSuccess(trivialCfg.provider, healthAttempt);
               else providerHealth.recordFailure(trivialCfg.provider, 'transport', `${trivialCfg.provider}/${trivialCfg.model}`, 'greeting stream read failure', healthAttempt);
             } else {
-              const data = await resp.json();
-              const bodyFailure = getUnusableProviderBodyReason(data);
+              let data = await resp.json();
+              const preparedGreeting = prepareProviderChatCompletionBody(data, trivialCfg.provider);
+              data = preparedGreeting.data;
+              const bodyFailure = preparedGreeting.bodyFailure;
               if (bodyFailure) {
                 console.log(`⚡ [${agent.name}] Greeting fast-path returned unusable body (${bodyFailure.reason}) — falling through to normal routing`);
                 logUpstreamFailure(trivialCfg.provider, 200, data);
@@ -2957,14 +2984,15 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
             const adapter = agentRegistry.getCliAdapter(target.providerId)!;
             return adapter.chatCompletion(sanitizeForCli(compressedMessages), target.model, {});
           })();
-          const bodyFailure = getUnusableProviderBodyReason({
-            choices: [{ message: { role: 'assistant', content: cliResult.content } }],
-          });
+          const bodyFailure = getCliStdoutBodyFailure(cliResult.content);
           if (bodyFailure) {
-            console.log(`⚠️  [${agent.name}] CLI ${target.label} returned unusable body (${bodyFailure.reason}), trying fallback...`);
+            console.log(`⚠️  [${agent.name}] CLI ${target.label} returned unusable stdout (${bodyFailure.reason}), trying fallback...`);
             const providerBody = { choices: [{ message: { role: 'assistant', content: cliResult.content } }] };
             if (!isOverloadOnlyRateLimit(200, providerBody)) {
               modelMatrix.recordError(target.providerId, target.model, bodyFailure.reason);
+            }
+            if (shouldRecordProviderQuotaThrottle(200, providerBody, { rateLimitClassified: bodyFailure.kind === 'rate_limit' })) {
+              providerQuota.record429(target.providerId);
             }
             consumptionTracker.recordUsage(target.providerId, { tokensIn: 0, tokensOut: 0, latencyMs: 0, error: true });
             logUpstreamFailure(target.providerId, 200, providerBody);
@@ -3087,8 +3115,11 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
           continue;
         }
 
-        data = await resp.json();
-        const bodyFailure = getUnusableProviderBodyReason(data);
+        let parsedBody = await resp.json();
+        const preparedBody = prepareProviderChatCompletionBody(parsedBody, target.providerId);
+        parsedBody = preparedBody.data;
+        const bodyFailure = preparedBody.bodyFailure;
+        data = parsedBody;
         if (bodyFailure) {
           console.log(`⚠️  [${agent.name}] ${target.label} returned unusable body (${bodyFailure.reason}), trying fallback...`);
           if (!isOverloadOnlyRateLimit(200, data)) {
@@ -3360,6 +3391,17 @@ async function handleCliProvider(
       model,
       { temperature: undefined, maxTokens: undefined },
     );
+
+    const stdoutFailure = getCliStdoutBodyFailure(result.content);
+    if (stdoutFailure) {
+      console.log(`⚠️  [${agent.name}] CLI ${providerId}/${model} returned unusable stdout (${stdoutFailure.reason})`);
+      logUpstreamFailure(providerId, 200, { choices: [{ message: { content: result.content } }] });
+      if (stdoutFailure.kind === 'rate_limit') {
+        res.setHeader('Retry-After', String(DEFAULT_RETRY_AFTER_SECONDS));
+        return jsonResponse(res, 429, { error: CLIENT_RATE_LIMIT_ERROR });
+      }
+      return jsonResponse(res, 502, { error: CLIENT_PROVIDER_ERROR });
+    }
 
     const latency = Date.now() - startTime;
     const tokensIn = result.usage?.promptTokens ?? compressionResult.compressedTokens;
