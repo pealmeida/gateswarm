@@ -120,7 +120,7 @@ describe('MoMA gateway security helpers', () => {
       error: {
         code: 'invalid_api_key',
         type: 'authentication_error',
-        message: 'token=sk-supersecretkey123456',
+        message: 'token=test-fake-key-not-a-secret',
       },
     });
     const metadata = upstreamFailureMetadata('example-provider', 401, secretBody);
@@ -131,7 +131,7 @@ describe('MoMA gateway security helpers', () => {
       code: 'invalid_api_key',
       errorType: 'authentication_error',
     });
-    expect(JSON.stringify(metadata)).not.toContain('sk-supersecretkey123456');
+    expect(JSON.stringify(metadata)).not.toContain('test-fake-key-not-a-secret');
     expect(metadata).not.toHaveProperty('bodyPrefix');
   });
 });

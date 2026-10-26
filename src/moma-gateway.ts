@@ -1285,6 +1285,34 @@ const CLIENT_EFFORT_LEVELS = new Set<EffortLevel>([
 export const CLIENT_VOTE_REQUEST_ID_PATTERN = /^v[0-9a-f]{12}$/;
 export const CLIENT_VOTE_REQUEST_PROMPT_MAX_LENGTH = 2048;
 
+const CLIENT_FINISH_REASONS = new Set([
+  'stop',
+  'length',
+  'tool_calls',
+  'content_filter',
+  'function_call',
+]);
+
+export const CLIENT_METADATA_STRING_MAX_LENGTH = 256;
+export const CLIENT_MESSAGE_CONTENT_PARTS_MAX = 256;
+export const CLIENT_LOGPROBS_ARRAY_MAX_ENTRIES = 4096;
+export const CLIENT_LOGPROBS_TOP_MAX_ENTRIES = 20;
+export const CLIENT_LOGPROB_TOKEN_MAX_LENGTH = 1024;
+export const CLIENT_LOGPROB_BYTES_MAX_ITEMS = 4096;
+
+const CLIENT_USAGE_DETAIL_FIELDS = new Set(['prompt_tokens_details', 'completion_tokens_details']);
+
+function sanitizeClientMetadataString(value: unknown, maxLength = CLIENT_METADATA_STRING_MAX_LENGTH): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  if (value.length === 0 || value.length > maxLength) return undefined;
+  return value;
+}
+
+function sanitizeClientFinishReason(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  return CLIENT_FINISH_REASONS.has(value) ? value : null;
+}
+
 function sanitizeClientUsage(usage: unknown): Record<string, number | Record<string, number>> {
   const out: Record<string, number | Record<string, number>> = {
     prompt_tokens: 0,
@@ -1304,7 +1332,7 @@ function sanitizeClientUsage(usage: unknown): Record<string, number | Record<str
   }
   for (const [key, value] of Object.entries(src)) {
     if (key === 'prompt_tokens' || key === 'completion_tokens' || key === 'total_tokens') continue;
-    if (!key.endsWith('_details') || !value || typeof value !== 'object' || Array.isArray(value)) continue;
+    if (!CLIENT_USAGE_DETAIL_FIELDS.has(key) || !value || typeof value !== 'object' || Array.isArray(value)) continue;
     const details: Record<string, number> = {};
     for (const [detailKey, detailValue] of Object.entries(value as Record<string, unknown>)) {
       if (!CLIENT_USAGE_DETAIL_KEYS.has(detailKey)) continue;
@@ -1322,33 +1350,42 @@ function sanitizeClientMessageContent(content: unknown): string | null | Array<R
   if (typeof content === 'string') return content;
   if (!Array.isArray(content)) return null;
   const parts: Array<Record<string, unknown>> = [];
-  for (const part of content) {
+  for (const part of content.slice(0, CLIENT_MESSAGE_CONTENT_PARTS_MAX)) {
     if (!part || typeof part !== 'object') return null;
     const record = part as Record<string, unknown>;
     if (record.type === 'text' && typeof record.text === 'string') {
       parts.push({ type: 'text', text: record.text });
       continue;
     }
-    if (record.type === 'image_url' && record.image_url && typeof record.image_url === 'object') {
-      const url = (record.image_url as Record<string, unknown>).url;
-      if (typeof url === 'string') parts.push({ type: 'image_url', image_url: { url } });
-      continue;
-    }
+    if (record.type === 'image_url') continue;
     return null;
   }
   return parts.length > 0 ? parts : null;
 }
 
+function sanitizeLogprobBytes(bytes: unknown): number[] | null | undefined {
+  if (bytes === null) return null;
+  if (!Array.isArray(bytes)) return undefined;
+  const out: number[] = [];
+  for (const value of bytes.slice(0, CLIENT_LOGPROB_BYTES_MAX_ITEMS)) {
+    if (typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value > 255) return undefined;
+    out.push(value);
+  }
+  return out;
+}
+
 function sanitizeLogprobScalarEntry(entry: unknown): Record<string, unknown> | undefined {
   if (!entry || typeof entry !== 'object') return undefined;
   const record = entry as Record<string, unknown>;
-  if (typeof record.token !== 'string') return undefined;
+  if (typeof record.token !== 'string' || record.token.length === 0 || record.token.length > CLIENT_LOGPROB_TOKEN_MAX_LENGTH) {
+    return undefined;
+  }
   if (typeof record.logprob !== 'number' || !Number.isFinite(record.logprob)) return undefined;
   const out: Record<string, unknown> = { token: record.token, logprob: record.logprob };
-  if (record.bytes === null) {
-    out.bytes = null;
-  } else if (Array.isArray(record.bytes) && record.bytes.every((b) => typeof b === 'number' && Number.isFinite(b))) {
-    out.bytes = record.bytes;
+  if ('bytes' in record) {
+    const bytes = sanitizeLogprobBytes(record.bytes);
+    if (bytes === undefined) return undefined;
+    out.bytes = bytes;
   }
   return out;
 }
@@ -1362,6 +1399,7 @@ function sanitizeLogprobTokenEntry(entry: unknown): Record<string, unknown> | un
     return base;
   }
   base.top_logprobs = record.top_logprobs
+    .slice(0, CLIENT_LOGPROBS_TOP_MAX_ENTRIES)
     .map((item) => sanitizeLogprobScalarEntry(item))
     .filter((item): item is Record<string, unknown> => item !== undefined);
   return base;
@@ -1374,6 +1412,7 @@ export function sanitizeClientLogprobs(logprobs: unknown): Record<string, unknow
   for (const key of ['content', 'refusal'] as const) {
     if (!Array.isArray(src[key])) continue;
     const entries = src[key]
+      .slice(0, CLIENT_LOGPROBS_ARRAY_MAX_ENTRIES)
       .map((item) => sanitizeLogprobTokenEntry(item))
       .filter((item): item is Record<string, unknown> => item !== undefined);
     if (entries.length > 0) out[key] = entries;
@@ -1383,7 +1422,7 @@ export function sanitizeClientLogprobs(logprobs: unknown): Record<string, unknow
 
 function sanitizeClientChatMessage(message: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {
-    role: typeof message.role === 'string' ? message.role : 'assistant',
+    role: 'assistant',
     content: sanitizeClientMessageContent(message.content),
   };
   if (typeof message.reasoning_content === 'string') out.reasoning_content = message.reasoning_content;
@@ -1432,11 +1471,14 @@ export function sanitizeClientChatCompletionPayload(upstream: unknown, routedMod
     ? body.choices.map((choice: any, index: number) => {
         const message = choice?.message && typeof choice.message === 'object'
           ? sanitizeClientChatMessage(choice.message as Record<string, unknown>)
-          : { role: 'assistant', content: choice?.text ?? null };
+          : {
+              role: 'assistant',
+              content: typeof choice?.text === 'string' ? choice.text : null,
+            };
         const sanitizedChoice: Record<string, unknown> = {
           index: typeof choice?.index === 'number' ? choice.index : index,
           message,
-          finish_reason: choice?.finish_reason ?? null,
+          finish_reason: sanitizeClientFinishReason(choice?.finish_reason),
         };
         const logprobs = sanitizeClientLogprobs(choice?.logprobs);
         if (logprobs) sanitizedChoice.logprobs = logprobs;
@@ -1444,15 +1486,18 @@ export function sanitizeClientChatCompletionPayload(upstream: unknown, routedMod
       })
     : [];
 
+  const sanitizedId = sanitizeClientMetadataString(body.id);
+  const sanitizedModel = sanitizeClientMetadataString(body.model) ?? sanitizeClientMetadataString(routedModel) ?? 'unknown';
   const payload: Record<string, unknown> = {
-    id: typeof body.id === 'string' ? body.id : `chatcmpl-${Date.now()}`,
+    id: sanitizedId ?? `chatcmpl-${Date.now()}`,
     object: 'chat.completion',
     created: typeof body.created === 'number' ? body.created : Math.floor(Date.now() / 1000),
-    model: typeof body.model === 'string' ? body.model : (routedModel ?? 'unknown'),
+    model: sanitizedModel,
     choices,
     usage: sanitizeClientUsage(body.usage),
   };
-  if (typeof body.system_fingerprint === 'string') payload.system_fingerprint = body.system_fingerprint;
+  const systemFingerprint = sanitizeClientMetadataString(body.system_fingerprint);
+  if (systemFingerprint) payload.system_fingerprint = systemFingerprint;
   return payload;
 }
 

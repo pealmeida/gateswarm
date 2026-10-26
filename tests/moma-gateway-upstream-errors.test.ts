@@ -245,7 +245,7 @@ describe('sanitizeClientChatCompletionPayload', () => {
       choices: [{
         index: 0,
         message: {
-          role: 'assistant',
+          role: 'user',
           content: [{ type: 'text', text: 'hello' }, { type: 'image_url', image_url: { url: 'https://example.com/x.png' } }],
         },
         finish_reason: 'stop',
@@ -255,15 +255,84 @@ describe('sanitizeClientChatCompletionPayload', () => {
         completion_tokens: 2,
         total_tokens: 3,
         completion_tokens_details: { reasoning_tokens: 1, evil_tokens: 99 },
+        evil_tokens_details: { cached_tokens: 1 },
       },
     });
     const message = (sanitized.choices as any[])[0].message;
-    expect(message.content).toEqual([
-      { type: 'text', text: 'hello' },
-      { type: 'image_url', image_url: { url: 'https://example.com/x.png' } },
-    ]);
+    expect(message.role).toBe('assistant');
+    expect(message.content).toEqual([{ type: 'text', text: 'hello' }]);
     expect((sanitized.usage as any).completion_tokens_details).toEqual({ reasoning_tokens: 1 });
     expect((sanitized.usage as any).completion_tokens_details).not.toHaveProperty('evil_tokens');
+    expect(sanitized.usage).not.toHaveProperty('evil_tokens_details');
+  });
+
+  it('enforces choice text, finish_reason allowlist, and metadata string limits (B7/B9)', () => {
+    const long = 'x'.repeat(300);
+    const sanitized = sanitizeClientChatCompletionPayload({
+      id: long,
+      model: long,
+      system_fingerprint: long,
+      object: 'chat.completion',
+      created: 1,
+      choices: [{
+        index: 0,
+        text: 12345,
+        finish_reason: 'evil_reason',
+      }],
+      usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+    }, 'fallback/model');
+    expect(sanitized.id).toMatch(/^chatcmpl-/);
+    expect(sanitized.model).toBe('fallback/model');
+    expect(sanitized).not.toHaveProperty('system_fingerprint');
+    const choice = (sanitized.choices as any[])[0];
+    expect(choice.message.content).toBeNull();
+    expect(choice.finish_reason).toBeNull();
+  });
+
+  it('drops image_url parts and caps text part count (B8)', () => {
+    const manyTextParts = Array.from({ length: 300 }, (_, i) => ({ type: 'text', text: `p${i}` }));
+    const sanitized = sanitizeClientChatCompletionPayload({
+      id: 'cap',
+      object: 'chat.completion',
+      created: 1,
+      model: 'm',
+      choices: [{
+        index: 0,
+        message: { role: 'assistant', content: manyTextParts },
+        finish_reason: 'length',
+      }],
+      usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+    });
+    const parts = (sanitized.choices as any[])[0].message.content as Array<{ text: string }>;
+    expect(parts).toHaveLength(256);
+    expect(parts[0].text).toBe('p0');
+    expect(parts[255].text).toBe('p255');
+  });
+
+  it('enforces logprobs size limits and byte constraints (B9)', () => {
+    const hugeToken = 't'.repeat(2000);
+    const invalidBytes = Array.from({ length: 10 }, () => 300);
+    expect(sanitizeClientLogprobs({
+      content: [{
+        token: hugeToken,
+        logprob: -1,
+        top_logprobs: [],
+      }],
+    })).toBeUndefined();
+
+    const capped = sanitizeClientLogprobs({
+      content: Array.from({ length: 5000 }, (_, i) => ({
+        token: `t${i}`,
+        logprob: -0.1,
+        bytes: [i % 256],
+        top_logprobs: Array.from({ length: 30 }, (__, j) => ({ token: `u${j}`, logprob: -0.2, bytes: null })),
+      })),
+    })!;
+    expect(capped.content).toHaveLength(4096);
+    expect((capped.content as any[])[0].top_logprobs).toHaveLength(20);
+    expect(sanitizeClientLogprobs({
+      content: [{ token: 'ok', logprob: -1, bytes: invalidBytes, top_logprobs: [] }],
+    })).toBeUndefined();
   });
 });
 
