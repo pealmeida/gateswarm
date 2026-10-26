@@ -11,12 +11,8 @@ import {
   DEFAULT_RETRY_AFTER_SECONDS,
   initializeGatewayForTests,
 } from '../src/moma-gateway.js';
-import { agentRegistry, DEFAULT_CLI_PROVIDERS } from '../src/agent-registry.js';
-
-function registerClaudeCliForTests(): void {
-  if (agentRegistry.isCliProvider('claude-cli')) return;
-  agentRegistry.registerCliProvider(DEFAULT_CLI_PROVIDERS['claude-cli']);
-}
+import { agentRegistry } from '../src/agent-registry.js';
+import { registerClaudeCliForTests, restoreCliProvidersRegisteredForTests } from './helpers/test-cli-registry.js';
 
 const originalBailianKey = process.env.BAILIAN_KEY;
 const originalZaiKey = process.env.ZAI_KEY;
@@ -117,6 +113,7 @@ describe('MoMA routed forward chain', () => {
   });
 
   afterEach(() => {
+    restoreCliProvidersRegisteredForTests();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
@@ -306,6 +303,56 @@ describe('MoMA routed forward chain', () => {
     expect(response.status).toBe(200);
     expect(response.body).not.toContain('UPSTREAM_SECRET_DETAIL');
     expect(response.body).not.toContain('evil-provider-should-not-appear');
+    expect(JSON.parse(response.body).choices?.[0]?.message?.content).toBe('fallback ok');
+  });
+
+  it.each(['', '   \n'])('falls back when CLI stdout is empty (%j) despite exit 0', async (stdout) => {
+    registerClaudeCliForTests();
+    vi.spyOn(consumptionIntelligence, 'selectModel').mockResolvedValue({
+      provider: 'claude-cli',
+      model: 'cc/test-model',
+      tier: 'heavy',
+      reason: 'static_fallback',
+      estimatedTokens: 32,
+      estimatedCost: 0,
+      confidence: 1,
+      alternatives: [],
+      source: 'request',
+      timestamp: Date.now(),
+    });
+    vi.spyOn(consumptionIntelligence, 'getFallback').mockResolvedValue({
+      provider: 'zai',
+      model: 'glm-4.7-flash',
+      tier: 'heavy',
+      reason: 'static_fallback',
+      estimatedTokens: 32,
+      estimatedCost: 0,
+      confidence: 1,
+      alternatives: [],
+      source: 'request',
+      timestamp: Date.now(),
+    });
+    mockHealthyProviders();
+    vi.spyOn(providerQuota, 'shouldSwitch').mockReturnValue({ shouldSwitch: false, reason: '' });
+    vi.spyOn(agentRegistry, 'checkCliProviderAvailability').mockResolvedValue({ ok: true });
+    vi.spyOn(agentRegistry, 'getCliAdapter').mockReturnValue({
+      chatCompletion: vi.fn().mockResolvedValue({
+        content: stdout,
+        finishReason: 'stop',
+        usage: { promptTokens: 0, completionTokens: 0 },
+        model: 'cc/test-model',
+      }),
+    } as any);
+
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      id: 'chatcmpl-ok',
+      object: 'chat.completion',
+      choices: [{ message: { role: 'assistant', content: 'fallback ok' }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 1, completion_tokens: 2, total_tokens: 3 },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })));
+
+    const response = await postJson(port, routedRequest({ effort_override: 'heavy' }));
+    expect(response.status).toBe(200);
     expect(JSON.parse(response.body).choices?.[0]?.message?.content).toBe('fallback ok');
   });
 

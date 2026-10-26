@@ -209,8 +209,9 @@ export function getUnusableProviderBodyReason(data: any): ProviderBodyFailure | 
 const CLI_STDOUT_FAILURE_MAX_LENGTH = 500;
 
 function cliStdoutFailureFromApiErrorCode(code: string, message: string): ProviderBodyFailure {
+  // Exit-0 stdout is not authoritative for auth — prompt injection can echo these lines.
   if (code === '401' || code === '403') {
-    return { reason: 'cli_api_error_stdout', kind: 'auth', message };
+    return { reason: 'cli_api_error_stdout_soft_auth', kind: 'provider_error', message };
   }
   if (code === '429' || code === '1305' || code === '1308') {
     return { reason: 'cli_api_error_stdout', kind: 'rate_limit', message };
@@ -227,7 +228,10 @@ function cliStdoutFailureFromApiErrorCode(code: string, message: string): Provid
  */
 export function getCliStdoutBodyFailure(content: any): ProviderBodyFailure | null {
   const text = contentToText(content).trim();
-  if (!text || text.length > CLI_STDOUT_FAILURE_MAX_LENGTH) return null;
+  if (!text) {
+    return { reason: 'empty_body', kind: 'unusable_body', message: 'empty response body' };
+  }
+  if (text.length > CLI_STDOUT_FAILURE_MAX_LENGTH) return null;
 
   const apiError = text.match(/^API Error:\s*(\d{3,4})\b.*$/i);
   if (apiError) return cliStdoutFailureFromApiErrorCode(apiError[1], text);

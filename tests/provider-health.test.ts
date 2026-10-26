@@ -69,6 +69,11 @@ describe('provider response usability', () => {
     })).toBeNull();
   });
 
+  it('treats empty CLI stdout as unusable body (R8-B1)', () => {
+    expect(getCliStdoutBodyFailure('')).toMatchObject({ reason: 'empty_body', kind: 'unusable_body' });
+    expect(getCliStdoutBodyFailure('   \n')).toMatchObject({ reason: 'empty_body', kind: 'unusable_body' });
+  });
+
   it('detects CLI stdout rate-limit text even when shaped like a completion', () => {
     const text = 'Rate limit exceeded. Please try again later.';
     expect(getCliStdoutBodyFailure(text)).toMatchObject({ kind: 'rate_limit' });
@@ -83,6 +88,28 @@ describe('provider response usability', () => {
     expect(getCliStdoutBodyFailure('5-hour limit reached ∙ resets 3am')).toMatchObject({ kind: 'rate_limit' });
     expect(getCliStdoutBodyFailure('API Error: 429 quota')).toMatchObject({ kind: 'rate_limit' });
     expect(getCliStdoutBodyFailure('API Error: 1305 system overloaded')).toMatchObject({ kind: 'rate_limit' });
+  });
+
+  it('treats exit-0 API Error 401/403 stdout as soft failure (R8-N2)', () => {
+    expect(getCliStdoutBodyFailure('API Error: 401')).toMatchObject({
+      kind: 'provider_error',
+      reason: 'cli_api_error_stdout_soft_auth',
+    });
+    expect(getCliStdoutBodyFailure('API Error: 403 forbidden')).toMatchObject({
+      kind: 'provider_error',
+      reason: 'cli_api_error_stdout_soft_auth',
+    });
+  });
+
+  it('does not hard-cooldown CLI after two exit-0 API Error: 401 stdout failures (R8-N2)', () => {
+    const health = new ProviderHealthTracker(() => Date.now(), () => {});
+    for (let i = 0; i < 2; i += 1) {
+      const failure = getCliStdoutBodyFailure('API Error: 401');
+      expect(failure?.kind).toBe('provider_error');
+      const attempt = health.beginAttempt('claude-cli');
+      health.recordFailure('claude-cli', failure!.kind, 'claude-cli/cc-test', failure!.reason, attempt);
+    }
+    expect(health.getSkipReason('claude-cli')).toBeNull();
   });
 
   it('does not flag legitimate short answers that mention errors or rate limits (R7-B1 negatives)', () => {

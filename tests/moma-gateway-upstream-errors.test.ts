@@ -1,11 +1,7 @@
 import { request as httpRequest } from 'node:http';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { agentRegistry, DEFAULT_CLI_PROVIDERS } from '../src/agent-registry.js';
-
-function registerClaudeCliForTests(): void {
-  if (agentRegistry.isCliProvider('claude-cli')) return;
-  agentRegistry.registerCliProvider(DEFAULT_CLI_PROVIDERS['claude-cli']);
-}
+import { agentRegistry } from '../src/agent-registry.js';
+import { registerClaudeCliForTests, restoreCliProvidersRegisteredForTests } from './helpers/test-cli-registry.js';
 import { modelMatrix } from '../src/model-matrix.js';
 import { providerQuota } from '../src/provider-quota.js';
 import {
@@ -415,6 +411,7 @@ describe('direct route upstream error sanitization', () => {
   });
 
   afterEach(() => {
+    restoreCliProvidersRegisteredForTests();
     vi.unstubAllGlobals();
   });
 
@@ -516,6 +513,27 @@ describe('direct route upstream error sanitization', () => {
     expect(response.status).toBe(502);
     expect(JSON.parse(response.body).error).toEqual(CLIENT_PROVIDER_ERROR);
     expect(response.body).not.toContain('UPSTREAM_PARTIAL');
+  });
+
+  it.each(['', '   \n'])('returns 502 when direct CLI stdout is empty (%j)', async (stdout) => {
+    registerClaudeCliForTests();
+    vi.spyOn(agentRegistry, 'checkCliProviderAvailability').mockResolvedValue({ ok: true });
+    vi.spyOn(agentRegistry, 'getCliAdapter').mockReturnValue({
+      chatCompletion: vi.fn().mockResolvedValue({
+        content: stdout,
+        finishReason: 'stop',
+        usage: { promptTokens: 0, completionTokens: 0 },
+        model: 'cc/test-model',
+      }),
+    } as any);
+
+    const payload = JSON.stringify({
+      model: 'claude-cli/cc/test-model',
+      messages: [{ role: 'user', content: 'hello' }],
+    });
+    const response = await postJson(port, payload);
+    expect(response.status).toBe(502);
+    expect(JSON.parse(response.body).error).toEqual(CLIENT_PROVIDER_ERROR);
   });
 
   it('returns 429 without echoing CLI rate-limit stdout on direct CLI route', async () => {
