@@ -227,6 +227,21 @@ describe('MoMA routed forward chain', () => {
     expect(response.headers['retry-after']).toBe(String(DEFAULT_RETRY_AFTER_SECONDS));
   });
 
+  it('does not record model matrix errors for HTTP 4xx bodies with overload code 1305', async () => {
+    mockStaticLightRouting();
+    mockHealthyProviders();
+    vi.spyOn(providerQuota, 'shouldSwitch').mockReturnValue({ shouldSwitch: false, reason: '' });
+    vi.spyOn(consumptionIntelligence, 'getFallback').mockResolvedValue(null);
+    const recordError = vi.spyOn(modelMatrix, 'recordError');
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(
+      JSON.stringify({ error: { code: 1305, message: 'overload' } }),
+      { status: 400, headers: { 'Content-Type': 'application/json' } },
+    )));
+
+    await postJson(port, routedRequest());
+    expect(recordError).not.toHaveBeenCalled();
+  });
+
   it('does not record model matrix errors for HTTP 200 bodies with overload code 1305', async () => {
     mockStaticLightRouting();
     mockHealthyProviders();

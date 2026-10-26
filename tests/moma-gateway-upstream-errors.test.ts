@@ -109,6 +109,75 @@ describe('sanitizeClientChatCompletionPayload', () => {
     expect(sanitized).not.toHaveProperty('error');
     expect(sanitized).not.toHaveProperty('provider');
   });
+
+  it('preserves reasoning-only completions and optional OpenAI metadata fields', () => {
+    const sanitized = sanitizeClientChatCompletionPayload({
+      id: 'chatcmpl-reasoning',
+      object: 'chat.completion',
+      created: 456,
+      model: 'reasoning-model',
+      system_fingerprint: 'fp_abc123',
+      choices: [{
+        index: 0,
+        message: {
+          role: 'assistant',
+          content: '',
+          reasoning_content: 'internal chain of thought',
+          refusal: 'none',
+        },
+        finish_reason: 'length',
+        logprobs: { content: [{ token: 'a', logprob: -0.1 }] },
+      }],
+      usage: {
+        prompt_tokens: 10,
+        completion_tokens: 20,
+        total_tokens: 30,
+        completion_tokens_details: { reasoning_tokens: 18, accepted_prediction_tokens: 0 },
+        prompt_tokens_details: { cached_tokens: 2 },
+        evil_field: 'drop-me',
+      },
+      provider: 'evil',
+    });
+
+    expect(sanitized.system_fingerprint).toBe('fp_abc123');
+    const choice = (sanitized.choices as any[])[0];
+    expect(choice.message.reasoning_content).toBe('internal chain of thought');
+    expect(choice.message.refusal).toBe('none');
+    expect(choice.message.content).toBe('');
+    expect(choice.finish_reason).toBe('length');
+    expect(choice.logprobs).toEqual({ content: [{ token: 'a', logprob: -0.1 }] });
+    expect(sanitized.usage).toEqual({
+      prompt_tokens: 10,
+      completion_tokens: 20,
+      total_tokens: 30,
+      completion_tokens_details: { reasoning_tokens: 18, accepted_prediction_tokens: 0 },
+      prompt_tokens_details: { cached_tokens: 2 },
+    });
+    expect(sanitized.usage).not.toHaveProperty('evil_field');
+  });
+
+  it('preserves documented _voteRequest metadata on the client payload', () => {
+    const sanitized = sanitizeClientChatCompletionPayload({
+      id: 'chatcmpl-vote',
+      object: 'chat.completion',
+      created: 1,
+      model: 'm',
+      choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+      _voteRequest: {
+        id: 'vote-1',
+        prompt: 'vote prompt',
+        predictedTier: 'light',
+        confidence: 0.8,
+      },
+    });
+    expect(sanitized._voteRequest).toEqual({
+      id: 'vote-1',
+      prompt: 'vote prompt',
+      predictedTier: 'light',
+      confidence: 0.8,
+    });
+  });
 });
 
 describe('resolveRetryAfterSeconds', () => {

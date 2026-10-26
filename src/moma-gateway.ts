@@ -1269,43 +1269,96 @@ export function clientHttpResponseForUpstreamFailure(upstreamStatus: number): {
   return { httpStatus: 502, error: CLIENT_PROVIDER_ERROR };
 }
 
+function sanitizeClientUsage(usage: unknown): Record<string, number | Record<string, number>> {
+  const out: Record<string, number | Record<string, number>> = {
+    prompt_tokens: 0,
+    completion_tokens: 0,
+    total_tokens: 0,
+  };
+  if (!usage || typeof usage !== 'object') return out;
+  const src = usage as Record<string, unknown>;
+  if (typeof src.prompt_tokens === 'number' && Number.isFinite(src.prompt_tokens)) {
+    out.prompt_tokens = src.prompt_tokens;
+  }
+  if (typeof src.completion_tokens === 'number' && Number.isFinite(src.completion_tokens)) {
+    out.completion_tokens = src.completion_tokens;
+  }
+  if (typeof src.total_tokens === 'number' && Number.isFinite(src.total_tokens)) {
+    out.total_tokens = src.total_tokens;
+  }
+  for (const [key, value] of Object.entries(src)) {
+    if (key === 'prompt_tokens' || key === 'completion_tokens' || key === 'total_tokens') continue;
+    if (!key.endsWith('_details') || !value || typeof value !== 'object' || Array.isArray(value)) continue;
+    const details: Record<string, number> = {};
+    for (const [detailKey, detailValue] of Object.entries(value as Record<string, unknown>)) {
+      if (typeof detailValue === 'number' && Number.isFinite(detailValue)) {
+        details[detailKey] = detailValue;
+      }
+    }
+    if (Object.keys(details).length > 0) out[key] = details;
+  }
+  return out;
+}
+
+function sanitizeClientChatMessage(message: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {
+    role: typeof message.role === 'string' ? message.role : 'assistant',
+    content: message.content ?? null,
+  };
+  if (typeof message.reasoning_content === 'string') out.reasoning_content = message.reasoning_content;
+  if (typeof message.refusal === 'string') out.refusal = message.refusal;
+  if (Array.isArray(message.tool_calls)) out.tool_calls = message.tool_calls;
+  if (message.function_call && typeof message.function_call === 'object') {
+    out.function_call = message.function_call;
+  }
+  return out;
+}
+
+export function sanitizeClientVoteRequestField(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const vote = value as Record<string, unknown>;
+  if (typeof vote.id !== 'string' || typeof vote.prompt !== 'string') return undefined;
+  if (typeof vote.predictedTier !== 'string' || typeof vote.confidence !== 'number') return undefined;
+  return {
+    id: vote.id,
+    prompt: vote.prompt,
+    predictedTier: vote.predictedTier,
+    confidence: vote.confidence,
+  };
+}
+
 /** Strip provider-specific fields from upstream chat completion JSON before returning to clients. */
 export function sanitizeClientChatCompletionPayload(upstream: unknown, routedModel?: string): Record<string, unknown> {
   const body = upstream && typeof upstream === 'object' ? upstream as Record<string, unknown> : {};
   const choices = Array.isArray(body.choices)
     ? body.choices.map((choice: any, index: number) => {
         const message = choice?.message && typeof choice.message === 'object'
-          ? {
-              role: typeof choice.message.role === 'string' ? choice.message.role : 'assistant',
-              content: choice.message.content ?? null,
-              ...(Array.isArray(choice.message.tool_calls) ? { tool_calls: choice.message.tool_calls } : {}),
-              ...(choice.message.function_call ? { function_call: choice.message.function_call } : {}),
-            }
+          ? sanitizeClientChatMessage(choice.message as Record<string, unknown>)
           : { role: 'assistant', content: choice?.text ?? null };
-        return {
+        const sanitizedChoice: Record<string, unknown> = {
           index: typeof choice?.index === 'number' ? choice.index : index,
           message,
           finish_reason: choice?.finish_reason ?? null,
         };
+        if (choice?.logprobs && typeof choice.logprobs === 'object' && !Array.isArray(choice.logprobs)) {
+          sanitizedChoice.logprobs = choice.logprobs;
+        }
+        return sanitizedChoice;
       })
     : [];
 
-  const usage = body.usage && typeof body.usage === 'object'
-    ? {
-        prompt_tokens: (body.usage as Record<string, unknown>).prompt_tokens ?? 0,
-        completion_tokens: (body.usage as Record<string, unknown>).completion_tokens ?? 0,
-        total_tokens: (body.usage as Record<string, unknown>).total_tokens ?? 0,
-      }
-    : { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
-
-  return {
+  const payload: Record<string, unknown> = {
     id: typeof body.id === 'string' ? body.id : `chatcmpl-${Date.now()}`,
     object: 'chat.completion',
     created: typeof body.created === 'number' ? body.created : Math.floor(Date.now() / 1000),
     model: typeof body.model === 'string' ? body.model : (routedModel ?? 'unknown'),
     choices,
-    usage,
+    usage: sanitizeClientUsage(body.usage),
   };
+  if (typeof body.system_fingerprint === 'string') payload.system_fingerprint = body.system_fingerprint;
+  const voteRequest = sanitizeClientVoteRequestField(body._voteRequest);
+  if (voteRequest) payload._voteRequest = voteRequest;
+  return payload;
 }
 
 export function resolveRetryAfterSeconds(
@@ -2881,7 +2934,9 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
         if (!resp.ok) {
           const failureKind = providerFailureKindForHttp(resp.status, errorText);
           console.log(`⚠️  [${agent.name}] ${target.label} provider error (${resp.status}), trying fallback...`);
-          modelMatrix.recordError(target.providerId, target.model, `provider error (${resp.status})`);
+          if (!isOverloadOnlyRateLimit(resp.status, errorText)) {
+            modelMatrix.recordError(target.providerId, target.model, `provider error (${resp.status})`);
+          }
           if (shouldRecordProviderQuotaThrottle(resp.status, errorText, { rateLimitClassified: failureKind === 'rate_limit' })) {
             providerQuota.record429(target.providerId);
           }
@@ -3081,10 +3136,13 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
       res.setHeader('X-Modality', requestModalities.vision || requestModalities.audio
         ? ['text', requestModalities.vision ? 'vision' : '', requestModalities.audio ? 'audio' : ''].filter(Boolean).join('+')
         : 'text');
-      return jsonResponse(res, 200, sanitizeClientChatCompletionPayload(
+      const clientPayload = sanitizeClientChatCompletionPayload(
         data,
         `${actualTarget.providerId}/${actualTarget.model}`,
-      ));
+      );
+      const voteRequestField = sanitizeClientVoteRequestField((data as Record<string, unknown>)?._voteRequest);
+      if (voteRequestField) clientPayload._voteRequest = voteRequestField;
+      return jsonResponse(res, 200, clientPayload);
     } catch (err: any) {
       logGatewayFailure(`Provider error (${providerId}/${model})`, err);
       return jsonResponse(res, 502, { error: CLIENT_GATEWAY_ERROR });
