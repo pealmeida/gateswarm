@@ -66,7 +66,7 @@ import { loadVaultEnv } from './secrets/vault-env.js';
  *   GET  /v05/cli              — CLI provider status (v0.5)
  */
 
-import { createServer, IncomingMessage, ServerResponse } from 'http';
+import { createServer, IncomingMessage, ServerResponse, type Server } from 'http';
 import { BenchmarkLogger } from './benchmark-logger.js';
 import { heuristicScore, scoreToEffort, tierMidpoints } from './intent-engine.js';
 import { getScorerHealth, scoreIntent as scoreIntentV04 } from './intent-engine-v04.js';
@@ -96,14 +96,21 @@ import type { LoadBalanceDecision } from './provider-quota.js';
 import { consumptionTracker } from './consumption-tracker.js';
 import { quotaSync } from './quota-sync.js';
 import { getCliProvidersEnabled } from './v04-config.js';
-import { getUnusableProviderBodyReason, providerFailureKindForHttp, providerHealth } from './adapters/provider-health.js';
+import {
+  getCliStdoutBodyFailure,
+  prepareProviderChatCompletionBody,
+  providerFailureKindForHttp,
+  providerHealth,
+} from './adapters/provider-health.js';
+import { evaluateToolCallingCapability, normalizeUpstreamModelId } from './tool-calling-capability.js';
 import { turboQuantCompress, MODEL_CONTEXT_WINDOWS } from './turboquant-compressor.js';
 import { ragIndex, queryRag } from './rag-index.js';
 import {
   setTrainingMode, isTrainingMode, createVoteRequest,
   detectVoteReply, inferRagConsensus, shouldRetrain as shouldRetrainTraining,
   getTrainingStats, appendVotePromptToCompletion, appendVotePromptToStream, recordDetectedVoteReply,
-  isVoteClarification, processVoteReplyDetailed,
+  isVoteClarification, processVoteReplyDetailed, formatVotePrompt,
+  type VoteRequest,
 } from './training-mode.js';
 import { getCalibrationStats, calibrateBronze, calibrateSilver } from './label-combiner.js';
 import { join, dirname } from 'path';
@@ -720,12 +727,31 @@ async function handleDirectRoute(
   // stop sequences, etc.) while removing router-only controls below.
   const body = req && (req as any)._body ? (req as any)._body : { messages };
 
-  const sanitizedMessages = sanitizeMessages(messages);
+  const cleanModel = normalizeUpstreamModelId(providerId, model);
+  const hasTools = requestHasTools(body);
 
   // CLI provider dispatch
   if (agentRegistry.isCliProvider(providerId)) {
+    if (hasTools) {
+      const toolValidation = validateToolCallingConversation(messages);
+      if (!toolValidation.ok) {
+        return jsonResponse(res, 400, {
+          error: { message: toolValidation.message, type: 'invalid_tool_calls' },
+        });
+      }
+    }
+    const sanitizedMessages = hasTools
+      ? sanitizeMessagesForToolCalling(messages)
+      : sanitizeMessages(messages);
     return handleCliProviderDirect(providerId, model, agent, sanitizedMessages, res, req, promptText);
   }
+
+  const prepared = buildDirectHttpProviderRequest(body as Record<string, unknown>, messages, providerId, model);
+  if (!prepared.ok) {
+    return jsonResponse(res, prepared.status, { error: prepared.error });
+  }
+
+  const sanitizedMessages = prepared.payload.messages as any[];
 
   // HTTP provider dispatch
   const baseUrl = agentRegistry.getProviderBaseUrl(providerId);
@@ -735,10 +761,6 @@ async function handleDirectRoute(
       error: { message: `Provider ${providerId} not configured (missing baseUrl or apiKey)`, type: 'provider_unavailable' },
     });
   }
-
-  // Strip provider prefix from model name for HTTP providers
-  // e.g. "bailian/qwen3.5-plus" → "qwen3.5-plus"
-  const cleanModel = model.includes('/') ? model.split('/').slice(1).join('/') : model;
 
   const startTime = Date.now();
   // v0.5.6: Respect the client's stream flag — don't force stream:false.
@@ -756,7 +778,7 @@ async function handleDirectRoute(
         return sanitizedMessages.map(normalizeMessageContent);
       })()
     : sanitizedMessages;
-  const payload = buildHttpProviderPayload(body, directMessages, cleanModel);
+  const payload = { ...prepared.payload, messages: directMessages, model: prepared.cleanModel };
   const healthAttempt = providerHealth.beginAttempt(providerId);
 
   try {
@@ -767,14 +789,12 @@ async function handleDirectRoute(
     });
 
     if (!response.ok) {
-      // v0.5.5: Record rate-limit errors so provider health degrades
-      if (response.status === 429 || response.status === 1305 || response.status === 1308) {
+      const errorBody = await response.text().catch(() => '');
+      if (shouldRecordProviderQuotaThrottle(response.status, errorBody)) {
         providerQuota.record429(providerId);
         modelMatrix.recordError(providerId, cleanModel, `rate-limited (${response.status})`);
         console.log(`⚠️  [${agent.name}] Direct route ${providerId}/${cleanModel} rate-limited (${response.status})`);
       }
-      const errorBody = await response.text().catch(() => '');
-      logUpstreamFailure(providerId, response.status, errorBody);
       const failureKind = providerFailureKindForHttp(response.status, errorBody);
       providerHealth.recordFailure(
         providerId,
@@ -783,11 +803,8 @@ async function handleDirectRoute(
         upstreamFailureHealthDetail(providerId, response.status, errorBody),
         healthAttempt,
       );
-      let data: any = {};
-      try { data = JSON.parse(errorBody); } catch {}
-      return jsonResponse(res, response.status, {
-        error: data.error || { message: `Provider error: ${response.status}`, type: 'provider_error' },
-      });
+      respondWithSanitizedUpstreamFailure(res, response.status, providerId, errorBody, response.headers);
+      return;
     }
 
     // v0.5.6: Forward the upstream stream as-is when client wants streaming.
@@ -818,8 +835,10 @@ async function handleDirectRoute(
     }
 
     // Non-streaming: parse JSON and return
-    const data = await response.json();
-    const bodyFailure = getUnusableProviderBodyReason(data);
+    let data = await response.json();
+    const prepared = prepareProviderChatCompletionBody(data, providerId);
+    data = prepared.data;
+    const bodyFailure = prepared.bodyFailure;
     if (bodyFailure) {
       logUpstreamFailure(providerId, 200, data);
       providerHealth.recordFailure(
@@ -829,9 +848,11 @@ async function handleDirectRoute(
         upstreamFailureHealthDetail(providerId, 200, data),
         healthAttempt,
       );
-      return jsonResponse(res, 502, {
-        error: { message: `Provider returned unusable response: ${bodyFailure.reason}`, type: 'provider_error' },
-      });
+      if (bodyFailure.kind === 'rate_limit') {
+        res.setHeader('Retry-After', String(DEFAULT_RETRY_AFTER_SECONDS));
+        return jsonResponse(res, 429, { error: CLIENT_RATE_LIMIT_ERROR });
+      }
+      return jsonResponse(res, 502, { error: CLIENT_PROVIDER_ERROR });
     }
     if (clientWantsStream) {
       res.writeHead(200, {
@@ -871,13 +892,11 @@ async function handleDirectRoute(
     providerQuota.recordSuccess(providerId);
 
     emitModeHeaders(req, res, promptText);
-    return jsonResponse(res, 200, data);
+    return jsonResponse(res, 200, sanitizeClientChatCompletionPayload(data, `${providerId}/${cleanModel}`));
   } catch (err: any) {
-    console.error(`❌ Direct route error (${providerId}): ${err.message}`);
+    logGatewayFailure(`Direct route error (${providerId})`, err);
     providerHealth.recordFailure(providerId, 'transport', `${providerId}/${cleanModel}`, err.message, healthAttempt);
-    return jsonResponse(res, 502, {
-      error: { message: `Provider error: ${err.message}`, type: 'provider_error' },
-    });
+    return jsonResponse(res, 502, { error: CLIENT_PROVIDER_ERROR });
   }
 }
 
@@ -919,6 +938,17 @@ async function handleCliProviderDirect(
 
   try {
     const result = await adapter.chatCompletion(cliMessages, model);
+    const stdoutFailure = getCliStdoutBodyFailure(result.content);
+    if (stdoutFailure) {
+      console.log(`⚠️  Direct CLI ${providerId}/${model} returned unusable stdout (${stdoutFailure.reason})`);
+      logUpstreamFailure(providerId, 200, { choices: [{ message: { content: result.content } }] });
+      if (stdoutFailure.kind === 'rate_limit') {
+        res.setHeader('Retry-After', String(DEFAULT_RETRY_AFTER_SECONDS));
+        return jsonResponse(res, 429, { error: CLIENT_RATE_LIMIT_ERROR });
+      }
+      return jsonResponse(res, 502, { error: CLIENT_PROVIDER_ERROR });
+    }
+
     const latency = Date.now() - startTime;
 
     benchmarkLogger.log({
@@ -956,6 +986,159 @@ async function handleCliProviderDirect(
     console.error(`❌ CLI provider error (direct, ${providerId}): ${err.message}`);
     return jsonResponse(res, 502, cliFailureResponse());
   }
+}
+
+/** Sanitize messages for tool-calling HTTP providers (preserve matched tool_call / tool pairs). */
+export function sanitizeMessagesForToolCalling(msgs: any[]): any[] {
+  if (msgs.length <= 1) return [...msgs];
+
+  const systemMsgs = msgs.filter(m => m.role === 'system');
+  const nonSystemMsgs = msgs.filter(m => m.role !== 'system');
+
+  const merged: any[] = [];
+  for (const msg of nonSystemMsgs) {
+    const prevMsg = merged.length > 0 ? merged[merged.length - 1] : null;
+    const prevHasToolCalls = prevMsg?.role === 'assistant' && Array.isArray(prevMsg.tool_calls) && prevMsg.tool_calls.length > 0;
+    const msgHasToolCalls = msg.role === 'assistant' && Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0;
+    if (
+      prevMsg &&
+      prevMsg.role === msg.role &&
+      msg.role !== 'tool' &&
+      !prevHasToolCalls &&
+      !msgHasToolCalls &&
+      !messageHasMediaParts(prevMsg) && !messageHasMediaParts(msg)
+    ) {
+      const prevContent = typeof prevMsg.content === 'string' ? prevMsg.content : JSON.stringify(prevMsg.content);
+      const currContent = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
+      prevMsg.content = prevContent + '\n---\n' + currContent;
+    } else {
+      merged.push({ ...msg });
+    }
+  }
+
+  const result = [...systemMsgs];
+  if (merged.length > 0 && merged[0].role !== 'user') {
+    const firstUserIdx = merged.findIndex(m => m.role === 'user');
+    if (firstUserIdx > 0) {
+      result.push(merged[firstUserIdx], ...merged.slice(firstUserIdx + 1));
+    } else {
+      result.push(...merged);
+    }
+  } else {
+    result.push(...merged);
+  }
+
+  const valid: any[] = [];
+  const hasToolCallParent = new Set<string>();
+  for (const msg of result) {
+    if (msg.role === 'assistant' && msg.tool_calls) {
+      for (const tc of msg.tool_calls) {
+        if (tc.id) hasToolCallParent.add(tc.id);
+      }
+    }
+  }
+  for (const msg of result) {
+    const assistantWithTools = msg.role === 'assistant' && msg.tool_calls?.length > 0;
+    if (msg.role === 'tool') {
+      if (typeof msg.tool_call_id !== 'string' || msg.tool_call_id.trim() === '') continue;
+      if (!hasToolCallParent.has(msg.tool_call_id)) continue;
+      const prevRole = valid.length > 0 ? valid[valid.length - 1].role : null;
+      if (prevRole !== 'assistant' && prevRole !== 'tool') continue;
+      valid.push({ ...msg, content: msg.content ?? '' });
+      continue;
+    }
+    if (!assistantWithTools) {
+      if (msg.content === null || msg.content === undefined) continue;
+      if (typeof msg.content === 'string' && msg.content.trim() === '') continue;
+      valid.push(msg);
+      continue;
+    }
+    if (msg.content === null || msg.content === undefined) {
+      valid.push({ ...msg, content: '' });
+    } else {
+      valid.push(msg);
+    }
+  }
+
+  while (valid.length > 0 && valid[0].role !== 'system' && valid[0].role !== 'user') {
+    valid.shift();
+  }
+
+  if (!valid.some(m => m.role === 'user')) {
+    const sysEnd = valid.findIndex(m => m.role !== 'system');
+    const insertIdx = sysEnd < 0 ? valid.length : sysEnd;
+    valid.splice(insertIdx, 0, { role: 'user', content: '[Continuing conversation — please respond]' });
+  }
+
+  const validToolIds = new Set<string>();
+  for (const msg of valid) {
+    if (msg.role === 'tool' && msg.tool_call_id) validToolIds.add(msg.tool_call_id);
+  }
+  for (const msg of valid) {
+    if (msg.role === 'assistant' && msg.tool_calls?.length > 0) {
+      const covered = msg.tool_calls.every((tc: any) => validToolIds.has(tc.id));
+      if (!covered) {
+        const droppedIds = new Set(
+          msg.tool_calls.map((tc: any) => tc.id).filter((id: unknown) => typeof id === 'string' && id.length > 0),
+        );
+        delete msg.tool_calls;
+        if (msg.content === null || msg.content === undefined || (typeof msg.content === 'string' && msg.content.trim() === '')) {
+          msg.content = '[tool use]';
+        }
+        if (droppedIds.size > 0) {
+          for (let i = valid.length - 1; i >= 0; i--) {
+            const toolMsg = valid[i];
+            if (toolMsg.role === 'tool' && droppedIds.has(toolMsg.tool_call_id)) {
+              valid.splice(i, 1);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return valid;
+}
+
+export function requestHasTools(body: Record<string, unknown>): boolean {
+  const tools = body.tools;
+  return Array.isArray(tools) && tools.length > 0;
+}
+
+/** Build sanitized messages + upstream payload for a direct HTTP provider route (test hook). */
+export function buildDirectHttpProviderRequest(
+  body: Record<string, unknown>,
+  messages: any[],
+  providerId: string,
+  model: string,
+): { ok: true; cleanModel: string; payload: Record<string, unknown> } | { ok: false; status: number; error: { message: string; type: string } } {
+  const cleanModel = normalizeUpstreamModelId(providerId, model);
+  if (requestHasTools(body)) {
+    const capability = evaluateToolCallingCapability(providerId, cleanModel);
+    if (!capability.allowed) {
+      return {
+        ok: false,
+        status: 400,
+        error: {
+          message: capability.reason,
+          type: 'tools_not_supported',
+        },
+      };
+    }
+    const toolValidation = validateToolCallingConversation(messages);
+    if (!toolValidation.ok) {
+      return {
+        ok: false,
+        status: 400,
+        error: { message: toolValidation.message, type: 'invalid_tool_calls' },
+      };
+    }
+  }
+  const sanitizedMessages = requestHasTools(body)
+    ? sanitizeMessagesForToolCalling(messages)
+    : sanitizeMessages(messages);
+  const payload = buildHttpProviderPayload(body, sanitizedMessages, cleanModel);
+  return { ok: true, cleanModel, payload };
 }
 
 /** Sanitize messages for OpenAI-compatible providers (remove tool messages, merge same-role). */
@@ -1058,11 +1241,527 @@ function extractKeyDecisions(text: string): string[] {
 
 // ─── Helpers ───────────────────────────────────────────
 
-const DEFAULT_MAX_BODY_BYTES = 1_048_576;
+export const DEFAULT_MAX_BODY_BYTES = 1_048_576;
+export const MAX_BODY_BYTES_UPPER_BOUND = 16 * 1024 * 1024;
+export const MAX_TOOL_CALLS_PER_ASSISTANT_MESSAGE = 64;
+
+export const CLIENT_INTERNAL_ERROR = Object.freeze({
+  message: 'An internal error occurred',
+  type: 'internal_error',
+});
+
+export const CLIENT_GATEWAY_ERROR = Object.freeze({
+  message: 'The gateway could not complete the request',
+  type: 'gateway_error',
+});
+
+export const CLIENT_PROVIDER_ERROR = Object.freeze({
+  message: 'The upstream provider could not be reached',
+  type: 'provider_error',
+});
+
+export const CLIENT_TIMEOUT_ERROR = Object.freeze({
+  message: 'The upstream provider did not respond in time',
+  type: 'timeout',
+});
+
+export const CLIENT_PROVIDER_CHAIN_EXHAUSTED = Object.freeze({
+  message: 'All configured providers for this request are unavailable',
+  type: 'provider_chain_exhausted',
+});
+
+export const CLIENT_RATE_LIMIT_ERROR = Object.freeze({
+  message: 'The upstream provider is rate limiting requests',
+  type: 'rate_limit',
+});
+
+export const DEFAULT_RETRY_AFTER_SECONDS = 60;
+export const MAX_RETRY_AFTER_SECONDS = 300;
+
+/** Client-safe HTTP status + body for a failed upstream provider response. */
+export function clientHttpResponseForUpstreamFailure(upstreamStatus: number): {
+  httpStatus: number;
+  error: typeof CLIENT_PROVIDER_ERROR | typeof CLIENT_TIMEOUT_ERROR | typeof CLIENT_RATE_LIMIT_ERROR;
+} {
+  if (upstreamStatus === 504) {
+    return { httpStatus: 504, error: CLIENT_TIMEOUT_ERROR };
+  }
+  if (upstreamStatus === 429) {
+    return { httpStatus: 429, error: CLIENT_RATE_LIMIT_ERROR };
+  }
+  return { httpStatus: 502, error: CLIENT_PROVIDER_ERROR };
+}
+
+const CLIENT_USAGE_DETAIL_KEYS = new Set([
+  'cached_tokens',
+  'reasoning_tokens',
+  'audio_tokens',
+  'accepted_prediction_tokens',
+  'rejected_prediction_tokens',
+]);
+
+const CLIENT_EFFORT_LEVELS = new Set<EffortLevel>([
+  'trivial', 'light', 'moderate', 'heavy', 'intensive', 'extreme',
+]);
+
+export const CLIENT_VOTE_REQUEST_ID_PATTERN = /^v[0-9a-f]{12}$/;
+export const CLIENT_VOTE_REQUEST_PROMPT_MAX_LENGTH = 2048;
+
+const CLIENT_FINISH_REASONS = new Set([
+  'stop',
+  'length',
+  'tool_calls',
+  'content_filter',
+  'function_call',
+]);
+
+export const CLIENT_METADATA_STRING_MAX_LENGTH = 256;
+export const CLIENT_MESSAGE_CONTENT_PARTS_MAX = 256;
+export const CLIENT_LOGPROBS_ARRAY_MAX_ENTRIES = 4096;
+export const CLIENT_LOGPROBS_TOP_MAX_ENTRIES = 20;
+export const CLIENT_LOGPROB_TOKEN_MAX_LENGTH = 1024;
+export const CLIENT_LOGPROB_BYTES_MAX_ITEMS = 4096;
+
+const CLIENT_USAGE_DETAIL_FIELDS = new Set(['prompt_tokens_details', 'completion_tokens_details']);
+
+function sanitizeClientMetadataString(value: unknown, maxLength = CLIENT_METADATA_STRING_MAX_LENGTH): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  if (value.length === 0 || value.length > maxLength) return undefined;
+  return value;
+}
+
+function sanitizeClientFinishReason(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  return CLIENT_FINISH_REASONS.has(value) ? value : null;
+}
+
+function sanitizeClientUsage(usage: unknown): Record<string, number | Record<string, number>> {
+  const out: Record<string, number | Record<string, number>> = {
+    prompt_tokens: 0,
+    completion_tokens: 0,
+    total_tokens: 0,
+  };
+  if (!usage || typeof usage !== 'object') return out;
+  const src = usage as Record<string, unknown>;
+  if (typeof src.prompt_tokens === 'number' && Number.isFinite(src.prompt_tokens)) {
+    out.prompt_tokens = src.prompt_tokens;
+  }
+  if (typeof src.completion_tokens === 'number' && Number.isFinite(src.completion_tokens)) {
+    out.completion_tokens = src.completion_tokens;
+  }
+  if (typeof src.total_tokens === 'number' && Number.isFinite(src.total_tokens)) {
+    out.total_tokens = src.total_tokens;
+  }
+  for (const [key, value] of Object.entries(src)) {
+    if (key === 'prompt_tokens' || key === 'completion_tokens' || key === 'total_tokens') continue;
+    if (!CLIENT_USAGE_DETAIL_FIELDS.has(key) || !value || typeof value !== 'object' || Array.isArray(value)) continue;
+    const details: Record<string, number> = {};
+    for (const [detailKey, detailValue] of Object.entries(value as Record<string, unknown>)) {
+      if (!CLIENT_USAGE_DETAIL_KEYS.has(detailKey)) continue;
+      if (typeof detailValue === 'number' && Number.isFinite(detailValue)) {
+        details[detailKey] = detailValue;
+      }
+    }
+    if (Object.keys(details).length > 0) out[key] = details;
+  }
+  return out;
+}
+
+function sanitizeClientMessageContent(content: unknown): string | null | Array<Record<string, unknown>> {
+  if (content === null || content === undefined) return null;
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return null;
+  const parts: Array<Record<string, unknown>> = [];
+  for (const part of content.slice(0, CLIENT_MESSAGE_CONTENT_PARTS_MAX)) {
+    if (!part || typeof part !== 'object') return null;
+    const record = part as Record<string, unknown>;
+    if (record.type === 'text' && typeof record.text === 'string') {
+      parts.push({ type: 'text', text: record.text });
+      continue;
+    }
+    if (record.type === 'image_url') continue;
+    return null;
+  }
+  return parts.length > 0 ? parts : null;
+}
+
+function sanitizeLogprobBytes(bytes: unknown): number[] | null | undefined {
+  if (bytes === null) return null;
+  if (!Array.isArray(bytes)) return undefined;
+  const out: number[] = [];
+  for (const value of bytes.slice(0, CLIENT_LOGPROB_BYTES_MAX_ITEMS)) {
+    if (typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value > 255) return undefined;
+    out.push(value);
+  }
+  return out;
+}
+
+function sanitizeLogprobScalarEntry(entry: unknown): Record<string, unknown> | undefined {
+  if (!entry || typeof entry !== 'object') return undefined;
+  const record = entry as Record<string, unknown>;
+  if (typeof record.token !== 'string' || record.token.length === 0 || record.token.length > CLIENT_LOGPROB_TOKEN_MAX_LENGTH) {
+    return undefined;
+  }
+  if (typeof record.logprob !== 'number' || !Number.isFinite(record.logprob)) return undefined;
+  const out: Record<string, unknown> = { token: record.token, logprob: record.logprob };
+  if ('bytes' in record) {
+    const bytes = sanitizeLogprobBytes(record.bytes);
+    if (bytes === undefined) return undefined;
+    out.bytes = bytes;
+  }
+  return out;
+}
+
+function sanitizeLogprobTokenEntry(entry: unknown): Record<string, unknown> | undefined {
+  const base = sanitizeLogprobScalarEntry(entry);
+  if (!base) return undefined;
+  const record = entry as Record<string, unknown>;
+  if (!Array.isArray(record.top_logprobs)) {
+    base.top_logprobs = [];
+    return base;
+  }
+  base.top_logprobs = record.top_logprobs
+    .slice(0, CLIENT_LOGPROBS_TOP_MAX_ENTRIES)
+    .map((item) => sanitizeLogprobScalarEntry(item))
+    .filter((item): item is Record<string, unknown> => item !== undefined);
+  return base;
+}
+
+export function sanitizeClientLogprobs(logprobs: unknown): Record<string, unknown> | undefined {
+  if (!logprobs || typeof logprobs !== 'object' || Array.isArray(logprobs)) return undefined;
+  const src = logprobs as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const key of ['content', 'refusal'] as const) {
+    if (!Array.isArray(src[key])) continue;
+    const entries = src[key]
+      .slice(0, CLIENT_LOGPROBS_ARRAY_MAX_ENTRIES)
+      .map((item) => sanitizeLogprobTokenEntry(item))
+      .filter((item): item is Record<string, unknown> => item !== undefined);
+    if (entries.length > 0) out[key] = entries;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+function sanitizeClientChatMessage(message: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {
+    role: 'assistant',
+    content: sanitizeClientMessageContent(message.content),
+  };
+  if (typeof message.reasoning_content === 'string') out.reasoning_content = message.reasoning_content;
+  if (typeof message.refusal === 'string') out.refusal = message.refusal;
+  if (Array.isArray(message.tool_calls)) out.tool_calls = message.tool_calls;
+  if (message.function_call && typeof message.function_call === 'object') {
+    out.function_call = message.function_call;
+  }
+  return out;
+}
+
+export function sanitizeClientVoteRequestField(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const vote = value as Record<string, unknown>;
+  if (typeof vote.id !== 'string' || !CLIENT_VOTE_REQUEST_ID_PATTERN.test(vote.id)) return undefined;
+  if (typeof vote.prompt !== 'string' || vote.prompt.length === 0 || vote.prompt.length > CLIENT_VOTE_REQUEST_PROMPT_MAX_LENGTH) {
+    return undefined;
+  }
+  if (typeof vote.predictedTier !== 'string' || !CLIENT_EFFORT_LEVELS.has(vote.predictedTier as EffortLevel)) {
+    return undefined;
+  }
+  if (typeof vote.confidence !== 'number' || !Number.isFinite(vote.confidence) || vote.confidence < 0 || vote.confidence > 1) {
+    return undefined;
+  }
+  return {
+    id: vote.id,
+    prompt: vote.prompt,
+    predictedTier: vote.predictedTier,
+    confidence: vote.confidence,
+  };
+}
+
+export function gatewayVoteRequestForClient(vote: VoteRequest): Record<string, unknown> | undefined {
+  return sanitizeClientVoteRequestField({
+    id: vote.id,
+    prompt: formatVotePrompt(vote).trimStart(),
+    predictedTier: vote.predictedTier,
+    confidence: vote.confidence,
+  });
+}
+
+/** Strip provider-specific fields from upstream chat completion JSON before returning to clients. */
+export function sanitizeClientChatCompletionPayload(upstream: unknown, routedModel?: string): Record<string, unknown> {
+  const body = upstream && typeof upstream === 'object' ? upstream as Record<string, unknown> : {};
+  const choices = Array.isArray(body.choices)
+    ? body.choices.map((choice: any, index: number) => {
+        const message = choice?.message && typeof choice.message === 'object'
+          ? sanitizeClientChatMessage(choice.message as Record<string, unknown>)
+          : {
+              role: 'assistant',
+              content: typeof choice?.text === 'string' ? choice.text : null,
+            };
+        const sanitizedChoice: Record<string, unknown> = {
+          index: typeof choice?.index === 'number' ? choice.index : index,
+          message,
+          finish_reason: sanitizeClientFinishReason(choice?.finish_reason),
+        };
+        const logprobs = sanitizeClientLogprobs(choice?.logprobs);
+        if (logprobs) sanitizedChoice.logprobs = logprobs;
+        return sanitizedChoice;
+      })
+    : [];
+
+  const sanitizedId = sanitizeClientMetadataString(body.id);
+  const sanitizedModel = sanitizeClientMetadataString(body.model) ?? sanitizeClientMetadataString(routedModel) ?? 'unknown';
+  const payload: Record<string, unknown> = {
+    id: sanitizedId ?? `chatcmpl-${Date.now()}`,
+    object: 'chat.completion',
+    created: typeof body.created === 'number' ? body.created : Math.floor(Date.now() / 1000),
+    model: sanitizedModel,
+    choices,
+    usage: sanitizeClientUsage(body.usage),
+  };
+  const systemFingerprint = sanitizeClientMetadataString(body.system_fingerprint);
+  if (systemFingerprint) payload.system_fingerprint = systemFingerprint;
+  return payload;
+}
+
+export function resolveRetryAfterSeconds(
+  upstreamHeaders: Headers | { get(name: string): string | null } | null | undefined,
+  fallbackSeconds = DEFAULT_RETRY_AFTER_SECONDS,
+  nowMs: number = Date.now(),
+): string {
+  const raw = upstreamHeaders?.get('retry-after')?.trim();
+  if (!raw) return String(fallbackSeconds);
+
+  if (/^\d+$/.test(raw)) {
+    const seconds = Number.parseInt(raw, 10);
+    if (seconds > 0) return String(Math.min(seconds, MAX_RETRY_AFTER_SECONDS));
+    return String(fallbackSeconds);
+  }
+
+  const dateMs = Date.parse(raw);
+  if (!Number.isNaN(dateMs)) {
+    const deltaSeconds = Math.floor((dateMs - nowMs) / 1000);
+    return String(Math.min(MAX_RETRY_AFTER_SECONDS, Math.max(0, deltaSeconds)));
+  }
+
+  return String(fallbackSeconds);
+}
+
+export function respondWithSanitizedUpstreamFailure(
+  res: ServerResponse,
+  upstreamStatus: number,
+  providerId: string,
+  errorBody: unknown,
+  upstreamHeaders?: Headers | { get(name: string): string | null } | null,
+): void {
+  logUpstreamFailure(providerId, upstreamStatus, errorBody);
+  const { httpStatus, error } = clientHttpResponseForUpstreamFailure(upstreamStatus);
+  if (httpStatus === 429) {
+    res.setHeader('Retry-After', resolveRetryAfterSeconds(upstreamHeaders));
+  }
+  jsonResponse(res, httpStatus, { error });
+}
+
+function logProviderChainExhausted(context: string, attempted: string[], skipped: string[] = []): void {
+  const attemptedText = attempted.length > 0 ? attempted.join(' → ') : 'none';
+  const skippedText = skipped.length > 0 ? skipped.join(' → ') : 'none';
+  console.error(`❌ ${context}: attempted=${truncateForLog(attemptedText)} skipped=${truncateForLog(skippedText)}`);
+}
+
+const MAX_LOGGED_ERROR_MESSAGE_CHARS = 500;
+const MAX_LOGGED_STACK_CHARS = 2_000;
+
+export const DRAIN_BODY_MAX_MS = 2_000;
+export const DEFAULT_BODY_READ_IDLE_MS = DRAIN_BODY_MAX_MS;
+export const DEFAULT_SERVER_REQUEST_TIMEOUT_MS = 120_000;
+export const DEFAULT_SERVER_HEADERS_TIMEOUT_MS = 60_000;
+
+function truncateForLog(value: string, maxChars = MAX_LOGGED_ERROR_MESSAGE_CHARS): string {
+  if (value.length <= maxChars) return value;
+  return `${value.slice(0, maxChars)}…[truncated]`;
+}
+
+function truncateStackForLog(stack: string): string {
+  return truncateForLog(stack, MAX_LOGGED_STACK_CHARS);
+}
+
+export function resolveBodyReadIdleMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.MOMA_BODY_READ_IDLE_MS;
+  if (raw === undefined || raw.trim() === '') return DEFAULT_BODY_READ_IDLE_MS;
+  const configured = Number(raw);
+  if (!Number.isSafeInteger(configured) || configured <= 0) {
+    console.warn(`⚠️  MOMA_BODY_READ_IDLE_MS invalid (${JSON.stringify(raw)}); using default ${DEFAULT_BODY_READ_IDLE_MS}`);
+    return DEFAULT_BODY_READ_IDLE_MS;
+  }
+  return configured;
+}
+
+export function resolveDrainBodyMaxMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.MOMA_DRAIN_BODY_MAX_MS;
+  if (raw === undefined || raw.trim() === '') return DRAIN_BODY_MAX_MS;
+  const configured = Number(raw);
+  if (!Number.isSafeInteger(configured) || configured <= 0) {
+    console.warn(`⚠️  MOMA_DRAIN_BODY_MAX_MS invalid (${JSON.stringify(raw)}); using default ${DRAIN_BODY_MAX_MS}`);
+    return DRAIN_BODY_MAX_MS;
+  }
+  return configured;
+}
+
+export function resolveDrainBodyMaxExtraBytes(env: NodeJS.ProcessEnv = process.env): number {
+  return resolveMaxBodyBytes(env);
+}
+
+export function resolveServerRequestTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.MOMA_SERVER_REQUEST_TIMEOUT_MS;
+  if (raw === undefined || raw.trim() === '') return DEFAULT_SERVER_REQUEST_TIMEOUT_MS;
+  const configured = Number(raw);
+  if (!Number.isSafeInteger(configured) || configured <= 0) {
+    console.warn(`⚠️  MOMA_SERVER_REQUEST_TIMEOUT_MS invalid (${JSON.stringify(raw)}); using default ${DEFAULT_SERVER_REQUEST_TIMEOUT_MS}`);
+    return DEFAULT_SERVER_REQUEST_TIMEOUT_MS;
+  }
+  return configured;
+}
+
+export function resolveServerHeadersTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.MOMA_SERVER_HEADERS_TIMEOUT_MS;
+  if (raw === undefined || raw.trim() === '') return DEFAULT_SERVER_HEADERS_TIMEOUT_MS;
+  const configured = Number(raw);
+  if (!Number.isSafeInteger(configured) || configured <= 0) {
+    console.warn(`⚠️  MOMA_SERVER_HEADERS_TIMEOUT_MS invalid (${JSON.stringify(raw)}); using default ${DEFAULT_SERVER_HEADERS_TIMEOUT_MS}`);
+    return DEFAULT_SERVER_HEADERS_TIMEOUT_MS;
+  }
+  return configured;
+}
+
+export function configureGatewayHttpServer(server: Server): void {
+  const requestTimeoutMs = resolveServerRequestTimeoutMs();
+  const headersTimeoutMs = Math.min(resolveServerHeadersTimeoutMs(), requestTimeoutMs);
+  server.requestTimeout = requestTimeoutMs;
+  server.headersTimeout = headersTimeoutMs;
+}
+
+export function logGatewayFailure(context: string, err: unknown): void {
+  if (err instanceof Error) {
+    console.error(`❌ ${context}: ${err.name}: ${truncateForLog(err.message)}`);
+    if (err.stack) console.error(truncateStackForLog(err.stack));
+  } else {
+    console.error(`❌ ${context}: ${truncateForLog(String(err))}`);
+  }
+}
+
+let gatewayTestRoutesEnabled = false;
+
+export function enableGatewayTestRoutes(): void {
+  gatewayTestRoutesEnabled = true;
+}
+
+export function startDrainingRequestBody(req: IncomingMessage): void {
+  const marked = req as IncomingMessage & { _gateswarmDraining?: boolean };
+  if (marked._gateswarmDraining) return;
+  marked._gateswarmDraining = true;
+
+  const maxExtraBytes = resolveDrainBodyMaxExtraBytes();
+  const maxMs = resolveDrainBodyMaxMs();
+  let drainedExtraBytes = 0;
+  let finished = false;
+
+  const finishDrain = () => {
+    if (finished) return;
+    finished = true;
+    clearTimeout(timer);
+    if (!req.destroyed) req.destroy();
+  };
+
+  const timer = setTimeout(finishDrain, maxMs);
+
+  req.on('data', (chunk: Buffer | string) => {
+    if (finished) return;
+    const len = Buffer.isBuffer(chunk) ? chunk.length : Buffer.byteLength(chunk);
+    drainedExtraBytes += len;
+    if (drainedExtraBytes > maxExtraBytes) finishDrain();
+  });
+  req.on('end', () => {
+    if (!finished) {
+      finished = true;
+      clearTimeout(timer);
+    }
+  });
+  req.on('error', finishDrain);
+  req.on('close', () => {
+    finished = true;
+    clearTimeout(timer);
+  });
+
+  if (!req.readableEnded) req.resume();
+}
+
+export function respondRequestBodyError(req: IncomingMessage, res: ServerResponse, err: RequestBodyError): void {
+  if (res.headersSent) return;
+  startDrainingRequestBody(req);
+  res.setHeader('Connection', 'close');
+  jsonResponse(res, err.status, { error: { message: err.message } });
+}
+
+export function resolveMaxBodyBytes(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.MOMA_MAX_BODY_BYTES;
+  if (raw === undefined || raw.trim() === '') {
+    return DEFAULT_MAX_BODY_BYTES;
+  }
+  const configured = Number(raw);
+  if (!Number.isSafeInteger(configured) || configured <= 0) {
+    console.warn(`⚠️  MOMA_MAX_BODY_BYTES invalid (${JSON.stringify(raw)}); using default ${DEFAULT_MAX_BODY_BYTES}`);
+    return DEFAULT_MAX_BODY_BYTES;
+  }
+  if (configured > MAX_BODY_BYTES_UPPER_BOUND) {
+    console.warn(`⚠️  MOMA_MAX_BODY_BYTES ${configured} exceeds cap ${MAX_BODY_BYTES_UPPER_BOUND}; using cap`);
+    return MAX_BODY_BYTES_UPPER_BOUND;
+  }
+  return configured;
+}
+
+function isValidToolCallEntry(toolCall: unknown): boolean {
+  if (!toolCall || typeof toolCall !== 'object') return false;
+  const tc = toolCall as Record<string, unknown>;
+  if (typeof tc.id !== 'string' || tc.id.trim() === '') return false;
+  if (tc.type !== 'function') return false;
+  const fn = tc.function;
+  if (!fn || typeof fn !== 'object') return false;
+  const fnRecord = fn as Record<string, unknown>;
+  return typeof fnRecord.name === 'string' && fnRecord.name.trim() !== '';
+}
+
+/** Validate assistant tool_calls arrays in a tool-calling conversation. */
+export function validateToolCallingConversation(
+  messages: unknown[],
+): { ok: true } | { ok: false; message: string } {
+  if (!Array.isArray(messages)) {
+    return { ok: false, message: 'messages must be an array' };
+  }
+  for (const msg of messages) {
+    if (!msg || typeof msg !== 'object') continue;
+    const record = msg as Record<string, unknown>;
+    if (record.role !== 'assistant' || record.tool_calls === undefined) continue;
+    const toolCalls = record.tool_calls;
+    if (!Array.isArray(toolCalls)) {
+      return { ok: false, message: 'tool_calls must be an array' };
+    }
+    if (toolCalls.length > MAX_TOOL_CALLS_PER_ASSISTANT_MESSAGE) {
+      return {
+        ok: false,
+        message: `tool_calls exceed limit of ${MAX_TOOL_CALLS_PER_ASSISTANT_MESSAGE}`,
+      };
+    }
+    for (const toolCall of toolCalls) {
+      if (!isValidToolCallEntry(toolCall)) {
+        return { ok: false, message: 'invalid tool_calls entry' };
+      }
+    }
+  }
+  return { ok: true };
+}
 
 export class RequestBodyError extends Error {
   constructor(
-    public readonly status: 400 | 413,
+    public readonly status: 400 | 408 | 413,
     message: string,
   ) {
     super(message);
@@ -1071,10 +1770,33 @@ export class RequestBodyError extends Error {
 }
 
 function maxBodyBytes(): number {
-  const configured = Number(process.env.MOMA_MAX_BODY_BYTES);
-  return Number.isSafeInteger(configured) && configured > 0
-    ? configured
-    : DEFAULT_MAX_BODY_BYTES;
+  return resolveMaxBodyBytes();
+}
+
+export function getMaxBodyBytes(): number {
+  return maxBodyBytes();
+}
+
+export function handleUnhandledRejection(reason: unknown): void {
+  if (reason instanceof RequestBodyError) {
+    console.error(`⚠️  Request body rejected without response handler (${reason.status}): ${reason.message}`);
+    return;
+  }
+  if (reason instanceof Error) {
+    console.error(`❌ Unhandled rejection: ${reason.name}: ${truncateForLog(reason.message)}`);
+    if (reason.stack) console.error(truncateStackForLog(reason.stack));
+  } else {
+    console.error('❌ Unhandled rejection:', reason);
+  }
+  process.exit(1);
+}
+
+function requestBodyTooLargeMessage(): string {
+  return `request body too large (limit ${getMaxBodyBytes()} bytes)`;
+}
+
+function requestBodyIdleMessage(): string {
+  return `request body read idle timeout (limit ${resolveBodyReadIdleMs()} ms)`;
 }
 
 export function parseBody(req: IncomingMessage): Promise<any> {
@@ -1082,22 +1804,33 @@ export function parseBody(req: IncomingMessage): Promise<any> {
     const chunks: Buffer[] = [];
     let bodyBytes = 0;
     let settled = false;
+    let idleTimer: ReturnType<typeof setTimeout> | undefined;
 
     const fail = (error: Error) => {
       if (settled) return;
       settled = true;
+      if (idleTimer) clearTimeout(idleTimer);
       reject(error);
     };
 
+    const armIdleTimer = () => {
+      if (idleTimer) clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => {
+        fail(new RequestBodyError(408, requestBodyIdleMessage()));
+        startDrainingRequestBody(req);
+      }, resolveBodyReadIdleMs());
+    };
+
+    armIdleTimer();
+
     req.on('data', (chunk: Buffer | string) => {
       if (settled) return;
+      armIdleTimer();
       const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
       bodyBytes += buffer.length;
       if (bodyBytes > maxBodyBytes()) {
-        // Stop accepting additional data immediately. The request is destroyed
-        // after the route handler has flushed its 413 response.
-        req.pause();
-        fail(new RequestBodyError(413, 'request body too large'));
+        fail(new RequestBodyError(413, requestBodyTooLargeMessage()));
+        startDrainingRequestBody(req);
         return;
       }
       chunks.push(buffer);
@@ -1105,6 +1838,7 @@ export function parseBody(req: IncomingMessage): Promise<any> {
     req.on('end', () => {
       if (settled) return;
       settled = true;
+      if (idleTimer) clearTimeout(idleTimer);
       const body = Buffer.concat(chunks).toString('utf8');
       if (!body) {
         resolve({});
@@ -1116,8 +1850,14 @@ export function parseBody(req: IncomingMessage): Promise<any> {
         reject(new RequestBodyError(400, 'invalid JSON body'));
       }
     });
-    req.on('error', error => fail(error));
-    req.on('aborted', () => fail(new Error('request aborted')));
+    req.on('error', (error) => {
+      if (idleTimer) clearTimeout(idleTimer);
+      fail(error);
+    });
+    req.on('aborted', () => {
+      if (idleTimer) clearTimeout(idleTimer);
+      fail(new Error('request aborted'));
+    });
   });
 }
 
@@ -1181,7 +1921,57 @@ export interface UpstreamFailureMetadata {
   provider: string;
   status: number;
   code: string | number | null;
-  bodyPrefix: string;
+  errorType: string | null;
+}
+
+export function extractUpstreamErrorFields(body: unknown): { code: string | number | null; errorType: string | null } {
+  let code: string | number | null = null;
+  let errorType: string | null = null;
+  try {
+    const parsed = typeof body === 'string' ? JSON.parse(body) : body;
+    const error = (parsed as { error?: Record<string, unknown> })?.error ?? parsed;
+    if (error && typeof error === 'object') {
+      const record = error as Record<string, unknown>;
+      if (typeof record.code === 'string' || typeof record.code === 'number') code = record.code;
+      if (typeof record.type === 'string') errorType = record.type;
+    }
+  } catch {
+    // ignore unparsable bodies — metadata stays status/code/type only
+  }
+  return { code, errorType };
+}
+
+/** Overload-style limits (e.g. provider code 1305) must not trigger quota throttling. */
+export function isOverloadOnlyRateLimit(status: number, errorBody: unknown): boolean {
+  if (status === 1305) return true;
+  const { code } = extractUpstreamErrorFields(errorBody);
+  if (code === 1305 || code === '1305') return true;
+  if (errorBody && typeof errorBody === 'object' && Array.isArray((errorBody as { choices?: unknown[] }).choices)) {
+    const content = (errorBody as { choices: Array<{ message?: { content?: unknown } }> }).choices[0]?.message?.content;
+    if (typeof content === 'string' && /^API Error:\s*1305\b/i.test(content.trim())) return true;
+  }
+  return false;
+}
+
+export function shouldRecordProviderQuotaThrottle(
+  status: number,
+  errorBody: unknown,
+  options?: { rateLimitClassified?: boolean },
+): boolean {
+  if (isOverloadOnlyRateLimit(status, errorBody)) return false;
+  if (options?.rateLimitClassified) return true;
+  return status === 429 || status === 1308;
+}
+
+/** Whether a forward-chain attempt failure should surface as client rate-limit exhaustion. */
+export function forwardChainFailureWasRateLimit(
+  status: number,
+  errorBody: unknown,
+  classifiedRateLimit = false,
+): boolean {
+  if (isOverloadOnlyRateLimit(status, errorBody)) return false;
+  if (classifiedRateLimit) return true;
+  return status === 429 || status === 1308;
 }
 
 export function maskApiKeyShapedSubstrings(value: string): string {
@@ -1192,18 +1982,12 @@ export function maskApiKeyShapedSubstrings(value: string): string {
 }
 
 export function upstreamFailureMetadata(provider: string, status: number, body: unknown): UpstreamFailureMetadata {
-  const text = typeof body === 'string' ? body : JSON.stringify(body ?? '') ?? '';
-  let code: string | number | null = null;
-  try {
-    const parsed = JSON.parse(text);
-    const error = parsed?.error ?? parsed;
-    if (typeof error?.code === 'string' || typeof error?.code === 'number') code = error.code;
-  } catch {}
+  const { code, errorType } = extractUpstreamErrorFields(body);
   return {
     provider,
     status,
     code,
-    bodyPrefix: maskApiKeyShapedSubstrings(text).slice(0, 200),
+    errorType,
   };
 }
 
@@ -1354,8 +2138,7 @@ async function forwardStreamingWithFallback(options: {
         const available = await agentRegistry.checkCliProviderAvailability(target.providerId);
         if (!available.ok) throw new Error(available.reason ?? 'CLI unavailable');
         const result = await agentRegistry.getCliAdapter(target.providerId)!.chatCompletion(sanitizeForCli(messages), target.model, {});
-        const resultBody = { choices: [{ message: { role: 'assistant', content: result.content }, finish_reason: result.finishReason }] };
-        const unusable = getUnusableProviderBodyReason(resultBody);
+        const unusable = getCliStdoutBodyFailure(result.content);
         if (unusable) {
           providerHealth.recordFailure(target.providerId, unusable.kind, target.label, unusable.reason, healthAttempt);
           continue;
@@ -1413,7 +2196,11 @@ async function forwardStreamingWithFallback(options: {
       // It is usable only when it passes the same completion validation.
       let data: any;
       try { data = await response.json(); } catch { data = null; }
-      const unusable = getUnusableProviderBodyReason(data);
+      const preparedStreamJson = data
+        ? prepareProviderChatCompletionBody(data, target.providerId)
+        : { data: null, bodyFailure: { reason: 'empty_body', kind: 'unusable_body' as const, message: 'empty response body' } };
+      data = preparedStreamJson.data;
+      const unusable = preparedStreamJson.bodyFailure;
       if (unusable) {
         providerHealth.recordFailure(target.providerId, unusable.kind, target.label, unusable.reason, healthAttempt);
         continue;
@@ -1431,7 +2218,8 @@ async function forwardStreamingWithFallback(options: {
       console.error(`❌ Streaming attempt ${target.label} failed: ${error?.message ?? kind}`);
     }
   }
-  jsonResponse(res, 502, { error: { message: `Provider stream chain exhausted (attempted: ${attempted.join(' → ') || 'none'})`, type: 'provider_chain_exhausted' } });
+  logProviderChainExhausted('Provider stream chain exhausted', attempted);
+  jsonResponse(res, 502, { error: CLIENT_PROVIDER_CHAIN_EXHAUSTED });
 }
 
 async function forwardToProvider(
@@ -1475,8 +2263,7 @@ async function forwardToProvider(
 
     if (!response.ok) {
       const error = await response.text();
-      logUpstreamFailure(providerId, response.status, error);
-      jsonResponse(res, response.status, { error: { message: error, type: 'provider_error' } });
+      respondWithSanitizedUpstreamFailure(res, response.status, providerId, error, response.headers);
       return;
     }
 
@@ -1559,10 +2346,11 @@ async function forwardToProvider(
     clearTimeout(timeoutId);
     if (err.name === 'AbortError') {
       console.error(`⏱️  Provider ${providerId}/${model} timed out after ${providerTimeoutLabel}`);
-      jsonResponse(res, 504, { error: { message: `Provider ${providerId}/${model} timed out after ${providerTimeoutLabel}`, type: 'timeout' } });
+      logGatewayFailure(`Provider timeout (${providerId}/${model}) after ${providerTimeoutLabel}`, err);
+      jsonResponse(res, 504, { error: CLIENT_TIMEOUT_ERROR });
     } else {
-      console.error(`❌ Forward error: ${err.message}`);
-      jsonResponse(res, 502, { error: { message: `Gateway error: ${err.message}`, type: 'gateway_error' } });
+      logGatewayFailure(`Forward error (${providerId}/${model})`, err);
+      jsonResponse(res, 502, { error: CLIENT_GATEWAY_ERROR });
     }
   }
 }
@@ -1653,7 +2441,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
   //   3. Headers: X-Direct-Provider + X-Direct-Model
   const directRoute = resolveDirectRoute(req, body, agent);
   if (directRoute) {
-    return handleDirectRoute(req, res, agent, messages, promptText, directRoute.providerId, directRoute.model);
+    return await handleDirectRoute(req, res, agent, messages, promptText, directRoute.providerId, directRoute.model);
   }
 
   // ─── v0.5.6: Greeting/Ultra-Short Fast-Path ──────────────
@@ -1687,7 +2475,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
         const baseUrl = agentRegistry.getProviderBaseUrl(trivialCfg.provider);
         const apiKey = agentRegistry.getProviderApiKey(trivialCfg.provider);
         if (baseUrl && apiKey) {
-          const cleanModel = trivialCfg.model.includes('/') ? trivialCfg.model.split('/').slice(1).join('/') : trivialCfg.model;
+          const cleanModel = normalizeUpstreamModelId(trivialCfg.provider, trivialCfg.model);
           const healthAttempt = providerHealth.beginAttempt(trivialCfg.provider);
           greetingHealthAttempt = healthAttempt;
           const resp = await fetch(`${baseUrl}/chat/completions`, {
@@ -1729,8 +2517,10 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
               if (completed) providerHealth.recordSuccess(trivialCfg.provider, healthAttempt);
               else providerHealth.recordFailure(trivialCfg.provider, 'transport', `${trivialCfg.provider}/${trivialCfg.model}`, 'greeting stream read failure', healthAttempt);
             } else {
-              const data = await resp.json();
-              const bodyFailure = getUnusableProviderBodyReason(data);
+              let data = await resp.json();
+              const preparedGreeting = prepareProviderChatCompletionBody(data, trivialCfg.provider);
+              data = preparedGreeting.data;
+              const bodyFailure = preparedGreeting.bodyFailure;
               if (bodyFailure) {
                 console.log(`⚡ [${agent.name}] Greeting fast-path returned unusable body (${bodyFailure.reason}) — falling through to normal routing`);
                 logUpstreamFailure(trivialCfg.provider, 200, data);
@@ -1748,7 +2538,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
                 writeJsonCompletionAsSse(res, data, cleanModel);
                 return;
               }
-              return jsonResponse(res, 200, data);
+              return jsonResponse(res, 200, sanitizeClientChatCompletionPayload(data, cleanModel));
             }
             return;
           }
@@ -1756,7 +2546,9 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
           logUpstreamFailure(trivialCfg.provider, resp.status, errorText);
           const healthDetail = upstreamFailureHealthDetail(trivialCfg.provider, resp.status, errorText);
           if (resp.status === 429 || resp.status === 1305 || resp.status === 1308) {
-            providerQuota.record429(trivialCfg.provider);
+            if (shouldRecordProviderQuotaThrottle(resp.status, errorText)) {
+              providerQuota.record429(trivialCfg.provider);
+            }
             providerHealth.recordFailure(trivialCfg.provider, 'rate_limit', `${trivialCfg.provider}/${trivialCfg.model}`, healthDetail, healthAttempt);
             // v0.5.5: Feed the greeting-fast-path failure to the intelligence layer
             // so the trivial tier gets rebalanced if ZAI is persistently exhausted
@@ -1990,124 +2782,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
   //   3. Tool messages appear without a parent assistant message
   // This pass fixes all three issues.
   // ──────────────────────────────────────────────────────────
-  const sanitizeMessages = (msgs: any[]): any[] => {
-    if (msgs.length <= 1) return [...msgs];
-
-    // Phase 1: Move all system messages to the front
-    const systemMsgs = msgs.filter(m => m.role === 'system');
-    const nonSystemMsgs = msgs.filter(m => m.role !== 'system');
-
-    // Phase 2: Merge consecutive same-role messages in non-system msgs
-    // BUT skip tool messages — each tool result has its own tool_call_id and
-    // may contain structured content (images, file data). Merging would
-    // destroy the tool_call_id mapping and stringify content arrays.
-    const merged: any[] = [];
-    for (const msg of nonSystemMsgs) {
-      const prevMsg = merged.length > 0 ? merged[merged.length - 1] : null;
-      if (
-        prevMsg &&
-        prevMsg.role === msg.role &&
-        msg.role !== 'tool' &&  // Never merge tool messages
-        !messageHasMediaParts(prevMsg) && !messageHasMediaParts(msg)  // MoMA: keep media arrays intact
-      ) {
-        // Merge content
-        const prevContent = typeof prevMsg.content === 'string' ? prevMsg.content : JSON.stringify(prevMsg.content);
-        const currContent = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
-        prevMsg.content = prevContent + '\n---\n' + currContent;
-      } else {
-        merged.push({ ...msg });
-      }
-    }
-
-    // Phase 3: Ensure the sequence starts with 'user' or 'system'
-    // If the first non-system message isn't 'user', prepend a placeholder
-    const result = [...systemMsgs];
-    if (merged.length > 0 && merged[0].role !== 'user') {
-      // Try to find the first user message and move it up, otherwise skip assistant messages at start
-      const firstUserIdx = merged.findIndex(m => m.role === 'user');
-      if (firstUserIdx > 0) {
-        // Pull the first user message to the front, drop preceding assistant messages
-        result.push(merged[firstUserIdx], ...merged.slice(firstUserIdx + 1));
-      }
-      // If no user message at all, just use what we have (edge case)
-      else {
-        result.push(...merged);
-      }
-    } else {
-      result.push(...merged);
-    }
-
-    // Phase 5: Remove empty content messages + ensure tool always follows assistant
-    const valid: any[] = [];
-    const hasToolCallParent = new Set<string>();
-    for (const msg of result) {
-      if (msg.role === 'assistant' && msg.tool_calls) {
-        for (const tc of msg.tool_calls) {
-          if (tc.id) hasToolCallParent.add(tc.id);
-        }
-      }
-    }
-    for (const msg of result) {
-      // Skip empty content - BUT preserve assistant messages with tool_calls (they're structural anchors)
-      if (!msg.content && !(msg.role === 'assistant' && msg.tool_calls)) continue;
-      if (typeof msg.content === 'string' && msg.content.trim() === '' && !(msg.role === 'assistant' && msg.tool_calls)) continue;
-      // Skip null content assistant messages WITHOUT tool_calls
-      if (msg.role === 'assistant' && msg.content === null && !msg.tool_calls) continue;
-      // Skip orphaned tool messages (no parent assistant)
-      if (msg.role === 'tool') {
-        if (msg.tool_call_id && !hasToolCallParent.has(msg.tool_call_id)) continue;
-        // v0.5.2 fix: Tool must follow an assistant or another tool message.
-        // Multi-tool returns (tc1, tc2, tc3) are consecutive tool messages —
-        // only the first follows an assistant directly; subsequent ones follow
-        // the previous tool message. DeepSeek and other strict providers reject
-        // tool_calls where any tool_call_id is unmatched.
-        const prevRole = valid.length > 0 ? valid[valid.length - 1].role : null;
-        if (prevRole !== 'assistant' && prevRole !== 'tool') continue;
-      }
-      valid.push(msg);
-    }
-
-    // Phase 6: Final safety — drop leading non-system/non-user messages
-    while (valid.length > 0 && valid[0].role !== 'system' && valid[0].role !== 'user') {
-      valid.shift();
-    }
-
-    // Phase 7: ZAI/Bailian require at least one user message. If missing after compression,
-    // inject a synthetic one right after the system message.
-    if (!valid.some(m => m.role === 'user')) {
-      const sysEnd = valid.findIndex(m => m.role !== 'system');
-      const insertIdx = sysEnd < 0 ? valid.length : sysEnd;
-      valid.splice(insertIdx, 0, { role: 'user', content: '[Continuing conversation — please respond]' });
-    }
-
-    // Phase 8 (v0.5.2): Safety net — strip orphaned tool_calls from assistants.
-    // TurboQuant compression and message dropping can leave assistant messages
-    // with tool_calls whose corresponding tool responses were removed. Providers
-    // like DeepSeek reject these with "insufficient tool messages following
-    // tool_calls message". Rather than fail, drop the tool_calls metadata.
-    const validToolIds = new Set<string>();
-    for (const msg of valid) {
-      if (msg.role === 'tool' && msg.tool_call_id) validToolIds.add(msg.tool_call_id);
-    }
-    for (const msg of valid) {
-      if (msg.role === 'assistant' && msg.tool_calls?.length > 0) {
-        const covered = msg.tool_calls.every((tc: any) => validToolIds.has(tc.id));
-        if (!covered) {
-          delete msg.tool_calls;
-          // After stripping tool_calls, content may be null — replace
-          // with placeholder to satisfy strict APIs (DeepSeek rejects
-          // assistant messages with null content and no tool_calls)
-          if (msg.content === null || msg.content === undefined || (typeof msg.content === 'string' && msg.content.trim() === '')) {
-            msg.content = '[tool use]';
-          }
-        }
-      }
-    }
-
-    return valid;
-  };
-
-  const sanitizedMessages = sanitizeMessages(compressedMessages);
+  const sanitizedMessages = sanitizeMessagesForToolCalling(compressedMessages);
   compressedMessages.length = 0;
   compressedMessages.push(...sanitizedMessages);
 
@@ -2254,7 +2929,8 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
 
     let data: any = null;
     let latency = 0;
-    let actualTarget = initial;
+    let actualTarget: RetryTarget | null = null;
+    let lastChainFailureRateLimit = false;
 
     // v0.5.5: Global retry budget prevents an unbounded fallback cascade.
     // If all providers are rate-limited, failing fast is better than a
@@ -2277,6 +2953,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
       if (healthSkip) {
         console.log(`⏭️  [${agent.name}] Skipping ${target.label}: ${healthSkip}`);
         skippedTargets.push(`${target.label} (${healthSkip})`);
+        lastChainFailureRateLimit = false;
         continue;
       }
 
@@ -2289,6 +2966,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
         if (switchCheck.shouldSwitch) {
           console.log(`⏭️  [${agent.name}] Skipping ${target.label}: ${switchCheck.reason}`);
           skippedTargets.push(`${target.label} (${switchCheck.reason})`);
+          lastChainFailureRateLimit = false;
           continue;
         }
       }
@@ -2304,23 +2982,29 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
           if (!avail.ok) {
             console.log(`⚠️  [${agent.name}] CLI ${target.label} unavailable: ${avail.reason}`);
             providerHealth.recordFailure(target.providerId, 'transport', target.label, avail.reason ?? 'unavailable', healthAttempt);
+            lastChainFailureRateLimit = false;
             continue;
           }
           const cliResult = await (async () => {
             const adapter = agentRegistry.getCliAdapter(target.providerId)!;
             return adapter.chatCompletion(sanitizeForCli(compressedMessages), target.model, {});
           })();
-          const bodyFailure = getUnusableProviderBodyReason({
-            choices: [{ message: { role: 'assistant', content: cliResult.content } }],
-          });
+          const bodyFailure = getCliStdoutBodyFailure(cliResult.content);
           if (bodyFailure) {
-            console.log(`⚠️  [${agent.name}] CLI ${target.label} returned unusable body (${bodyFailure.reason}), trying fallback...`);
-            modelMatrix.recordError(target.providerId, target.model, bodyFailure.reason);
-            consumptionTracker.recordUsage(target.providerId, { tokensIn: 0, tokensOut: 0, latencyMs: 0, error: true });
+            console.log(`⚠️  [${agent.name}] CLI ${target.label} returned unusable stdout (${bodyFailure.reason}), trying fallback...`);
             const providerBody = { choices: [{ message: { role: 'assistant', content: cliResult.content } }] };
+            if (!isOverloadOnlyRateLimit(200, providerBody)) {
+              modelMatrix.recordError(target.providerId, target.model, bodyFailure.reason);
+            }
+            if (shouldRecordProviderQuotaThrottle(200, providerBody, { rateLimitClassified: bodyFailure.kind === 'rate_limit' })) {
+              providerQuota.record429(target.providerId);
+            }
+            consumptionTracker.recordUsage(target.providerId, { tokensIn: 0, tokensOut: 0, latencyMs: 0, error: true });
             logUpstreamFailure(target.providerId, 200, providerBody);
             providerHealth.recordFailure(target.providerId, bodyFailure.kind, target.label, upstreamFailureHealthDetail(target.providerId, 200, providerBody), healthAttempt);
             consumptionIntelligence.recordFallbackOutcome(effort, target.providerId, target.model, false, bodyFailure.reason);
+            lastChainFailureRateLimit = forwardChainFailureWasRateLimit(200, providerBody, bodyFailure.kind === 'rate_limit');
+            data = null;
             continue;
           }
 
@@ -2341,6 +3025,8 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
           // v0.5.5: Feed CLI failure to intelligence layer
           consumptionIntelligence.recordFallbackOutcome(effort, target.providerId, target.model, false, 'cli_error');
           providerHealth.recordFailure(target.providerId, 'transport', target.label, err.message, healthAttempt);
+          lastChainFailureRateLimit = false;
+          data = null;
           continue;
         }
       }
@@ -2393,10 +3079,15 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
 
         if (resp.status === 429 || resp.status === 1305 || resp.status === 1308) {
           console.log(`⚠️  [${agent.name}] ${target.label} rate-limited (${resp.status}), trying fallback...`);
-          modelMatrix.recordError(target.providerId, target.model, `rate-limited (${resp.status})`);
-          providerQuota.record429(target.providerId);
+          if (!isOverloadOnlyRateLimit(resp.status, errorText)) {
+            modelMatrix.recordError(target.providerId, target.model, `rate-limited (${resp.status})`);
+          }
+          if (shouldRecordProviderQuotaThrottle(resp.status, errorText)) {
+            providerQuota.record429(target.providerId);
+          }
           consumptionTracker.recordUsage(target.providerId, { tokensIn: 0, tokensOut: 0, latencyMs: 0, error: true });
           providerHealth.recordFailure(target.providerId, 'rate_limit', target.label, healthDetail, healthAttempt);
+          lastChainFailureRateLimit = forwardChainFailureWasRateLimit(resp.status, errorText);
           // v0.5.5: Feed the failure to the intelligence layer for self-healing
           consumptionIntelligence.recordFallbackOutcome(effort, target.providerId, target.model, false, '429');
           continue;
@@ -2405,6 +3096,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
         if (resp.status >= 500 && resp.status < 600) {
           console.log(`⚠️  [${agent.name}] ${target.label} server error (${resp.status}), trying fallback...`);
           modelMatrix.recordError(target.providerId, target.model, `server error (${resp.status})`);
+          lastChainFailureRateLimit = false;
           consumptionTracker.recordUsage(target.providerId, { tokensIn: 0, tokensOut: 0, latencyMs: 0, error: true });
           const failureKind = providerFailureKindForHttp(resp.status, errorText);
           providerHealth.recordFailure(target.providerId, failureKind, target.label, healthDetail, healthAttempt);
@@ -2415,24 +3107,38 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
         if (!resp.ok) {
           const failureKind = providerFailureKindForHttp(resp.status, errorText);
           console.log(`⚠️  [${agent.name}] ${target.label} provider error (${resp.status}), trying fallback...`);
-          modelMatrix.recordError(target.providerId, target.model, `provider error (${resp.status})`);
-          if (failureKind === 'rate_limit') providerQuota.record429(target.providerId);
+          if (!isOverloadOnlyRateLimit(resp.status, errorText)) {
+            modelMatrix.recordError(target.providerId, target.model, `provider error (${resp.status})`);
+          }
+          if (shouldRecordProviderQuotaThrottle(resp.status, errorText, { rateLimitClassified: failureKind === 'rate_limit' })) {
+            providerQuota.record429(target.providerId);
+          }
           consumptionTracker.recordUsage(target.providerId, { tokensIn: 0, tokensOut: 0, latencyMs: 0, error: true });
           providerHealth.recordFailure(target.providerId, failureKind, target.label, healthDetail, healthAttempt);
+          lastChainFailureRateLimit = forwardChainFailureWasRateLimit(resp.status, errorText, failureKind === 'rate_limit');
           consumptionIntelligence.recordFallbackOutcome(effort, target.providerId, target.model, false, String(resp.status));
           continue;
         }
 
-        data = await resp.json();
-        const bodyFailure = getUnusableProviderBodyReason(data);
+        let parsedBody = await resp.json();
+        const preparedBody = prepareProviderChatCompletionBody(parsedBody, target.providerId);
+        parsedBody = preparedBody.data;
+        const bodyFailure = preparedBody.bodyFailure;
+        data = parsedBody;
         if (bodyFailure) {
           console.log(`⚠️  [${agent.name}] ${target.label} returned unusable body (${bodyFailure.reason}), trying fallback...`);
-          modelMatrix.recordError(target.providerId, target.model, bodyFailure.reason);
-          if (bodyFailure.kind === 'rate_limit') providerQuota.record429(target.providerId);
+          if (!isOverloadOnlyRateLimit(200, data)) {
+            modelMatrix.recordError(target.providerId, target.model, bodyFailure.reason);
+          }
+          if (shouldRecordProviderQuotaThrottle(200, data, { rateLimitClassified: bodyFailure.kind === 'rate_limit' })) {
+            providerQuota.record429(target.providerId);
+          }
           consumptionTracker.recordUsage(target.providerId, { tokensIn: 0, tokensOut: 0, latencyMs: 0, error: true });
           logUpstreamFailure(target.providerId, 200, data);
           providerHealth.recordFailure(target.providerId, bodyFailure.kind, target.label, upstreamFailureHealthDetail(target.providerId, 200, data), healthAttempt);
           consumptionIntelligence.recordFallbackOutcome(effort, target.providerId, target.model, false, bodyFailure.reason);
+          lastChainFailureRateLimit = forwardChainFailureWasRateLimit(200, data, bodyFailure.kind === 'rate_limit');
+          data = null;
           continue;
         }
         latency = Date.now() - startTime;
@@ -2441,6 +3147,8 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
         break;
       } catch (err: any) {
         clearTimeout(reqTimeoutId);
+        data = null;
+        lastChainFailureRateLimit = false;
         if (err.name === 'AbortError') {
           console.error(`⏱️  ${target.label} timed out within the global retry budget, trying fallback...`);
           modelMatrix.recordError(target.providerId, target.model, 'timeout within global budget');
@@ -2455,13 +3163,14 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
       }
     }
 
-    if (!data) {
-      const attempted = attemptedTargets.length > 0 ? attemptedTargets.join(' → ') : 'none';
-      const skipped = skippedTargets.length > 0 ? skippedTargets.join(' → ') : 'none';
-      jsonResponse(res, 502, { error: {
-        message: `Provider chain exhausted (attempted: ${attempted}; skipped: ${skipped})`,
-        type: 'provider_chain_exhausted',
-      } });
+    if (!data || !actualTarget) {
+      logProviderChainExhausted('Provider chain exhausted', attemptedTargets, skippedTargets);
+      if (lastChainFailureRateLimit) {
+        res.setHeader('Retry-After', String(DEFAULT_RETRY_AFTER_SECONDS));
+        jsonResponse(res, 429, { error: CLIENT_RATE_LIMIT_ERROR });
+      } else {
+        jsonResponse(res, 502, { error: CLIENT_PROVIDER_CHAIN_EXHAUSTED });
+      }
       return;
     }
     if (actualTarget.providerId !== providerId) {
@@ -2560,17 +3269,22 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
 
       // Benchmark logging (if enabled for this agent)
       if (agent.benchmarkEnabled) {
-        await benchmarkLogger.log({
-          prompt: promptText.slice(0, 500),
-          prompt_length: promptText.length,
-          tier: effort,
-          routed_model: `${actualTarget.providerId}/${actualTarget.model}`,
-          tokens_in: typeof tokensIn === 'number' ? tokensIn : 0,
-          tokens_out: typeof tokensOut === 'number' ? tokensOut : 0,
-          latency_ms: latency,
-          provider: actualTarget.providerId,
-          status: data ? 'success' : 'error',
-        });
+        try {
+          await benchmarkLogger.log({
+            prompt: promptText.slice(0, 500),
+            prompt_length: promptText.length,
+            tier: effort,
+            routed_model: `${actualTarget.providerId}/${actualTarget.model}`,
+            tokens_in: typeof tokensIn === 'number' ? tokensIn : 0,
+            tokens_out: typeof tokensOut === 'number' ? tokensOut : 0,
+            latency_ms: latency,
+            provider: actualTarget.providerId,
+            status: data ? 'success' : 'error',
+          });
+        } catch (logErr: unknown) {
+          const detail = logErr instanceof Error ? logErr.message : String(logErr);
+          console.error(`Benchmark log failed (non-fatal): ${detail}`);
+        }
       }
 
       res.setHeader('X-Mode', activeMode);
@@ -2598,10 +3312,18 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
       res.setHeader('X-Modality', requestModalities.vision || requestModalities.audio
         ? ['text', requestModalities.vision ? 'vision' : '', requestModalities.audio ? 'audio' : ''].filter(Boolean).join('+')
         : 'text');
-      return jsonResponse(res, 200, data);
+      const clientPayload = sanitizeClientChatCompletionPayload(
+        data,
+        `${actualTarget.providerId}/${actualTarget.model}`,
+      );
+      if (voteRequest) {
+        const gatewayVote = gatewayVoteRequestForClient(voteRequest);
+        if (gatewayVote) clientPayload._voteRequest = gatewayVote;
+      }
+      return jsonResponse(res, 200, clientPayload);
     } catch (err: any) {
-      console.error(`❌ Provider error: ${err.message}`);
-      return jsonResponse(res, 502, { error: { message: err.message, type: 'gateway_error' } });
+      logGatewayFailure(`Provider error (${providerId}/${model})`, err);
+      return jsonResponse(res, 502, { error: CLIENT_GATEWAY_ERROR });
     }
   } else {
     await forwardStreamingWithFallback({
@@ -2674,6 +3396,17 @@ async function handleCliProvider(
       model,
       { temperature: undefined, maxTokens: undefined },
     );
+
+    const stdoutFailure = getCliStdoutBodyFailure(result.content);
+    if (stdoutFailure) {
+      console.log(`⚠️  [${agent.name}] CLI ${providerId}/${model} returned unusable stdout (${stdoutFailure.reason})`);
+      logUpstreamFailure(providerId, 200, { choices: [{ message: { content: result.content } }] });
+      if (stdoutFailure.kind === 'rate_limit') {
+        res.setHeader('Retry-After', String(DEFAULT_RETRY_AFTER_SECONDS));
+        return jsonResponse(res, 429, { error: CLIENT_RATE_LIMIT_ERROR });
+      }
+      return jsonResponse(res, 502, { error: CLIENT_PROVIDER_ERROR });
+    }
 
     const latency = Date.now() - startTime;
     const tokensIn = result.usage?.promptTokens ?? compressionResult.compressedTokens;
@@ -2806,7 +3539,97 @@ function sanitizeForCli(msgs: any[]): any[] {
   }
   return [...systemMsgs, ...merged];
 }
+
+let unhandledRejectionGuardInstalled = false;
+
+function installUnhandledRejectionGuard(): void {
+  if (unhandledRejectionGuardInstalled) return;
+  unhandledRejectionGuardInstalled = true;
+  process.on('unhandledRejection', handleUnhandledRejection);
+}
+
+/** HTTP server with the full MoMA gateway route table (for integration tests). */
+export function createGatewayHttpServer(): Server {
+  installUnhandledRejectionGuard();
+  const server = createServer(async (req, res) => {
+    const url = new URL(req.url || '/', `http://localhost:${PORT}`);
+    const method = req.method || 'GET';
+    const apiKey = extractApiKey(req);
+
+    // CORS preflight
+    if (method === 'OPTIONS') {
+      res.writeHead(200, {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, POST, PATCH, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Admin-Token',
+      });
+      res.end();
+      return;
+    }
+
+    try {
+      if (url.pathname === '/health' && method === 'GET') {
+        const agents = agentRegistry.getAgents();
+        return jsonResponse(res, 200, {
+          status: 'healthy',
+          router: 'GateSwarm MoMA Router v0.7.0 (Trustable Precision)',
+          timestamp: new Date().toISOString(),
+          agents: agents.map(a => ({ id: a.id, name: a.name })),
+        });
+      }
+
+      if (gatewayTestRoutesEnabled && url.pathname === '/__test__/internal-error' && method === 'GET') {
+        throw new Error('secret-internal-database-host');
+      }
+      if (gatewayTestRoutesEnabled && url.pathname === '/__test__/bad-gateway' && method === 'GET') {
+        logGatewayFailure('test bad gateway', new Error('secret-upstream-detail'));
+        return jsonResponse(res, 502, { error: CLIENT_GATEWAY_ERROR });
+      }
+
+      if (url.pathname === '/v1/chat/completions' && method === 'POST') {
+        let agent: AgentConfig | null = null;
+        if (apiKey) {
+          agent = await agentRegistry.authenticate(apiKey);
+        }
+        if (!agent && REQUIRE_AUTH) {
+          return jsonResponse(res, 401, {
+            error: { message: 'Invalid or missing API key', type: 'authentication_error' },
+          });
+        }
+        if (!agent) {
+          agent = agentRegistry.getAgent('default') ?? null;
+          if (!agent) {
+            return jsonResponse(res, 503, {
+              error: { message: 'No default agent configured', type: 'service_unavailable' },
+            });
+          }
+        }
+        return await handleChatCompletion(req, res, agent);
+      }
+
+      jsonResponse(res, 404, { error: { message: `Not found: ${url.pathname}`, type: 'not_found' } });
+    } catch (err: any) {
+      if (err instanceof RequestBodyError) {
+        respondRequestBodyError(req, res, err);
+        return;
+      }
+      logGatewayFailure('Server error', err);
+      jsonResponse(res, 500, { error: CLIENT_INTERNAL_ERROR });
+    }
+  });
+  configureGatewayHttpServer(server);
+  return server;
+}
+
+export async function initializeGatewayForTests(): Promise<void> {
+  installUnhandledRejectionGuard();
+  enableGatewayTestRoutes();
+  await agentRegistry.initialize();
+  await modelMatrix.initialize();
+}
+
 async function init() {
+  installUnhandledRejectionGuard();
   // ─── Secrets: Sovereign Vault first, .env fallback ───────
   // Must run before agentRegistry.initialize() — that's where provider
   // API keys are read from process.env. See src/secrets/README.md.
@@ -3355,7 +4178,7 @@ async function init() {
         const messages = body.messages || [{ role: 'user', content: body.prompt || body.content || '' }];
         const lastUser = messages.filter((m: any) => m.role === 'user').pop();
         const promptText = lastUser?.content || '';
-        return handleDirectRoute(req, res, agent, messages, promptText, directRoute.provider, directRoute.model);
+        return await handleDirectRoute(req, res, agent, messages, promptText, directRoute.provider, directRoute.model);
       }
 
       // ─── List Agents ───
@@ -3456,7 +4279,7 @@ async function init() {
           console.log(`⚠️  No API key — using default agent: ${agent.name}`);
         }
 
-        return handleChatCompletion(req, res, agent);
+        return await handleChatCompletion(req, res, agent);
       }
 
       // ─── v0.4 Status ───
@@ -3610,16 +4433,15 @@ async function init() {
 
     } catch (err: any) {
       if (err instanceof RequestBodyError) {
-        if (!res.headersSent) {
-          if (err.status === 413) res.once('finish', () => req.destroy());
-          jsonResponse(res, err.status, { error: { message: err.message } });
-        }
+        respondRequestBodyError(req, res, err);
         return;
       }
-      console.error(`❌ Server error: ${err.message}`);
-      jsonResponse(res, 500, { error: { message: err.message, type: 'internal_error' } });
+      logGatewayFailure('Server error', err);
+      jsonResponse(res, 500, { error: CLIENT_INTERNAL_ERROR });
     }
   });
+
+  configureGatewayHttpServer(server);
 
   // Bind host: default to loopback so a fresh install is not network-exposed.
   // Non-loopback bindings require MOMA_ADMIN_TOKEN unless explicitly overridden.

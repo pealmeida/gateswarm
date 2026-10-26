@@ -198,12 +198,111 @@ export function getUnusableContentReason(content: any): ProviderBodyFailure | nu
 }
 
 export function getUnusableProviderBodyReason(data: any): ProviderBodyFailure | null {
-  if (hasUsableCompletion(data)) return null;
-
   const structuredError = failureForStructuredError(data?.error);
   if (structuredError) return structuredError;
 
+  if (hasUsableCompletion(data)) return null;
+
   return getUnusableContentReason(extractProviderResponseText(data));
+}
+
+const CLI_STDOUT_FAILURE_MAX_LENGTH = 500;
+
+function cliStdoutFailureFromApiErrorCode(code: string, message: string): ProviderBodyFailure {
+  // Exit-0 stdout is not authoritative for auth — prompt injection can echo these lines.
+  if (code === '401' || code === '403') {
+    return { reason: 'cli_api_error_stdout_soft_auth', kind: 'provider_error', message };
+  }
+  if (code === '429' || code === '1305' || code === '1308') {
+    return { reason: 'cli_api_error_stdout', kind: 'rate_limit', message };
+  }
+  if (/^5\d\d$/.test(code)) {
+    return { reason: 'cli_api_error_stdout', kind: 'server_error', message };
+  }
+  return { reason: 'cli_api_error_stdout', kind: 'provider_error', message };
+}
+
+/**
+ * CLI subprocesses may exit 0 while printing a short, known failure line on stdout.
+ * Only anchored signatures match — never infer auth/rate-limit from explanatory prose.
+ */
+export function getCliStdoutBodyFailure(content: any): ProviderBodyFailure | null {
+  const text = contentToText(content).trim();
+  if (!text) {
+    return { reason: 'empty_body', kind: 'unusable_body', message: 'empty response body' };
+  }
+  if (text.length > CLI_STDOUT_FAILURE_MAX_LENGTH) return null;
+
+  const apiError = text.match(/^API Error:\s*(\d{3,4})\b.*$/i);
+  if (apiError) return cliStdoutFailureFromApiErrorCode(apiError[1], text);
+
+  if (/^Rate limit exceeded\b.*$/i.test(text)) {
+    return { reason: 'cli_rate_limit_stdout', kind: 'rate_limit', message: text };
+  }
+  if (/^Rate limit reached\b.*$/i.test(text)) {
+    return { reason: 'cli_rate_limit_stdout', kind: 'rate_limit', message: text };
+  }
+  if (/^Too many requests\b.*$/i.test(text)) {
+    return { reason: 'cli_rate_limit_stdout', kind: 'rate_limit', message: text };
+  }
+  if (/^Claude AI usage limit reached\b.*$/i.test(text)) {
+    return { reason: 'cli_rate_limit_stdout', kind: 'rate_limit', message: text };
+  }
+  if (/^\d+-hour limit reached\b.*$/i.test(text)) {
+    return { reason: 'cli_rate_limit_stdout', kind: 'rate_limit', message: text };
+  }
+
+  return null;
+}
+
+/** Map Z.AI finish_reason values to OpenAI-compatible reasons (R6-F1). */
+export function normalizeZaiChatCompletionBody(data: any): { data: any; failure: ProviderBodyFailure | null } {
+  if (!data || typeof data !== 'object' || !Array.isArray(data.choices)) {
+    return { data, failure: null };
+  }
+
+  for (const choice of data.choices) {
+    if (choice?.finish_reason === 'network_error') {
+      return {
+        data,
+        failure: {
+          reason: 'zai_network_error_finish',
+          kind: 'server_error',
+          message: 'upstream finish_reason network_error',
+        },
+      };
+    }
+  }
+
+  let mapped = false;
+  const choices = data.choices.map((choice: any) => {
+    if (!choice || typeof choice !== 'object') return choice;
+    const raw = choice.finish_reason;
+    if (raw === 'sensitive') {
+      mapped = true;
+      return { ...choice, finish_reason: 'content_filter' };
+    }
+    if (raw === 'model_context_window_exceeded') {
+      mapped = true;
+      return { ...choice, finish_reason: 'length' };
+    }
+    return choice;
+  });
+
+  return { data: mapped ? { ...data, choices } : data, failure: null };
+}
+
+export function prepareProviderChatCompletionBody(
+  data: any,
+  providerId: string,
+): { data: any; bodyFailure: ProviderBodyFailure | null } {
+  let working = data;
+  if (providerId === 'zai') {
+    const zai = normalizeZaiChatCompletionBody(working);
+    if (zai.failure) return { data: working, bodyFailure: zai.failure };
+    working = zai.data;
+  }
+  return { data: working, bodyFailure: getUnusableProviderBodyReason(working) };
 }
 
 export function providerFailureKindForHttp(status: number, body: unknown = ''): ProviderFailureKind {

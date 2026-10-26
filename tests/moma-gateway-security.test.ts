@@ -91,9 +91,10 @@ describe('MoMA gateway security helpers', () => {
 
     await expect(parsed).rejects.toMatchObject({
       status: 413,
-      message: 'request body too large',
+      message: 'request body too large (limit 4 bytes)',
     });
-    expect(request.isPaused()).toBe(true);
+    // Oversized bodies are drained (not left paused) so clients can read the 413 response.
+    expect(request.isPaused()).toBe(false);
   });
 
   it('rejects malformed JSON with a 400 error instead of treating it as an empty body', async () => {
@@ -114,16 +115,23 @@ describe('MoMA gateway security helpers', () => {
     expect(JSON.stringify([listResponse, getResponse])).not.toContain(agent.apiKey);
   });
 
-  it('bounds and redacts upstream error metadata', () => {
-    const metadata = upstreamFailureMetadata(
-      'example-provider',
-      401,
-      JSON.stringify({ error: { code: 'invalid_api_key', message: 'token=sk-supersecretkey123456' } }),
-    );
+  it('persists only status, code, and type in upstream failure metadata (no raw body)', () => {
+    const secretBody = JSON.stringify({
+      error: {
+        code: 'invalid_api_key',
+        type: 'authentication_error',
+        message: 'token=test-fake-key-not-a-secret',
+      },
+    });
+    const metadata = upstreamFailureMetadata('example-provider', 401, secretBody);
 
-    expect(metadata).toMatchObject({ provider: 'example-provider', status: 401, code: 'invalid_api_key' });
-    expect(metadata.bodyPrefix).toContain('[REDACTED_API_KEY]');
-    expect(metadata.bodyPrefix).not.toContain('sk-supersecretkey123456');
-    expect(metadata.bodyPrefix.length).toBeLessThanOrEqual(200);
+    expect(metadata).toEqual({
+      provider: 'example-provider',
+      status: 401,
+      code: 'invalid_api_key',
+      errorType: 'authentication_error',
+    });
+    expect(JSON.stringify(metadata)).not.toContain('test-fake-key-not-a-secret');
+    expect(metadata).not.toHaveProperty('bodyPrefix');
   });
 });

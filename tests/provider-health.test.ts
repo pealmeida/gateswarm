@@ -3,8 +3,11 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  getCliStdoutBodyFailure,
   getUnusableContentReason,
   getUnusableProviderBodyReason,
+  normalizeZaiChatCompletionBody,
+  prepareProviderChatCompletionBody,
   ProviderHealthTracker,
   providerFailureKindForHttp,
   runProviderFallbackChain,
@@ -64,6 +67,101 @@ describe('provider response usability', () => {
         finish_reason: 'stop',
       }],
     })).toBeNull();
+  });
+
+  it('treats empty CLI stdout as unusable body (R8-B1)', () => {
+    expect(getCliStdoutBodyFailure('')).toMatchObject({ reason: 'empty_body', kind: 'unusable_body' });
+    expect(getCliStdoutBodyFailure('   \n')).toMatchObject({ reason: 'empty_body', kind: 'unusable_body' });
+  });
+
+  it('detects CLI stdout rate-limit text even when shaped like a completion', () => {
+    const text = 'Rate limit exceeded. Please try again later.';
+    expect(getCliStdoutBodyFailure(text)).toMatchObject({ kind: 'rate_limit' });
+    expect(getUnusableProviderBodyReason({
+      choices: [{ message: { role: 'assistant', content: text }, finish_reason: 'stop' }],
+    })).toBeNull();
+  });
+
+  it('matches anchored CLI failure signatures (R7-N1) without prose heuristics', () => {
+    expect(getCliStdoutBodyFailure('Too many requests')).toMatchObject({ kind: 'rate_limit' });
+    expect(getCliStdoutBodyFailure('Claude AI usage limit reached|1234567890')).toMatchObject({ kind: 'rate_limit' });
+    expect(getCliStdoutBodyFailure('5-hour limit reached ∙ resets 3am')).toMatchObject({ kind: 'rate_limit' });
+    expect(getCliStdoutBodyFailure('API Error: 429 quota')).toMatchObject({ kind: 'rate_limit' });
+    expect(getCliStdoutBodyFailure('API Error: 1305 system overloaded')).toMatchObject({ kind: 'rate_limit' });
+  });
+
+  it('treats exit-0 API Error 401/403 stdout as soft failure (R8-N2)', () => {
+    expect(getCliStdoutBodyFailure('API Error: 401')).toMatchObject({
+      kind: 'provider_error',
+      reason: 'cli_api_error_stdout_soft_auth',
+    });
+    expect(getCliStdoutBodyFailure('API Error: 403 forbidden')).toMatchObject({
+      kind: 'provider_error',
+      reason: 'cli_api_error_stdout_soft_auth',
+    });
+  });
+
+  it('does not hard-cooldown CLI after two exit-0 API Error: 401 stdout failures (R8-N2)', () => {
+    const health = new ProviderHealthTracker(() => Date.now(), () => {});
+    for (let i = 0; i < 2; i += 1) {
+      const failure = getCliStdoutBodyFailure('API Error: 401');
+      expect(failure?.kind).toBe('provider_error');
+      const attempt = health.beginAttempt('claude-cli');
+      health.recordFailure('claude-cli', failure!.kind, 'claude-cli/cc-test', failure!.reason, attempt);
+    }
+    expect(health.getSkipReason('claude-cli')).toBeNull();
+  });
+
+  it('does not flag legitimate short answers that mention errors or rate limits (R7-B1 negatives)', () => {
+    const negatives = [
+      'Error: rate limit handling is missing here. Wrap the call in a retry with backoff.',
+      'Failed requests caused by rate limits should be retried with exponential backoff.',
+      'Invalid — rate limits apply per API key, not per IP.',
+      'API error 500 usually indicates a server bug; check the logs.',
+      'Unauthorized (401) means your token is missing.',
+    ];
+    for (const text of negatives) {
+      expect(getCliStdoutBodyFailure(text)).toBeNull();
+    }
+  });
+
+  it('maps Z.AI finish_reason values and treats network_error as failure (R6-F1)', () => {
+    const sensitive = normalizeZaiChatCompletionBody({
+      choices: [{ message: { content: 'ok' }, finish_reason: 'sensitive' }],
+    });
+    expect(sensitive.failure).toBeNull();
+    expect(sensitive.data.choices[0].finish_reason).toBe('content_filter');
+
+    const length = normalizeZaiChatCompletionBody({
+      choices: [{ message: { content: '' }, finish_reason: 'model_context_window_exceeded' }],
+    });
+    expect(length.data.choices[0].finish_reason).toBe('length');
+
+    const network = prepareProviderChatCompletionBody({
+      choices: [{ message: { content: 'partial' }, finish_reason: 'network_error' }],
+    }, 'zai');
+    expect(network.bodyFailure).toMatchObject({ kind: 'server_error', reason: 'zai_network_error_finish' });
+  });
+
+  it('does not put Z.AI in hard cooldown after two network_error finish_reason failures (R7-N5)', () => {
+    const health = new ProviderHealthTracker(() => Date.now(), () => {});
+    for (let i = 0; i < 2; i += 1) {
+      const attempt = health.beginAttempt('zai');
+      health.recordFailure('zai', 'server_error', 'zai/glm-test', 'network_error finish', attempt);
+    }
+    expect(health.getSkipReason('zai')).toBeNull();
+  });
+
+  it('treats top-level error fields as failure even with terminal empty choices', () => {
+    const failure = getUnusableProviderBodyReason({
+      choices: [{ message: { role: 'assistant', content: '' }, finish_reason: 'stop' }],
+      error: { message: 'UPSTREAM_SECRET_DETAIL', code: 'invalid_api_key' },
+    });
+    expect(failure?.kind).toBe('auth');
+    expect(getUnusableProviderBodyReason({
+      choices: [{ message: { role: 'assistant', content: '' }, finish_reason: 'stop' }],
+      error: { code: 1305, message: 'overload' },
+    })).toMatchObject({ kind: 'rate_limit' });
   });
 });
 
