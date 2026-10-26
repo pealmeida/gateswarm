@@ -1704,6 +1704,17 @@ export function shouldRecordProviderQuotaThrottle(
   return status === 429 || status === 1308;
 }
 
+/** Whether a forward-chain attempt failure should surface as client rate-limit exhaustion. */
+export function forwardChainFailureWasRateLimit(
+  status: number,
+  errorBody: unknown,
+  classifiedRateLimit = false,
+): boolean {
+  if (isOverloadOnlyRateLimit(status, errorBody)) return false;
+  if (classifiedRateLimit) return true;
+  return status === 429 || status === 1308;
+}
+
 export function maskApiKeyShapedSubstrings(value: string): string {
   return value
     .replace(/\bBearer\s+[A-Za-z0-9._-]{8,}\b/gi, 'Bearer [REDACTED_API_KEY]')
@@ -2654,7 +2665,8 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
 
     let data: any = null;
     let latency = 0;
-    let actualTarget = initial;
+    let actualTarget: RetryTarget | null = null;
+    let lastChainFailureRateLimit = false;
 
     // v0.5.5: Global retry budget prevents an unbounded fallback cascade.
     // If all providers are rate-limited, failing fast is better than a
@@ -2793,12 +2805,15 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
 
         if (resp.status === 429 || resp.status === 1305 || resp.status === 1308) {
           console.log(`⚠️  [${agent.name}] ${target.label} rate-limited (${resp.status}), trying fallback...`);
-          modelMatrix.recordError(target.providerId, target.model, `rate-limited (${resp.status})`);
+          if (!isOverloadOnlyRateLimit(resp.status, errorText)) {
+            modelMatrix.recordError(target.providerId, target.model, `rate-limited (${resp.status})`);
+          }
           if (shouldRecordProviderQuotaThrottle(resp.status, errorText)) {
             providerQuota.record429(target.providerId);
           }
           consumptionTracker.recordUsage(target.providerId, { tokensIn: 0, tokensOut: 0, latencyMs: 0, error: true });
           providerHealth.recordFailure(target.providerId, 'rate_limit', target.label, healthDetail, healthAttempt);
+          lastChainFailureRateLimit = forwardChainFailureWasRateLimit(resp.status, errorText);
           // v0.5.5: Feed the failure to the intelligence layer for self-healing
           consumptionIntelligence.recordFallbackOutcome(effort, target.providerId, target.model, false, '429');
           continue;
@@ -2807,6 +2822,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
         if (resp.status >= 500 && resp.status < 600) {
           console.log(`⚠️  [${agent.name}] ${target.label} server error (${resp.status}), trying fallback...`);
           modelMatrix.recordError(target.providerId, target.model, `server error (${resp.status})`);
+          lastChainFailureRateLimit = false;
           consumptionTracker.recordUsage(target.providerId, { tokensIn: 0, tokensOut: 0, latencyMs: 0, error: true });
           const failureKind = providerFailureKindForHttp(resp.status, errorText);
           providerHealth.recordFailure(target.providerId, failureKind, target.label, healthDetail, healthAttempt);
@@ -2823,6 +2839,7 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
           }
           consumptionTracker.recordUsage(target.providerId, { tokensIn: 0, tokensOut: 0, latencyMs: 0, error: true });
           providerHealth.recordFailure(target.providerId, failureKind, target.label, healthDetail, healthAttempt);
+          lastChainFailureRateLimit = forwardChainFailureWasRateLimit(resp.status, errorText, failureKind === 'rate_limit');
           consumptionIntelligence.recordFallbackOutcome(effort, target.providerId, target.model, false, String(resp.status));
           continue;
         }
@@ -2839,6 +2856,8 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
           logUpstreamFailure(target.providerId, 200, data);
           providerHealth.recordFailure(target.providerId, bodyFailure.kind, target.label, upstreamFailureHealthDetail(target.providerId, 200, data), healthAttempt);
           consumptionIntelligence.recordFallbackOutcome(effort, target.providerId, target.model, false, bodyFailure.reason);
+          lastChainFailureRateLimit = forwardChainFailureWasRateLimit(200, data, bodyFailure.kind === 'rate_limit');
+          data = null;
           continue;
         }
         latency = Date.now() - startTime;
@@ -2847,6 +2866,8 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
         break;
       } catch (err: any) {
         clearTimeout(reqTimeoutId);
+        data = null;
+        lastChainFailureRateLimit = false;
         if (err.name === 'AbortError') {
           console.error(`⏱️  ${target.label} timed out within the global retry budget, trying fallback...`);
           modelMatrix.recordError(target.providerId, target.model, 'timeout within global budget');
@@ -2861,9 +2882,14 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
       }
     }
 
-    if (!data) {
+    if (!data || !actualTarget) {
       logProviderChainExhausted('Provider chain exhausted', attemptedTargets, skippedTargets);
-      jsonResponse(res, 502, { error: CLIENT_PROVIDER_CHAIN_EXHAUSTED });
+      if (lastChainFailureRateLimit) {
+        res.setHeader('Retry-After', String(DEFAULT_RETRY_AFTER_SECONDS));
+        jsonResponse(res, 429, { error: CLIENT_RATE_LIMIT_ERROR });
+      } else {
+        jsonResponse(res, 502, { error: CLIENT_PROVIDER_CHAIN_EXHAUSTED });
+      }
       return;
     }
     if (actualTarget.providerId !== providerId) {
