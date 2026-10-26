@@ -258,6 +258,55 @@ describe('MoMA gateway direct route tool calling', () => {
     expect(sanitized.some((m) => m.role === 'assistant' && m.tool_calls?.[0]?.id === 'call_1')).toBe(true);
   });
 
+  it('keeps tool messages with empty string content', () => {
+    const withEmptyToolResult = [
+      ...toolConversation.slice(0, 2),
+      { role: 'tool', tool_call_id: 'call_1', content: '' },
+    ];
+    const sanitized = sanitizeMessagesForToolCalling(withEmptyToolResult);
+    const toolMsg = sanitized.find((m) => m.role === 'tool' && m.tool_call_id === 'call_1');
+    expect(toolMsg).toBeDefined();
+    expect(toolMsg?.content).toBe('');
+  });
+
+  it('does not merge consecutive assistant messages when either has tool_calls', () => {
+    const consecutiveAssistants = [
+      { role: 'user', content: 'go' },
+      { role: 'assistant', content: 'first' },
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [{ id: 'call_a', type: 'function', function: { name: 'fn', arguments: '{}' } }],
+      },
+      { role: 'tool', tool_call_id: 'call_a', content: 'ok' },
+    ];
+    const sanitized = sanitizeMessagesForToolCalling(consecutiveAssistants);
+    const assistants = sanitized.filter((m) => m.role === 'assistant');
+    expect(assistants).toHaveLength(2);
+    expect(assistants[0].content).toBe('first');
+    expect(assistants[1].tool_calls?.[0]?.id).toBe('call_a');
+  });
+
+  it('removes tool results for dropped ids when parallel tool_calls are incomplete', () => {
+    const partialParallel = [
+      { role: 'user', content: 'parallel tools' },
+      {
+        role: 'assistant',
+        content: '',
+        tool_calls: [
+          { id: 'call_keep', type: 'function', function: { name: 'a', arguments: '{}' } },
+          { id: 'call_drop', type: 'function', function: { name: 'b', arguments: '{}' } },
+        ],
+      },
+      { role: 'tool', tool_call_id: 'call_keep', content: 'kept' },
+    ];
+    const sanitized = sanitizeMessagesForToolCalling(partialParallel);
+    expect(sanitized.filter((m) => m.role === 'tool')).toHaveLength(0);
+    const assistant = sanitized.find((m) => m.role === 'assistant');
+    expect(assistant?.tool_calls ?? []).toHaveLength(0);
+    expect(assistant?.content).toBe('[tool use]');
+  });
+
   it('includes tool results in the direct HTTP provider payload', () => {
     registerToolCapableZaiModel();
     const body = {

@@ -783,13 +783,12 @@ async function handleDirectRoute(
     });
 
     if (!response.ok) {
-      // v0.5.5: Record rate-limit errors so provider health degrades
-      if (response.status === 429 || response.status === 1305 || response.status === 1308) {
+      const errorBody = await response.text().catch(() => '');
+      if (shouldRecordProviderQuotaThrottle(response.status, errorBody)) {
         providerQuota.record429(providerId);
         modelMatrix.recordError(providerId, cleanModel, `rate-limited (${response.status})`);
         console.log(`⚠️  [${agent.name}] Direct route ${providerId}/${cleanModel} rate-limited (${response.status})`);
       }
-      const errorBody = await response.text().catch(() => '');
       const failureKind = providerFailureKindForHttp(response.status, errorBody);
       providerHealth.recordFailure(
         providerId,
@@ -798,7 +797,7 @@ async function handleDirectRoute(
         upstreamFailureHealthDetail(providerId, response.status, errorBody),
         healthAttempt,
       );
-      respondWithSanitizedUpstreamFailure(res, response.status, providerId, errorBody);
+      respondWithSanitizedUpstreamFailure(res, response.status, providerId, errorBody, response.headers);
       return;
     }
 
@@ -976,10 +975,14 @@ export function sanitizeMessagesForToolCalling(msgs: any[]): any[] {
   const merged: any[] = [];
   for (const msg of nonSystemMsgs) {
     const prevMsg = merged.length > 0 ? merged[merged.length - 1] : null;
+    const prevHasToolCalls = prevMsg?.role === 'assistant' && Array.isArray(prevMsg.tool_calls) && prevMsg.tool_calls.length > 0;
+    const msgHasToolCalls = msg.role === 'assistant' && Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0;
     if (
       prevMsg &&
       prevMsg.role === msg.role &&
       msg.role !== 'tool' &&
+      !prevHasToolCalls &&
+      !msgHasToolCalls &&
       !messageHasMediaParts(prevMsg) && !messageHasMediaParts(msg)
     ) {
       const prevContent = typeof prevMsg.content === 'string' ? prevMsg.content : JSON.stringify(prevMsg.content);
@@ -1012,16 +1015,26 @@ export function sanitizeMessagesForToolCalling(msgs: any[]): any[] {
     }
   }
   for (const msg of result) {
-    if (!msg.content && !(msg.role === 'assistant' && msg.tool_calls)) continue;
-    if (typeof msg.content === 'string' && msg.content.trim() === '' && !(msg.role === 'assistant' && msg.tool_calls)) continue;
-    if (msg.role === 'assistant' && msg.content === null && !msg.tool_calls) continue;
+    const assistantWithTools = msg.role === 'assistant' && msg.tool_calls?.length > 0;
     if (msg.role === 'tool') {
       if (typeof msg.tool_call_id !== 'string' || msg.tool_call_id.trim() === '') continue;
       if (!hasToolCallParent.has(msg.tool_call_id)) continue;
       const prevRole = valid.length > 0 ? valid[valid.length - 1].role : null;
       if (prevRole !== 'assistant' && prevRole !== 'tool') continue;
+      valid.push({ ...msg, content: msg.content ?? '' });
+      continue;
     }
-    valid.push(msg);
+    if (!assistantWithTools) {
+      if (msg.content === null || msg.content === undefined) continue;
+      if (typeof msg.content === 'string' && msg.content.trim() === '') continue;
+      valid.push(msg);
+      continue;
+    }
+    if (msg.content === null || msg.content === undefined) {
+      valid.push({ ...msg, content: '' });
+    } else {
+      valid.push(msg);
+    }
   }
 
   while (valid.length > 0 && valid[0].role !== 'system' && valid[0].role !== 'user') {
@@ -1042,9 +1055,20 @@ export function sanitizeMessagesForToolCalling(msgs: any[]): any[] {
     if (msg.role === 'assistant' && msg.tool_calls?.length > 0) {
       const covered = msg.tool_calls.every((tc: any) => validToolIds.has(tc.id));
       if (!covered) {
+        const droppedIds = new Set(
+          msg.tool_calls.map((tc: any) => tc.id).filter((id: unknown) => typeof id === 'string' && id.length > 0),
+        );
         delete msg.tool_calls;
         if (msg.content === null || msg.content === undefined || (typeof msg.content === 'string' && msg.content.trim() === '')) {
           msg.content = '[tool use]';
+        }
+        if (droppedIds.size > 0) {
+          for (let i = valid.length - 1; i >= 0; i--) {
+            const toolMsg = valid[i];
+            if (toolMsg.role === 'tool' && droppedIds.has(toolMsg.tool_call_id)) {
+              valid.splice(i, 1);
+            }
+          }
         }
       }
     }
@@ -1223,15 +1247,36 @@ export const CLIENT_PROVIDER_CHAIN_EXHAUSTED = Object.freeze({
   type: 'provider_chain_exhausted',
 });
 
+export const CLIENT_RATE_LIMIT_ERROR = Object.freeze({
+  message: 'The upstream provider is rate limiting requests',
+  type: 'rate_limit',
+});
+
+export const DEFAULT_RETRY_AFTER_SECONDS = 60;
+
 /** Client-safe HTTP status + body for a failed upstream provider response. */
 export function clientHttpResponseForUpstreamFailure(upstreamStatus: number): {
   httpStatus: number;
-  error: typeof CLIENT_PROVIDER_ERROR | typeof CLIENT_TIMEOUT_ERROR;
+  error: typeof CLIENT_PROVIDER_ERROR | typeof CLIENT_TIMEOUT_ERROR | typeof CLIENT_RATE_LIMIT_ERROR;
 } {
   if (upstreamStatus === 504) {
     return { httpStatus: 504, error: CLIENT_TIMEOUT_ERROR };
   }
+  if (upstreamStatus === 429) {
+    return { httpStatus: 429, error: CLIENT_RATE_LIMIT_ERROR };
+  }
   return { httpStatus: 502, error: CLIENT_PROVIDER_ERROR };
+}
+
+export function resolveRetryAfterSeconds(
+  upstreamHeaders: Headers | { get(name: string): string | null } | null | undefined,
+  fallbackSeconds = DEFAULT_RETRY_AFTER_SECONDS,
+): string {
+  const raw = upstreamHeaders?.get('retry-after')?.trim();
+  if (!raw) return String(fallbackSeconds);
+  const seconds = Number(raw);
+  if (Number.isFinite(seconds) && seconds > 0) return String(Math.ceil(seconds));
+  return String(fallbackSeconds);
 }
 
 export function respondWithSanitizedUpstreamFailure(
@@ -1239,9 +1284,13 @@ export function respondWithSanitizedUpstreamFailure(
   upstreamStatus: number,
   providerId: string,
   errorBody: unknown,
+  upstreamHeaders?: Headers | { get(name: string): string | null } | null,
 ): void {
   logUpstreamFailure(providerId, upstreamStatus, errorBody);
   const { httpStatus, error } = clientHttpResponseForUpstreamFailure(upstreamStatus);
+  if (httpStatus === 429) {
+    res.setHeader('Retry-After', resolveRetryAfterSeconds(upstreamHeaders));
+  }
   jsonResponse(res, httpStatus, { error });
 }
 
@@ -1605,7 +1654,36 @@ export interface UpstreamFailureMetadata {
   provider: string;
   status: number;
   code: string | number | null;
-  bodyPrefix: string;
+  errorType: string | null;
+}
+
+export function extractUpstreamErrorFields(body: unknown): { code: string | number | null; errorType: string | null } {
+  let code: string | number | null = null;
+  let errorType: string | null = null;
+  try {
+    const parsed = typeof body === 'string' ? JSON.parse(body) : body;
+    const error = (parsed as { error?: Record<string, unknown> })?.error ?? parsed;
+    if (error && typeof error === 'object') {
+      const record = error as Record<string, unknown>;
+      if (typeof record.code === 'string' || typeof record.code === 'number') code = record.code;
+      if (typeof record.type === 'string') errorType = record.type;
+    }
+  } catch {
+    // ignore unparsable bodies — metadata stays status/code/type only
+  }
+  return { code, errorType };
+}
+
+/** Overload-style limits (e.g. provider code 1305) must not trigger quota throttling. */
+export function isOverloadOnlyRateLimit(status: number, errorBody: unknown): boolean {
+  if (status === 1305) return true;
+  const { code } = extractUpstreamErrorFields(errorBody);
+  return code === 1305 || code === '1305';
+}
+
+export function shouldRecordProviderQuotaThrottle(status: number, errorBody: unknown): boolean {
+  if (isOverloadOnlyRateLimit(status, errorBody)) return false;
+  return status === 429 || status === 1308;
 }
 
 export function maskApiKeyShapedSubstrings(value: string): string {
@@ -1616,18 +1694,12 @@ export function maskApiKeyShapedSubstrings(value: string): string {
 }
 
 export function upstreamFailureMetadata(provider: string, status: number, body: unknown): UpstreamFailureMetadata {
-  const text = typeof body === 'string' ? body : JSON.stringify(body ?? '') ?? '';
-  let code: string | number | null = null;
-  try {
-    const parsed = JSON.parse(text);
-    const error = parsed?.error ?? parsed;
-    if (typeof error?.code === 'string' || typeof error?.code === 'number') code = error.code;
-  } catch {}
+  const { code, errorType } = extractUpstreamErrorFields(body);
   return {
     provider,
     status,
     code,
-    bodyPrefix: maskApiKeyShapedSubstrings(text).slice(0, 200),
+    errorType,
   };
 }
 
@@ -1900,7 +1972,7 @@ async function forwardToProvider(
 
     if (!response.ok) {
       const error = await response.text();
-      respondWithSanitizedUpstreamFailure(res, response.status, providerId, error);
+      respondWithSanitizedUpstreamFailure(res, response.status, providerId, error, response.headers);
       return;
     }
 
@@ -2181,7 +2253,9 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
           logUpstreamFailure(trivialCfg.provider, resp.status, errorText);
           const healthDetail = upstreamFailureHealthDetail(trivialCfg.provider, resp.status, errorText);
           if (resp.status === 429 || resp.status === 1305 || resp.status === 1308) {
-            providerQuota.record429(trivialCfg.provider);
+            if (shouldRecordProviderQuotaThrottle(resp.status, errorText)) {
+              providerQuota.record429(trivialCfg.provider);
+            }
             providerHealth.recordFailure(trivialCfg.provider, 'rate_limit', `${trivialCfg.provider}/${trivialCfg.model}`, healthDetail, healthAttempt);
             // v0.5.5: Feed the greeting-fast-path failure to the intelligence layer
             // so the trivial tier gets rebalanced if ZAI is persistently exhausted
@@ -2702,7 +2776,9 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
         if (resp.status === 429 || resp.status === 1305 || resp.status === 1308) {
           console.log(`⚠️  [${agent.name}] ${target.label} rate-limited (${resp.status}), trying fallback...`);
           modelMatrix.recordError(target.providerId, target.model, `rate-limited (${resp.status})`);
-          providerQuota.record429(target.providerId);
+          if (shouldRecordProviderQuotaThrottle(resp.status, errorText)) {
+            providerQuota.record429(target.providerId);
+          }
           consumptionTracker.recordUsage(target.providerId, { tokensIn: 0, tokensOut: 0, latencyMs: 0, error: true });
           providerHealth.recordFailure(target.providerId, 'rate_limit', target.label, healthDetail, healthAttempt);
           // v0.5.5: Feed the failure to the intelligence layer for self-healing
@@ -2724,7 +2800,9 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
           const failureKind = providerFailureKindForHttp(resp.status, errorText);
           console.log(`⚠️  [${agent.name}] ${target.label} provider error (${resp.status}), trying fallback...`);
           modelMatrix.recordError(target.providerId, target.model, `provider error (${resp.status})`);
-          if (failureKind === 'rate_limit') providerQuota.record429(target.providerId);
+          if (shouldRecordProviderQuotaThrottle(resp.status, errorText)) {
+            providerQuota.record429(target.providerId);
+          }
           consumptionTracker.recordUsage(target.providerId, { tokensIn: 0, tokensOut: 0, latencyMs: 0, error: true });
           providerHealth.recordFailure(target.providerId, failureKind, target.label, healthDetail, healthAttempt);
           consumptionIntelligence.recordFallbackOutcome(effort, target.providerId, target.model, false, String(resp.status));
@@ -2736,7 +2814,9 @@ async function handleChatCompletion(req: IncomingMessage, res: ServerResponse, a
         if (bodyFailure) {
           console.log(`⚠️  [${agent.name}] ${target.label} returned unusable body (${bodyFailure.reason}), trying fallback...`);
           modelMatrix.recordError(target.providerId, target.model, bodyFailure.reason);
-          if (bodyFailure.kind === 'rate_limit') providerQuota.record429(target.providerId);
+          if (shouldRecordProviderQuotaThrottle(200, data)) {
+            providerQuota.record429(target.providerId);
+          }
           consumptionTracker.recordUsage(target.providerId, { tokensIn: 0, tokensOut: 0, latencyMs: 0, error: true });
           logUpstreamFailure(target.providerId, 200, data);
           providerHealth.recordFailure(target.providerId, bodyFailure.kind, target.label, upstreamFailureHealthDetail(target.providerId, 200, data), healthAttempt);
