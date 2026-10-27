@@ -217,7 +217,24 @@ export class CliProviderAdapter {
   }
 
   private buildArgs(prompt: string, model: string, options?: any): string[] {
-    return this.cfg.argsTemplate.map((a) =>
+    const modelIsEmpty = model.trim() === '';
+    const template: string[] = [];
+
+    for (let i = 0; i < this.cfg.argsTemplate.length; i++) {
+      const arg = this.cfg.argsTemplate[i];
+
+      if (modelIsEmpty && arg === '{model}') {
+        const hasModelFlagBefore = i > 0 && this.cfg.argsTemplate[i - 1] === this.cfg.modelFlag;
+        if (hasModelFlagBefore) {
+          template.pop();
+        }
+        continue;
+      }
+
+      template.push(arg);
+    }
+
+    return template.map((a) =>
       a
         .replace('{model}', model)
         .replace('{prompt}', prompt)
