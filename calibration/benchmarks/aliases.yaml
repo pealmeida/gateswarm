@@ -29,6 +29,20 @@ models:
         - { alias: gpt-6-astra-max, match: variant }
       aa:
         - { slug: gpt-6-astra, match: exact }
+  cx/gpt-6.1-sol:
+    providers: [codex-cli]
+    sources:
+      lmarena:
+        - { alias: gpt-6.1-sol-max, match: variant }
+      aa:
+        - { slug: gpt-6.1-sol, match: exact }
+  cx/gpt-6.1-terra:
+    providers: [codex-cli]
+    sources:
+      lmarena:
+        - { alias: gpt-6.1-terra-max, match: variant }
+      aa:
+        - { slug: gpt-6.1-terra, match: exact }
   cx/gpt-6-sol:
     providers: [codex-cli]
     sources:

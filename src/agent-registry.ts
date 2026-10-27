@@ -99,7 +99,7 @@ export const DEFAULT_TIER_CONFIGS: Record<string, AgentTierConfig> = {
     light: 'opencodego/deepseek-v4-flash',
     moderate: 'opencodego/deepseek-v4-flash',
     heavy: 'cc/claude-sonnet-5',
-    intensive: 'cx/gpt-6-sol',
+    intensive: 'cx/gpt-6.1-sol',
     extreme: 'cc/claude-opus-5-5',
   },
   // Balanced — cost/quality tradeoff (v0.5.2 aligned)
@@ -134,8 +134,8 @@ export const DEFAULT_TIER_CONFIGS: Record<string, AgentTierConfig> = {
     trivial: 'qwen3.5-plus',
     light: 'glm-4.7-flash',
     moderate: 'qwen3-coder-plus',
-    heavy: 'cx/gpt-6-luna',
-    intensive: 'cx/gpt-6-sol',
+    heavy: 'cx/gpt-6.1-terra',
+    intensive: 'cx/gpt-6.1-sol',
     extreme: 'cx/gpt-6-astra',
   },
 };
@@ -241,6 +241,8 @@ export const DEFAULT_CLI_PROVIDERS: Record<string, CliProviderEntry> = {
     name: 'OpenAI Codex CLI',
     type: 'cli-agent',
     models: [
+      'cx/gpt-6.1-sol',
+      'cx/gpt-6.1-terra',
       'cx/gpt-6-sol',
       'cx/gpt-6-luna',
       'cx/gpt-6-astra',
@@ -260,6 +262,8 @@ export const DEFAULT_CLI_PROVIDERS: Record<string, CliProviderEntry> = {
       maxConcurrent: 1,
       ...(CODEX_WORKDIR !== undefined ? { workingDir: CODEX_WORKDIR } : {}),
       modelAlias: {
+        'cx/gpt-6.1-sol': 'gpt-6.1-sol',
+        'cx/gpt-6.1-terra': 'gpt-6.1-terra',
         'cx/gpt-6-sol': 'gpt-6-sol',
         'cx/gpt-6-luna': 'gpt-6-luna',
         'cx/gpt-6-astra': 'gpt-6-astra',
