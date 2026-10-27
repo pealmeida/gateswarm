@@ -86,6 +86,10 @@
         {
           "model": "mimo-v2.5",
           "provider": "opencodego"
+        },
+        {
+          "model": "cx/gpt-6-luna",
+          "provider": "codex-cli"
         }
       ]
     },
@@ -168,7 +172,7 @@
           "provider": "zai"
         },
         {
-          "model": "cx/gpt-6-luna",
+          "model": "cx/gpt-6.1-terra",
           "provider": "codex-cli"
         }
       ]
@@ -184,11 +188,11 @@
       "plan_enable_thinking": true,
       "fallback_models": [
         {
-          "model": "cx/gpt-6-sol",
+          "model": "cx/gpt-6.1-sol",
           "provider": "codex-cli"
         },
         {
-          "model": "cx/gpt-6-luna",
+          "model": "cx/gpt-6.1-terra",
           "provider": "codex-cli"
         },
         {
@@ -224,7 +228,7 @@
           "provider": "zai"
         },
         {
-          "model": "cx/gpt-6-sol",
+          "model": "cx/gpt-6.1-sol",
           "provider": "codex-cli"
         }
       ]

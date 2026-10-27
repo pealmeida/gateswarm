@@ -100,13 +100,13 @@
               "provider": "zai"
             },
             {
-              "model": "cx/gpt-6-luna",
+              "model": "cx/gpt-6.1-terra",
               "provider": "codex-cli"
             }
           ]
         },
         "intensive": {
-          "model": "cx/gpt-6-sol",
+          "model": "cx/gpt-6.1-sol",
           "provider": "codex-cli",
           "max_tokens": 4096,
           "enable_thinking": true,
@@ -116,7 +116,7 @@
           "plan_enable_thinking": true,
           "fallback_models": [
             {
-              "model": "cx/gpt-6-luna",
+              "model": "cx/gpt-6.1-terra",
               "provider": "codex-cli"
             },
             {
@@ -148,7 +148,7 @@
               "provider": "zai"
             },
             {
-              "model": "cx/gpt-6-sol",
+              "model": "cx/gpt-6.1-sol",
               "provider": "codex-cli"
             }
           ]
@@ -253,13 +253,13 @@
               "provider": "zai"
             },
             {
-              "model": "cx/gpt-6-luna",
+              "model": "cx/gpt-6.1-terra",
               "provider": "codex-cli"
             }
           ]
         },
         "intensive": {
-          "model": "cx/gpt-6-sol",
+          "model": "cx/gpt-6.1-sol",
           "provider": "codex-cli",
           "max_tokens": 4096,
           "enable_thinking": true,
@@ -269,7 +269,7 @@
           "plan_enable_thinking": true,
           "fallback_models": [
             {
-              "model": "cx/gpt-6-luna",
+              "model": "cx/gpt-6.1-terra",
               "provider": "codex-cli"
             },
             {
@@ -301,7 +301,7 @@
               "provider": "zai"
             },
             {
-              "model": "cx/gpt-6-sol",
+              "model": "cx/gpt-6.1-sol",
               "provider": "codex-cli"
             }
           ]
@@ -412,7 +412,7 @@
           ]
         },
         "intensive": {
-          "model": "cx/gpt-6-sol",
+          "model": "cx/gpt-6.1-sol",
           "provider": "codex-cli",
           "max_tokens": 4096,
           "enable_thinking": true,
@@ -422,7 +422,7 @@
           "plan_enable_thinking": true,
           "fallback_models": [
             {
-              "model": "cx/gpt-6-luna",
+              "model": "cx/gpt-6.1-terra",
               "provider": "codex-cli"
             },
             {
@@ -440,7 +440,7 @@
           ]
         },
         "extreme": {
-          "model": "cx/gpt-6-sol",
+          "model": "cx/gpt-6.1-sol",
           "provider": "codex-cli",
           "max_tokens": 8192,
           "enable_thinking": true,
@@ -450,7 +450,7 @@
           "plan_enable_thinking": true,
           "fallback_models": [
             {
-              "model": "cx/gpt-6-luna",
+              "model": "cx/gpt-6.1-terra",
               "provider": "codex-cli"
             },
             {
@@ -563,7 +563,7 @@
               "provider": "ollama-cloud"
             },
             {
-              "model": "cx/gpt-6-sol",
+              "model": "cx/gpt-6.1-sol",
               "provider": "codex-cli"
             },
             {
@@ -591,7 +591,7 @@
               "provider": "ollama-cloud"
             },
             {
-              "model": "cx/gpt-6-sol",
+              "model": "cx/gpt-6.1-sol",
               "provider": "codex-cli"
             },
             {
@@ -601,7 +601,7 @@
           ]
         },
         "extreme": {
-          "model": "cx/gpt-6-sol",
+          "model": "cx/gpt-6.1-sol",
           "provider": "codex-cli",
           "max_tokens": 8192,
           "enable_thinking": true,
@@ -611,7 +611,7 @@
           "plan_enable_thinking": true,
           "fallback_models": [
             {
-              "model": "cx/gpt-6-luna",
+              "model": "cx/gpt-6.1-terra",
               "provider": "codex-cli"
             },
             {
@@ -737,7 +737,7 @@
           "demote_primary": true,
           "promote": {
             "provider": "codex-cli",
-            "model": "cx/gpt-6-sol"
+            "model": "cx/gpt-6.1-sol"
           }
         },
         {
@@ -745,7 +745,7 @@
           "demote_primary": true,
           "promote": {
             "provider": "codex-cli",
-            "model": "cx/gpt-6-sol"
+            "model": "cx/gpt-6.1-sol"
           }
         }
       ]
