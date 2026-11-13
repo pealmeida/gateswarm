@@ -72,14 +72,28 @@ jobs:
           set -euo pipefail
           python3 - <<'PY'
           import json, pathlib, sys
+          invalid = False
           def rows(path):
+              global invalid
               p = pathlib.Path(path)
-              if not p.exists():
+              if not p.exists() or p.stat().st_size == 0:
+                  invalid = True
                   return []
-              data = json.loads(p.read_text())
+              try:
+                  data = json.loads(p.read_text())
+              except (OSError, ValueError):
+                  invalid = True
+                  return []
+              if not isinstance(data, dict):
+                  invalid = True
+                  return []
               out = []
-              for run in data.get("runs", []):
-                  for r in run.get("results", []):
+              for run in data.get("runs") or []:
+                  if not isinstance(run, dict):
+                      continue
+                  for r in run.get("results") or []:
+                      if not isinstance(r, dict):
+                          continue
                       rid = r.get("ruleId", "unknown")
                       level = r.get("level", "warning")
                       locs = r.get("locations") or [{}]
@@ -88,8 +102,12 @@ jobs:
                       line = (phys.get("region") or {}).get("startLine", "?")
                       out.append((level, rid, art, line))
               return out
-          lines = ["## Trivy", "", "| Sev | ID | Caminho | Linha |", "|---|---|---|---|"]
           items = rows("trivy-fs.sarif") + rows("trivy-config.sarif")
+          lines = ["## Trivy", ""]
+          if invalid:
+              lines.append("SARIF ausente ou inválido")
+              lines.append("")
+          lines.extend(["| Sev | ID | Caminho | Linha |", "|---|---|---|---|"])
           lines.append(f"Total: {len(items)}")
           lines.append("")
           for item in items[:200]:
@@ -110,7 +128,7 @@ jobs:
             trivy-fs.sarif
             trivy-config.sarif
           if-no-files-found: warn
-          retention-days: 30
+          retention-days: 7
 
       - name: Upload Trivy fs SARIF to code scanning
         if: always() && github.event.repository.visibility == 'public' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
@@ -169,8 +187,8 @@ jobs:
             --exclude node_modules \
             --exclude .next \
             --exclude dist \
-            --sarif-output semgrep.sarif \
             --text \
+            --sarif-output=semgrep.sarif \
             --metrics off \
             --disable-version-check \
             "${extra[@]}"
@@ -184,10 +202,22 @@ jobs:
           import json, pathlib
           p = pathlib.Path("semgrep.sarif")
           items = []
-          if p.exists():
-              data = json.loads(p.read_text())
-              for run in data.get("runs", []):
-                  for r in run.get("results", []):
+          invalid = not p.exists() or p.stat().st_size == 0
+          data = None
+          if not invalid:
+              try:
+                  data = json.loads(p.read_text())
+              except (OSError, ValueError):
+                  invalid = True
+          if not invalid and not isinstance(data, dict):
+              invalid = True
+          if not invalid:
+              for run in data.get("runs") or []:
+                  if not isinstance(run, dict):
+                      continue
+                  for r in run.get("results") or []:
+                      if not isinstance(r, dict):
+                          continue
                       rid = r.get("ruleId", "unknown")
                       level = r.get("level", "warning")
                       locs = r.get("locations") or [{}]
@@ -195,7 +225,11 @@ jobs:
                       art = (phys.get("artifactLocation") or {}).get("uri", "?")
                       line = (phys.get("region") or {}).get("startLine", "?")
                       items.append((level, rid, art, line))
-          lines = ["## Semgrep", "", f"Total: {len(items)}", "", "| Sev | Regra | Caminho | Linha |", "|---|---|---|---|"]
+          lines = ["## Semgrep", ""]
+          if invalid:
+              lines.append("SARIF ausente ou inválido")
+              lines.append("")
+          lines.extend([f"Total: {len(items)}", "", "| Sev | Regra | Caminho | Linha |", "|---|---|---|---|"])
           for item in items[:200]:
               lines.append(f"| {item[0]} | {item[1]} | {item[2]} | {item[3]} |")
           pathlib.Path("semgrep-summary.md").write_text("\n".join(lines) + "\n")
@@ -210,7 +244,7 @@ jobs:
           name: semgrep-sarif
           path: semgrep.sarif
           if-no-files-found: warn
-          retention-days: 30
+          retention-days: 7
 
       - name: Upload Semgrep SARIF to code scanning
         if: always() && github.event.repository.visibility == 'public' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
