@@ -1,0 +1,220 @@
+name: Security scanners
+
+on:
+  pull_request:
+    branches: [main, staging, 'release/**']
+  push:
+    branches: [main, staging, 'release/**']
+  schedule:
+    - cron: '27 9 * * 1'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: security-scanners-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  SEMGREP_SEND_METRICS: 'off'
+  TRIVY_DISABLE_TELEMETRY: 'true'
+
+jobs:
+  trivy:
+    name: Trivy fs and config
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Trivy fs (vuln and misconfig, secrets off)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: '.'
+          scanners: 'vuln,misconfig'
+          severity: 'HIGH,CRITICAL'
+          ignore-unfixed: false
+          exit-code: '0'
+          format: sarif
+          output: trivy-fs.sarif
+          limit-severities-for-sarif: true
+          cache: true
+          version: 'v0.76.2'
+          skip-dirs: 'coverage,.worktrees,node_modules,.next,dist'
+          timeout: '10m0s'
+
+      - name: Trivy config (Dockerfile, compose, IaC)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  # v0.36.0
+        with:
+          scan-type: config
+          scan-ref: '.'
+          severity: 'HIGH,CRITICAL'
+          exit-code: '0'
+          format: sarif
+          output: trivy-config.sarif
+          limit-severities-for-sarif: true
+          cache: true
+          version: 'v0.76.2'
+          skip-dirs: 'coverage,.worktrees,node_modules,.next,dist'
+          timeout: '10m0s'
+
+      - name: Job summary (type and location only)
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, pathlib, sys
+          def rows(path):
+              p = pathlib.Path(path)
+              if not p.exists():
+                  return []
+              data = json.loads(p.read_text())
+              out = []
+              for run in data.get("runs", []):
+                  for r in run.get("results", []):
+                      rid = r.get("ruleId", "unknown")
+                      level = r.get("level", "warning")
+                      locs = r.get("locations") or [{}]
+                      phys = (locs[0].get("physicalLocation") or {})
+                      art = (phys.get("artifactLocation") or {}).get("uri", "?")
+                      line = (phys.get("region") or {}).get("startLine", "?")
+                      out.append((level, rid, art, line))
+              return out
+          lines = ["## Trivy", "", "| Sev | ID | Caminho | Linha |", "|---|---|---|---|"]
+          items = rows("trivy-fs.sarif") + rows("trivy-config.sarif")
+          lines.append(f"Total: {len(items)}")
+          lines.append("")
+          for item in items[:200]:
+              lines.append(f"| {item[0]} | {item[1]} | {item[2]} | {item[3]} |")
+          if len(items) > 200:
+              lines.append(f"| … | {len(items) - 200} mais |  |  |")
+          pathlib.Path("trivy-summary.md").write_text("\n".join(lines) + "\n")
+          print("\n".join(lines))
+          PY
+          cat trivy-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Trivy SARIF artifact
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: trivy-sarif
+          path: |
+            trivy-fs.sarif
+            trivy-config.sarif
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload Trivy fs SARIF to code scanning
+        if: always() && github.event.repository.visibility == 'public' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066  # v4.39.3
+        with:
+          sarif_file: trivy-fs.sarif
+          category: trivy-fs
+
+      - name: Upload Trivy config SARIF to code scanning
+        if: always() && github.event.repository.visibility == 'public' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066  # v4.39.3
+        with:
+          sarif_file: trivy-config.sarif
+          category: trivy-config
+
+  semgrep:
+    name: Semgrep OSS
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      security-events: write
+    container:
+      image: semgrep/semgrep:1.185.0@sha256:67518c174185a2043fdbed16c70631b79209499b3671178e7194379b48295a0d
+    env:
+      SEMGREP_SEND_METRICS: 'off'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Semgrep scan
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          extra=()
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            extra+=(--baseline-commit "$BASE_SHA")
+          fi
+          # Fase 1: sem --error. Fase 2: acrescente --error --severity ERROR.
+          semgrep scan \
+            --config p/typescript \
+            --config p/nextjs \
+            --config p/react \
+            --config p/docker \
+            --config p/owasp-top-ten \
+            --config p/python \
+            --config .semgrep/ \
+            --exclude coverage \
+            --exclude .worktrees \
+            --exclude node_modules \
+            --exclude .next \
+            --exclude dist \
+            --sarif --output semgrep.sarif \
+            --text \
+            --metrics off \
+            --disable-version-check \
+            "${extra[@]}"
+
+      - name: Job summary (type and location only)
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, pathlib
+          p = pathlib.Path("semgrep.sarif")
+          items = []
+          if p.exists():
+              data = json.loads(p.read_text())
+              for run in data.get("runs", []):
+                  for r in run.get("results", []):
+                      rid = r.get("ruleId", "unknown")
+                      level = r.get("level", "warning")
+                      locs = r.get("locations") or [{}]
+                      phys = (locs[0].get("physicalLocation") or {})
+                      art = (phys.get("artifactLocation") or {}).get("uri", "?")
+                      line = (phys.get("region") or {}).get("startLine", "?")
+                      items.append((level, rid, art, line))
+          lines = ["## Semgrep", "", f"Total: {len(items)}", "", "| Sev | Regra | Caminho | Linha |", "|---|---|---|---|"]
+          for item in items[:200]:
+              lines.append(f"| {item[0]} | {item[1]} | {item[2]} | {item[3]} |")
+          pathlib.Path("semgrep-summary.md").write_text("\n".join(lines) + "\n")
+          print("\n".join(lines))
+          PY
+          cat semgrep-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Semgrep SARIF artifact
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: semgrep-sarif
+          path: semgrep.sarif
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload Semgrep SARIF to code scanning
+        if: always() && github.event.repository.visibility == 'public' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066  # v4.39.3
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep

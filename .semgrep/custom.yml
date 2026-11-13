@@ -1,0 +1,60 @@
+rules:
+  - id: next-public-secret-env
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: "NEXT_PUBLIC_* com nome de segredo entra no bundle do cliente."
+    pattern-regex: 'NEXT_PUBLIC_[A-Z0-9_]*(SECRET|PASSWORD|PRIVATE|SERVICE_ROLE|ENCRYPTION|ACCESS_TOKEN|API_TOKEN)[A-Z0-9_]*'
+    metadata:
+      note: "Não use o sufixo isolado KEY. NEXT_PUBLIC_SUPABASE_ANON_KEY e chaves publicáveis são públicas por desenho."
+
+  - id: supabase-service-role-in-client
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: "Uso de service role em componente cliente."
+    patterns:
+      - pattern-inside: |
+          'use client'
+          ...
+      - pattern-regex: 'SERVICE_ROLE'
+
+  - id: cookie-set-missing-security-flags
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: "cookies().set sem httpOnly true e secure true."
+    patterns:
+      - pattern-either:
+          - pattern: "cookies().set($NAME, $VAL, $OPTS)"
+          - pattern: "cookies().set($OPTS)"
+          - pattern: "(await cookies()).set($NAME, $VAL, $OPTS)"
+          - pattern: "(await cookies()).set($OPTS)"
+      - pattern-not: "cookies().set($NAME, $VAL, {..., httpOnly: true, secure: true, ...})"
+      - pattern-not: "cookies().set({..., httpOnly: true, secure: true, ...})"
+      - pattern-not: "(await cookies()).set($NAME, $VAL, {..., httpOnly: true, secure: true, ...})"
+      - pattern-not: "(await cookies()).set({..., httpOnly: true, secure: true, ...})"
+
+  - id: localstorage-set-pii-unencrypted
+    languages: [typescript, javascript]
+    severity: ERROR
+    message: "localStorage.setItem de conversa ou PII sem wrapper de cifra."
+    patterns:
+      - pattern-either:
+          - pattern: localStorage.setItem($KEY, $VAL)
+          - pattern: window.localStorage.setItem($KEY, $VAL)
+      - pattern-not: localStorage.setItem($KEY, encrypt($VAL))
+      - pattern-not: localStorage.setItem($KEY, encrypt(...))
+      - pattern-not: localStorage.setItem($KEY, $NS.encrypt(...))
+      - pattern-not: window.localStorage.setItem($KEY, encrypt($VAL))
+      - pattern-not: window.localStorage.setItem($KEY, encrypt(...))
+      - pattern-not: window.localStorage.setItem($KEY, $NS.encrypt(...))
+      - metavariable-regex:
+          metavariable: $KEY
+          regex: '(?i).*(conversation|campaign_ai|email|cpf|phone|token|pii|message|session).*'
+
+  - id: dangerously-set-inner-html
+    languages: [typescript, javascript]
+    severity: WARNING
+    message: "dangerouslySetInnerHTML exige sanitização do conteúdo."
+    pattern-either:
+      - pattern: "<$EL dangerouslySetInnerHTML={...} />"
+      - pattern: "<$EL dangerouslySetInnerHTML={...}></$EL>"
+      - pattern: "{ dangerouslySetInnerHTML: ... }"
