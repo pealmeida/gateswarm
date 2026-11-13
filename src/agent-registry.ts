@@ -461,6 +461,13 @@ export class AgentRegistry {
     cliAdapters.set(config.id, new CliProviderAdapter(config.cliConfig));
   }
 
+  /** Drop a CLI provider registration (used by tests to avoid leaking into other files). */
+  unregisterCliProvider(providerId: string): void {
+    delete this.providers[providerId];
+    delete this.state.providers[providerId];
+    cliAdapters.delete(providerId);
+  }
+
   /** Register all default CLI providers. */
   registerDefaultCliProviders(): void {
     for (const [, config] of Object.entries(DEFAULT_CLI_PROVIDERS)) {

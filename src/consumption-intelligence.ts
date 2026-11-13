@@ -18,6 +18,7 @@
  */
 
 import { modelMatrix, ModelEntry, EffortLevel, ProviderSummary } from './model-matrix.js';
+import { evaluateToolCallingCapability } from './tool-calling-capability.js';
 import { agentRegistry } from './agent-registry.js';
 import { getConfig, saveConfig } from './v04-config.js';
 import { providerQuota, getMultiWindowQuota } from './provider-quota.js';
@@ -726,6 +727,11 @@ class ConsumptionIntelligence {
   modelSupportsVision(provider: string, modelId: string): boolean {
     const model = modelMatrix.getModel(provider, modelId);
     return model?.supportsVision === true;
+  }
+
+  /** Delegates to shared direct-route tool capability policy (matrix + allowlist). */
+  modelSupportsTools(provider: string, modelId: string): boolean {
+    return evaluateToolCallingCapability(provider, modelId).allowed;
   }
 
   /**
