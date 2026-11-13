@@ -169,7 +169,7 @@ jobs:
             --exclude node_modules \
             --exclude .next \
             --exclude dist \
-            --sarif --output semgrep.sarif \
+            --sarif-output semgrep.sarif \
             --text \
             --metrics off \
             --disable-version-check \
