@@ -720,7 +720,7 @@ async function handleDirectRoute(
   // stop sequences, etc.) while removing router-only controls below.
   const body = req && (req as any)._body ? (req as any)._body : { messages };
 
-  const sanitizedMessages = sanitizeMessages(messages);
+  const sanitizedMessages = sanitizeMessages(messages, { preserveTools: Array.isArray(body?.tools) && body.tools.length > 0 && !agentRegistry.isCliProvider(providerId) });
 
   // CLI provider dispatch
   if (agentRegistry.isCliProvider(providerId)) {
@@ -959,33 +959,56 @@ async function handleCliProviderDirect(
 }
 
 /** Sanitize messages for OpenAI-compatible providers (remove tool messages, merge same-role). */
-function sanitizeMessages(msgs: any[]): any[] {
+function sanitizeMessages(msgs: any[], opts: { preserveTools?: boolean } = {}): any[] {
   if (msgs.length <= 1) return [...msgs];
-  // v0.5.2: Strip all tool-related messages — the Gateway is a routing proxy,
-  // not a tool-execution engine. Provider-side tool_calls cause errors with
-  // strict APIs (DeepSeek, etc.) when tool_call_ids are unmatched.
-  const stripped = msgs.filter(m => m.role !== 'tool').map(m => {
-    if (m.role === 'assistant' && m.tool_calls) {
-      // Keep the message but drop tool_calls array so providers don't
-      // expect matching tool responses. If content is null/empty after
-      // stripping, replace with a placeholder so strict APIs don't reject.
-      const { tool_calls, ...rest } = m;
-      if (rest.content === null || rest.content === undefined || (typeof rest.content === 'string' && rest.content.trim() === '')) {
-        rest.content = '[tool use]';
+  let stripped: any[];
+  if (opts.preserveTools) {
+    // Tool-enabled request: keep assistant(tool_calls) intact and keep each
+    // 'tool' message only when its tool_call_id matches a tool_call id from a
+    // preceding assistant. Orphaned tool messages are discarded.
+    const toolCallIds = new Set<string>();
+    stripped = [];
+    for (const m of msgs) {
+      if (m.role === 'tool') {
+        if (m.tool_call_id && toolCallIds.has(m.tool_call_id)) stripped.push(m);
+        continue;
       }
-      return rest;
+      if (m.role === 'assistant' && Array.isArray(m.tool_calls)) {
+        for (const tc of m.tool_calls) {
+          if (tc?.id) toolCallIds.add(tc.id);
+        }
+      }
+      stripped.push(m);
     }
-    return m;
-  });
+  } else {
+    // v0.5.2: Strip all tool-related messages — the Gateway is a routing proxy,
+    // not a tool-execution engine. Provider-side tool_calls cause errors with
+    // strict APIs (DeepSeek, etc.) when tool_call_ids are unmatched.
+    stripped = msgs.filter(m => m.role !== 'tool').map(m => {
+      if (m.role === 'assistant' && m.tool_calls) {
+        // Keep the message but drop tool_calls array so providers don't
+        // expect matching tool responses. If content is null/empty after
+        // stripping, replace with a placeholder so strict APIs don't reject.
+        const { tool_calls, ...rest } = m;
+        if (rest.content === null || rest.content === undefined || (typeof rest.content === 'string' && rest.content.trim() === '')) {
+          rest.content = '[tool use]';
+        }
+        return rest;
+      }
+      return m;
+    });
+  }
   if (stripped.length === 0) return [{ role: 'user', content: '(continuation)' }];
   const systemMsgs = stripped.filter(m => m.role === 'system');
   const nonSystemMsgs = stripped.filter(m => m.role !== 'system');
   const merged: any[] = [];
+  const toolish = (m: any) => m.role === 'tool' || (m.role === 'assistant' && m.tool_calls);
   for (const msg of nonSystemMsgs) {
     const prev = merged.length > 0 ? merged[merged.length - 1] : null;
     // MoMA: never merge media-bearing messages — stringifying a content
-    // array would inline base64 payloads into text.
-    if (prev && prev.role === msg.role && !messageHasMediaParts(prev) && !messageHasMediaParts(msg)) {
+    // array would inline base64 payloads into text. When preserving tools,
+    // never merge 'tool' messages or assistants bearing tool_calls.
+    if (prev && prev.role === msg.role && !messageHasMediaParts(prev) && !messageHasMediaParts(msg) && !(opts.preserveTools && (toolish(prev) || toolish(msg)))) {
       const prevContent = typeof prev.content === 'string' ? prev.content : JSON.stringify(prev.content);
       const currContent = typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content);
       prev.content = prevContent + '\n---\n' + currContent;
