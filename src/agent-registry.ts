@@ -162,7 +162,9 @@ export const HTTP_PROVIDER_MODELS: Record<string, string[]> = {
 
 /**
  * Build the Codex executor arguments. The executor edits only; `.git` stays
- * protected, and the harness commits after gates.
+ * protected, and the harness commits after gates. The `{model}` placeholder
+ * (substituted by CliProviderAdapter.buildArgs) routes `codex exec` to the
+ * requested model instead of the CLI default.
  */
 export function buildCodexExecArgs(env: NodeJS.ProcessEnv = process.env): string[] {
   const configuredSandbox = env.GATESWARM_CODEX_SANDBOX;
@@ -186,6 +188,7 @@ export function buildCodexExecArgs(env: NodeJS.ProcessEnv = process.env): string
   return [
     'exec',
     '--sandbox', sandbox,
+    '--model', '{model}',
     ...(workingDir !== undefined ? ['--cd', workingDir] : []),
     ...addDirs,
     '-',
@@ -252,7 +255,7 @@ export const DEFAULT_CLI_PROVIDERS: Record<string, CliProviderEntry> = {
     cliConfig: {
       command: 'codex',
       argsTemplate: buildCodexExecArgs(),
-      modelFlag: '--config',
+      modelFlag: '--model',
       inputFormat: 'stdin',
       outputFormat: 'stdout-text',
       timeoutMs: 300_000,
