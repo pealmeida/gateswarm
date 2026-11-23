@@ -154,7 +154,7 @@ The six built-in default tiers are defined in `DEFAULT_V04_CONFIG`; deployments 
 | **light** | 0.196029 – 0.264209 | deepseek-v4-flash | opencodego | 512 | — |
 | **moderate** | 0.264209 – 0.324887 | glm-5 | zai | 2048 | — |
 | **heavy** | 0.324887 – 0.365850 | cc/claude-sonnet-5 | claude-cli | 4096 | ✓ |
-| **intensive** | 0.365850 – 0.523832 | cx/gpt-6-sol | codex-cli | 4096 | ✓ |
+| **intensive** | 0.365850 – 0.523832 | cx/gpt-6.1-sol | codex-cli | 4096 | ✓ |
 | **extreme** | 0.523832 – 1.000000 | cc/claude-opus-5-5 | claude-cli | 8192 | ✓ |
 
 Reasoning (`enable_thinking`) is on for heavy, intensive, and extreme tiers. Tier models, plan/act overrides, and fallback chains are fully configurable via CLI or by editing `v04_config.json` directly.
@@ -169,7 +169,7 @@ Every tier has two model assignments — one for **acting** (default: implementa
 | **light** | deepseek-v4-flash | opencodego | (uses act) | — |
 | **moderate** | glm-5 | zai | glm-4.7-flash | zai |
 | **heavy** | cc/claude-sonnet-5 | claude-cli | glm-5 | zai |
-| **intensive** | cx/gpt-6-sol | codex-cli | cc/claude-sonnet-5 | claude-cli |
+| **intensive** | cx/gpt-6.1-sol | codex-cli | cc/claude-sonnet-5 | claude-cli |
 | **extreme** | cc/claude-opus-5-5 | claude-cli | cc/claude-opus-5-5 | claude-cli |
 
 Auto-detection (`detectIntentMode`) scores stem-aware keyword hits plus intent patterns. Override explicitly with `"mode": "plan"` / `"mode": "act"` in the request body, or the `X-Mode` request header.

@@ -6,12 +6,12 @@ GateSwarm routing defaults in `v04_config.json`, `calibration/matrix-variants/qu
 
 | Tier | Primary (act) | Plan | Main fallbacks |
 |------|---------------|------|----------------|
-| trivial | opencodego `mimo-v2.6-flash` | — | Go `deepseek-v4-flash`, `mimo-v2.5`; zai `glm-4.7-flash`, `glm-4.5-air` |
+| trivial | opencodego `mimo-v2.6-flash` | — | Go `deepseek-v4-flash`, `mimo-v2.5`; zai `glm-4.7-flash`, `glm-4.5-air`; codex-cli `cx/gpt-6-luna` (last resort) |
 | light | opencodego `deepseek-v4-flash` | — | Go `mimo-v2.5`; zai flash |
 | moderate | zai `glm-5` | zai `glm-4.7-flash` | zai `glm-5.1`, `glm-4.7`; Go flash |
-| heavy | claude-cli `cc/claude-sonnet-5` | zai `glm-5` | zai `glm-5.1`; codex-cli `cx/gpt-6-luna` |
-| intensive | codex-cli `cx/gpt-6-sol` | `cc/claude-sonnet-5` | `cx/gpt-6-luna`; zai `glm-5` / `glm-5.1` |
-| extreme | claude-cli `cc/claude-opus-5-5` | `cc/claude-opus-5-5` (same as act) | `cx/gpt-6-astra`; zai `glm-5`; `cx/gpt-6-sol` |
+| heavy | claude-cli `cc/claude-sonnet-5` | zai `glm-5` | zai `glm-5.1`; codex-cli `cx/gpt-6.1-terra` |
+| intensive | codex-cli `cx/gpt-6-sol` | `cc/claude-sonnet-5` | `cx/gpt-6.1-sol`, `cx/gpt-6.1-terra`; zai `glm-5` / `glm-5.1` |
+| extreme | claude-cli `cc/claude-opus-5-5` | `cc/claude-opus-5-5` (same as act) | `cx/gpt-6-astra`; zai `glm-5`; `cx/gpt-6.1-sol` |
 
 Orange/red quota bands keep load-shedding behavior (more ollama-cloud under stress) but use the same CLI model IDs where Codex/Claude appear.
 
@@ -45,11 +45,22 @@ Legacy IDs (`cc/claude-sonnet-4-6`, `cc/claude-opus-4-8`, …) remain in the cat
 
 | GateSwarm ID | CLI `model` |
 |--------------|-------------|
+| `cx/gpt-6.1-sol` | `gpt-6.1-sol` |
+| `cx/gpt-6.1-terra` | `gpt-6.1-terra` |
 | `cx/gpt-6-sol` | `gpt-6-sol` |
 | `cx/gpt-6-luna` | `gpt-6-luna` |
 | `cx/gpt-6-astra` | `gpt-6-astra` |
 
 Legacy `cx/gpt-5.*` entries remain mapped for existing configs.
+
+#### Codex fallback roles
+
+- `cx/gpt-6.1-sol`: planning and review fallback (replaces `cx/gpt-6-sol` in default routing).
+- `cx/gpt-6.1-terra`: execution fallback for balanced, straightforward work.
+- `cx/gpt-6-luna`: fallback for trivial tasks only (last resort in the trivial tier).
+- `cx/gpt-6-astra`: 3D and complex structures only (extreme tier).
+
+Codex models are fallbacks only; Z.AI / OpenCode Go GLM models stay first. Use `cx/gpt-6.1-sol` for review only when a change exceeds 300 lines or touches auth, RLS, personal data, or secrets. `cx/gpt-6-sol` remains in the catalog for existing configs but is no longer used in default routing.
 
 ## Retirements (do not use as new primaries)
 
